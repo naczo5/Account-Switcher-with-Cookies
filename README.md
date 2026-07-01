@@ -2,9 +2,11 @@
 
 # Account Switcher with Cookies (Lunar / Localts)
 
+## Disclaimer
+Import cookie alts via file path. Pasting the content is currently unreliable.
+
 A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) scoped for **Lunar Client** and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
 
-> **Security:** Cookie and Localts files are full account credentials. Never share them, never commit them to git, and treat imported accounts like passwords. This fork stores cookie-imported accounts **without encryption** by default so alt files can be re-imported easily — use Microsoft OAuth login instead if you want password or hardware encryption.
 
 ## What this fork adds
 
