@@ -162,6 +162,7 @@ dependencies {
     modImplementation(fabricApi.module("fabric-lifecycle-events-v1", fapi)) // Handles game ticks.
     modImplementation(fabricApi.module("fabric-resource-loader-${fabricResourceLoaderRevision}", fapi)) // Loads textures and languages.
     modImplementation(fabricApi.module("fabric-screen-api-v1", fapi)) // Handles title and multiplayer screen management.
+    modCompileOnly(fabricApi.module("fabric-key-binding-api-v1", fapi)) // Optional: menu keybind registration on full Fabric API.
 
     // ModMenu.
     val modmenu = "${property("modmenu")}"

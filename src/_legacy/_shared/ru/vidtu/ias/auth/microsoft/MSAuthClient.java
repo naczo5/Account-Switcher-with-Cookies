@@ -31,21 +31,12 @@ import ru.vidtu.ias.auth.handlers.CreateHandler;
 import ru.vidtu.ias.auth.microsoft.fields.DeviceAuth;
 import ru.vidtu.ias.auth.microsoft.fields.MSTokens;
 import ru.vidtu.ias.crypt.Crypt;
-import ru.vidtu.ias.utils.Holder;
 import ru.vidtu.ias.utils.IUtils;
 import ru.vidtu.ias.utils.exceptions.DevicePendingException;
-import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.DataOutputStream;
-import java.net.ConnectException;
-import java.net.NoRouteToHostException;
-import java.net.http.HttpTimeoutException;
-import java.nio.channels.UnresolvedAddressException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -179,126 +170,8 @@ public final class MSAuthClient implements Closeable {
             LOGGER.info("IAS: Processing response...");
             this.handler.stage(MicrosoftAccount.PROCESSING);
 
-            // Value holders.
-            Holder<String> access = new Holder<>();
-            Holder<byte[]> data = new Holder<>();
-
-            // Extract the MSAC.
-            CompletableFuture.completedFuture(null).thenComposeAsync(ignored -> {
-                // Stop if cancelled.
-                if (this.handler.cancelled()) return CompletableFuture.completedFuture(null);
-
-                // Log it and display progress.
-                LOGGER.info("IAS: Converting MSA to XBL...");
-                this.handler.stage(MicrosoftAccount.MSA_TO_XBL);
-
-                // Convert MSA to XBL.
-                return MSAuth.msaToXbl(ms.access());
-            }, IAS.executor()).thenComposeAsync(xbl -> {
-                // Stop if cancelled.
-                if (xbl == null || this.handler.cancelled()) return CompletableFuture.completedFuture(null);
-
-                // Log it and display progress.
-                LOGGER.info("IAS: Converting XBL to XSTS...");
-                this.handler.stage(MicrosoftAccount.XBL_TO_XSTS);
-
-                // Convert XBL to XSTS.
-                return MSAuth.xblToXsts(xbl.token(), xbl.hash());
-            }, IAS.executor()).thenComposeAsync(xsts -> {
-                // Stop if cancelled.
-                if (xsts == null || this.handler.cancelled()) return CompletableFuture.completedFuture(null);
-
-                // Log it and display progress.
-                LOGGER.info("IAS: Converting XSTS to MCA...");
-                this.handler.stage(MicrosoftAccount.XSTS_TO_MCA);
-
-                // Convert XSTS to MCA.
-                return MSAuth.xstsToMca(xsts.token(), xsts.hash());
-            }, IAS.executor()).thenComposeAsync(token -> {
-                // Stop if cancelled.
-                if (token == null || this.handler.cancelled()) return CompletableFuture.completedFuture(null);
-
-                // Update the access token.
-                access.set(token);
-
-                // Log it and display progress.
-                LOGGER.info("IAS: Converting MCA to MCP...");
-                this.handler.stage(MicrosoftAccount.MCA_TO_MCP);
-
-                // Convert MCA to MCP.
-                return MSAuth.mcaToMcp(token);
-            }, IAS.executor()).exceptionallyAsync(t -> {
-                // Probable case - no internet connection.
-                if (IUtils.anyInCausalChain(t, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
-                    throw new FriendlyException("Unable to connect to MS servers.", t,  "ias.error.connect");
-                }
-
-                // Handle error.
-                throw new RuntimeException("Unable to perform MS auth.", t);
-            }, IAS.executor()).thenApplyAsync(profile -> {
-                // Stop if cancelled.
-                if (profile == null || this.handler.cancelled()) return null;
-
-                // Log it and display progress.
-                LOGGER.info("IAS: Encrypting tokens...");
-                this.handler.stage(MicrosoftAccount.ENCRYPTING);
-
-                // Write the tokens.
-                byte[] unencrypted;
-                try (ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
-                     DataOutputStream out = new DataOutputStream(byteOut)) {
-                    // Write the access token.
-                    out.writeUTF(access.get());
-
-                    // Write the refresh token.
-                    out.writeUTF(ms.refresh());
-
-                    // Flush it.
-                    unencrypted = byteOut.toByteArray();
-                } catch (Throwable t) {
-                    throw new RuntimeException("Unable to write the tokens.", t);
-                }
-
-                // Encrypt the tokens.
-                try (ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
-                     DataOutputStream out = new DataOutputStream(byteOut)) {
-                    // Encrypt.
-                    byte[] encrypted = this.crypt.encrypt(unencrypted);
-
-                    // Write data.
-                    out.writeUTF(this.crypt.type());
-                    out.write(encrypted);
-
-                    // Flush it.
-                    data.set(byteOut.toByteArray());
-                } catch (Throwable t) {
-                    throw new RuntimeException("Unable to encrypt the tokens.", t);
-                }
-
-                // Return the profile as-is.
-                return profile;
-            }, IAS.executor()).thenAcceptAsync(profile -> {
-                // Stop if cancelled.
-                if (profile == null || this.handler.cancelled()) return;
-
-                // Authentication successful, refresh the profile.
-                UUID uuid = profile.uuid();
-                String name = profile.name();
-
-                // Log it and display progress.
-                LOGGER.info("IAS: Successfully added {}", profile);
-                this.handler.stage(MicrosoftAccount.FINALIZING);
-
-                // Create and return the data.
-                MicrosoftAccount account = new MicrosoftAccount(this.crypt.insecure(), uuid, name, data.get());
-                this.handler.success(account);
-            }, IAS.executor()).exceptionallyAsync(t -> {
-                // Handle error.
-                this.handler.error(new RuntimeException("Unable to create an MS account.", t));
-
-                // Return null.
-                return null;
-            }, IAS.executor());
+            // Create the account from tokens.
+            MSAccountFactory.create(this.crypt, ms, this.handler);
         } catch (Throwable t) {
             // Handle.
             this.handler.error(new RuntimeException("Unable to finalize MS auth.", t));

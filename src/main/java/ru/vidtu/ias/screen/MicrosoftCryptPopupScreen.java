@@ -55,6 +55,11 @@ final class MicrosoftCryptPopupScreen extends Screen {
     private final Consumer<Account> handler;
 
     /**
+     * Whether to open the cookie import flow instead of Microsoft OAuth.
+     */
+    private final boolean cookieImport;
+
+    /**
      * No encryption.
      */
     private PopupButton plain;
@@ -66,15 +71,33 @@ final class MicrosoftCryptPopupScreen extends Screen {
      * @param handler Account handler
      */
     MicrosoftCryptPopupScreen(Screen parent, Consumer<Account> handler) {
-        super(Component.translatable("ias.microsoft"));
+        this(parent, handler, false);
+    }
+
+    /**
+     * Creates a new crypt selection screen.
+     *
+     * @param parent       Parent screen
+     * @param handler      Account handler
+     * @param cookieImport Whether to import from cookies instead of Microsoft OAuth
+     */
+    MicrosoftCryptPopupScreen(Screen parent, Consumer<Account> handler, boolean cookieImport) {
+        super(Component.translatable(cookieImport ? "ias.cookie" : "ias.microsoft"));
         this.parent = parent;
         this.handler = handler;
+        this.cookieImport = cookieImport;
     }
 
     @Override
     protected void init() {
         // Bruh.
         assert this.minecraft != null;
+
+        if (this.cookieImport) {
+            //$set_screen 'this.minecraft' 'new CookiePopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE)'
+            this.minecraft.gui.setScreen(new CookiePopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE));
+            return;
+        }
 
         // Init parent.
         if (this.parent != null) {

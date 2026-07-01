@@ -76,8 +76,8 @@ final class AddPopupScreen extends Screen {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        // Add offline button.
-        PopupButton button = new PopupButton(this.width / 2 - 75, this.height / 2 - 24, 150, 20, Component.translatable("ias.add.microsoft"), btn -> {
+        // Add Microsoft button.
+        PopupButton button = new PopupButton(this.width / 2 - 75, this.height / 2 - 36, 150, 20, Component.translatable("ias.add.microsoft"), btn -> {
             //$set_screen 'this.minecraft' 'new MicrosoftCryptPopupScreen(this.parent, this.handler)'
             this.minecraft.gui.setScreen(new MicrosoftCryptPopupScreen(this.parent, this.handler));
         }, Supplier::get);
@@ -86,8 +86,18 @@ final class AddPopupScreen extends Screen {
         button.color(0.5F, 1.0F, 0.5F, true);
         this.addRenderableWidget(button);
 
+        // Add cookie import button.
+        button = new PopupButton(this.width / 2 - 75, this.height / 2 - 12, 150, 20, Component.translatable("ias.add.cookie"), btn -> {
+            //$set_screen 'this.minecraft' 'new MicrosoftCryptPopupScreen(this.parent, this.handler, true)'
+            this.minecraft.gui.setScreen(new MicrosoftCryptPopupScreen(this.parent, this.handler, true));
+        }, Supplier::get);
+        button.setTooltip(Tooltip.create(Component.translatable("ias.add.cookie.tip")));
+        button.setTooltipDelay(Duration.ofMillis(250L));
+        button.color(0.5F, 0.75F, 1.0F, true);
+        this.addRenderableWidget(button);
+
         // Add offline button.
-        button = new PopupButton(this.width / 2 - 75, this.height / 2, 150, 20, Component.translatable("ias.add.offline"), btn -> {
+        button = new PopupButton(this.width / 2 - 75, this.height / 2 + 12, 150, 20, Component.translatable("ias.add.offline"), btn -> {
             //$set_screen 'this.minecraft' 'new OfflinePopupScreen(this.parent, this.handler)'
             this.minecraft.gui.setScreen(new OfflinePopupScreen(this.parent, this.handler));
         }, Supplier::get);
@@ -97,7 +107,7 @@ final class AddPopupScreen extends Screen {
         this.addRenderableWidget(button);
 
         // Add cancel button.
-        this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 49 - 22, 150, 20,
+        this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 61 - 22, 150, 20,
                 CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
     }
 
@@ -120,9 +130,9 @@ final class AddPopupScreen extends Screen {
         pose.pushMatrix();
         pose.scale(2.0F, 2.0F);
         //? if >=26.1 {
-        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 49 / 2, 0xFF_FF_FF_FF);
+        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 61 / 2, 0xFF_FF_FF_FF);
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 49 / 2, 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 61 / 2, 0xFF_FF_FF_FF);*/
         pose.popMatrix();
     }
 
@@ -155,9 +165,9 @@ final class AddPopupScreen extends Screen {
         // Render "form".
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        graphics.fill(centerX - 80, centerY - 50, centerX + 80, centerY + 50, 0xF8_20_20_30);
-        graphics.fill(centerX - 79, centerY - 51, centerX + 79, centerY - 50, 0xF8_20_20_30);
-        graphics.fill(centerX - 79, centerY + 50, centerX + 79, centerY + 51, 0xF8_20_20_30);
+        graphics.fill(centerX - 80, centerY - 62, centerX + 80, centerY + 62, 0xF8_20_20_30);
+        graphics.fill(centerX - 79, centerY - 63, centerX + 79, centerY - 62, 0xF8_20_20_30);
+        graphics.fill(centerX - 79, centerY + 62, centerX + 79, centerY + 63, 0xF8_20_20_30);
     }
 
     @Override

@@ -36,11 +36,15 @@ import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -72,6 +76,33 @@ public final class MSAuth {
             .followRedirects(HttpClient.Redirect.NEVER)
             .executor(Runnable::run)
             .build();
+
+    /**
+     * SISU entry point used by Minecraft web login with existing Microsoft session cookies.
+     */
+    @NotNull
+    private static final String SISU_AUTH_URL = "https://sisu.xboxlive.com/connect/XboxLive/?state=login&cobrandId=8058f65d-ce06-4c30-9559-473c9275a65d&tid=896928775&ru=https%3A%2F%2Fwww.minecraft.net%2Fen-us%2Flogin&aid=1142970254";
+
+    /**
+     * Browser-like user agent for cookie-based SISU authentication.
+     */
+    @NotNull
+    private static final String COOKIE_AUTH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0";
+
+    @NotNull
+    private static final String MINECRAFT_OAUTH_CLIENT_ID = "00000000402b5328";
+
+    @NotNull
+    private static final String MINECRAFT_OAUTH_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
+
+    /**
+     * MCA token plus optional refresh from cookie-based import.
+     *
+     * @param mca     Minecraft access token
+     * @param refresh Microsoft refresh token, may be empty for cookie-only accounts
+     */
+    public record CookieMcaResult(@NotNull String mca, @NotNull String refresh) {
+    }
 
     /**
      * An instance of this class cannot be created.
@@ -295,6 +326,44 @@ public final class MSAuth {
     }
 
     /**
+     * Gets Microsoft tokens from a Localts/Minecraft refresh token.
+     *
+     * @param refresh Microsoft refresh token exported by Localts
+     * @return Future that will complete with Microsoft access and refresh tokens
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<MSTokens> minecraftRefreshToMsaMsr(@NotNull String refresh) {
+        String payload = "client_id=" + MINECRAFT_OAUTH_CLIENT_ID +
+                "&refresh_token=" + URLEncoder.encode(refresh, StandardCharsets.UTF_8) +
+                "&grant_type=refresh_token" +
+                "&redirect_uri=" + URLEncoder.encode("https://login.live.com/oauth20_desktop.srf", StandardCharsets.UTF_8) +
+                "&scope=" + URLEncoder.encode(MINECRAFT_OAUTH_SCOPE, StandardCharsets.UTF_8);
+
+        return CLIENT.sendAsync(HttpRequest.newBuilder()
+                .uri(URI.create("https://login.live.com/oauth20_token.srf"))
+                .header("User-Agent", IAS.USER_AGENT)
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .timeout(IAS.TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build(), HttpResponse.BodyHandlers.ofString()).thenApplyAsync(response -> {
+            try {
+                JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
+                Objects.requireNonNull(json, "Response is null");
+                if (response.statusCode() != HttpURLConnection.HTTP_OK) {
+                    throw new IllegalArgumentException("Invalid status code: " + response.statusCode());
+                }
+                return MSTokens.fromJson(json);
+            } catch (Throwable t) {
+                String message = "Unable to convert Localts refresh token to Microsoft tokens (" + response + " with " + response.headers() + "): " + response.body();
+                message = message.replace(refresh, "[MSR]");
+                throw new RuntimeException(message, t);
+            }
+        }, IAS.executor());
+    }
+
+    /**
      * Gets the Xbox Live (XBL) token from the Microsoft Access (MSA) token.
      *
      * @param authToken Microsoft Access (MSA) token (e.g. from {@link MSTokens#access()})
@@ -304,6 +373,19 @@ public final class MSAuth {
     @CheckReturnValue
     @NotNull
     public static CompletableFuture<XHashedToken> msaToXbl(@NotNull String authToken) {
+        return msaToXbl(authToken, "d=");
+    }
+
+    /**
+     * Gets the Xbox Live (XBL) token from the Microsoft Access (MSA) token using a specific RPS ticket prefix.
+     *
+     * @param authToken Microsoft Access (MSA) token
+     * @param ticketPrefix RPS ticket prefix ({@code d=} for normal IAS tokens, {@code t=} for Localts/Minecraft tokens)
+     * @return Future that will complete with an XBL token and a user hash or exceptionally
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<XHashedToken> msaToXbl(@NotNull String authToken, @NotNull String ticketPrefix) {
         // Create the payload.
         // This is ugly, but I won't create custom classes and serializers just for this.
         JsonObject request = new JsonObject();
@@ -311,7 +393,7 @@ public final class MSAuth {
         JsonObject requestProperties = new JsonObject();
         requestProperties.addProperty("AuthMethod", "RPS");
         requestProperties.addProperty("SiteName", "user.auth.xboxlive.com");
-        requestProperties.addProperty("RpsTicket", "d=" + authToken);
+        requestProperties.addProperty("RpsTicket", ticketPrefix + authToken);
         request.add("Properties", requestProperties);
 
         // We disable "HTTP -> HTTPS" inspection here, because it's not an actual URL,
@@ -570,5 +652,252 @@ public final class MSAuth {
                 throw new RuntimeException("Unable to obtain Minecraft profile by name '" + name + "' (" + response + " with " + response.headers() + "): " + response.body(), t);
             }
         }, IAS.executor());
+    }
+
+    /**
+     * Gets a Minecraft Access (MCA) token from browser session cookies.
+     *
+     * @param cookieHeader HTTP {@code Cookie} header value
+     * @return Future that will complete with MCA and optional refresh token or exceptionally
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<CookieMcaResult> cookiesToMcaFromCookies(@NotNull String cookieHeader) {
+        return cookiesToMcaViaSisu(cookieHeader)
+                .thenApply(mca -> new CookieMcaResult(mca, ""));
+    }
+
+    /**
+     * Gets a Minecraft Access (MCA) token from browser session cookies via Xbox SISU.
+     *
+     * @param cookieHeader HTTP {@code Cookie} header value
+     * @return Future that will complete with an MCA token or exceptionally
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<String> cookiesToMcaViaSisu(@NotNull String cookieHeader) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String redirect1 = followSisuRedirect(SISU_AUTH_URL, null, 1);
+                String redirect2 = followSisuRedirect(redirect1, cookieHeader, 2);
+                String redirect3 = followSisuRedirect(redirect2, cookieHeader, 3);
+
+                String encoded = extractSisuAccessToken(redirect3);
+                if (encoded == null || encoded.isBlank()) {
+                    throw new FriendlyException("No Xbox access token in SISU cookie auth response.", "ias.error.cookie.expired");
+                }
+
+                String decoded = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+                int rp = decoded.indexOf("\"rp://api.minecraftservices.com/\",");
+                if (rp < 0) {
+                    throw new FriendlyException("Unexpected SISU token payload.", "ias.error.cookie.expired");
+                }
+                String slice = decoded.substring(rp);
+
+                int uhsMarker = slice.indexOf("{\"DisplayClaims\":{\"xui\":[{\"uhs\":\"");
+                int tokenMarker = slice.indexOf("\"Token\":\"");
+                if (uhsMarker < 0 || tokenMarker < 0) {
+                    throw new FriendlyException("Unable to parse SISU XSTS payload.", "ias.error.cookie.expired");
+                }
+
+                String hash = slice.substring(uhsMarker + "{\"DisplayClaims\":{\"xui\":[{\"uhs\":\"".length());
+                hash = hash.substring(0, hash.indexOf('"'));
+                String xsts = slice.substring(tokenMarker + "\"Token\":\"".length());
+                xsts = xsts.substring(0, xsts.indexOf('"'));
+
+                return hash + '\0' + xsts;
+            } catch (FriendlyException e) {
+                throw e;
+            } catch (Throwable t) {
+                throw new FriendlyException("Unable to exchange cookies for tokens via SISU.", t, "ias.error.cookie.expired");
+            }
+        }, IAS.executor()).thenComposeAsync(pair -> {
+            int sep = pair.indexOf('\0');
+            return xstsToMca(pair.substring(sep + 1), pair.substring(0, sep));
+        }, IAS.executor());
+    }
+
+    @NotNull
+    private static String followSisuRedirect(@NotNull String url, @Nullable String cookieHeader, int step) throws Exception {
+        URI current = URI.create(url.replace(" ", "%20"));
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(current)
+                .header("User-Agent", COOKIE_AUTH_USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.8")
+                .timeout(IAS.TIMEOUT)
+                .GET();
+        if (cookieHeader != null && !cookieHeader.isBlank()) {
+            builder.header("Cookie", cookieHeader);
+        }
+
+        HttpResponse<Void> response = CLIENT_SYNC.send(builder.build(), HttpResponse.BodyHandlers.discarding());
+        if (response.statusCode() != HttpURLConnection.HTTP_MOVED_TEMP) {
+            throw new FriendlyException("Unexpected SISU redirect status: " + response.statusCode(), "ias.error.cookie.expired");
+        }
+
+        String location = response.headers().firstValue("location").orElse(null);
+        if (location == null || location.isBlank()) {
+            throw new FriendlyException("SISU redirect missing Location header.", "ias.error.cookie.expired");
+        }
+
+        URI next = URI.create(location.replace(" ", "%20"));
+        if (!next.isAbsolute()) {
+            next = current.resolve(next);
+        }
+        return next.toString();
+    }
+
+    /**
+     * Extracts the {@code accessToken} query parameter from a SISU redirect Location URL.
+     */
+    @Nullable
+    private static String extractSisuAccessToken(@NotNull String url) {
+        int idx = url.indexOf("accessToken=");
+        if (idx < 0) {
+            return null;
+        }
+        String raw = url.substring(idx + "accessToken=".length());
+        int amp = raw.indexOf('&');
+        if (amp >= 0) {
+            raw = raw.substring(0, amp);
+        }
+        int hash = raw.indexOf('#');
+        if (hash >= 0) {
+            raw = raw.substring(0, hash);
+        }
+        return urlDecode(raw);
+    }
+
+    /**
+     * Gets Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens from browser session cookies.
+     *
+     * @param cookieHeader HTTP {@code Cookie} header value
+     * @return Future that will complete with MSA/MSR tokens or exceptionally
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<MSTokens> cookiesToMsaMsr(@NotNull String cookieHeader) {
+        return cookiesToMsaMsr(cookieHeader, IAS.CLIENT_ID,
+                "XboxLive.signin%20XboxLive.offline_access",
+                "https://login.live.com/oauth20_desktop.srf").exceptionallyCompose(t -> {
+            return cookiesToMsaMsr(cookieHeader, "00000000402b5328",
+                        "service::user.auth.xboxlive.com::MBI_SSL",
+                        "https://login.live.com/oauth20_desktop.srf");
+        }).exceptionallyAsync(t -> {
+            FriendlyException friendly = FriendlyException.friendlyInChain(t);
+            if (friendly != null) {
+                throw friendly;
+            }
+            throw new FriendlyException("Unable to exchange cookies for tokens.", t, "ias.error.cookie.expired");
+        }, IAS.executor());
+    }
+
+    /**
+     * Attempts cookie-based OAuth implicit flow with the given client parameters.
+     */
+    @CheckReturnValue
+    @NotNull
+    private static CompletableFuture<MSTokens> cookiesToMsaMsr(@NotNull String cookieHeader, @NotNull String clientId,
+            @NotNull String scope, @NotNull String redirectUri) {
+        String url = "https://login.live.com/oauth20_authorize.srf" +
+                "?client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
+                "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8) +
+                "&response_type=token" +
+                "&scope=" + scope +
+                "&prompt=none";
+
+        return CLIENT.sendAsync(HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", IAS.USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Cookie", cookieHeader)
+                .timeout(IAS.TIMEOUT)
+                .GET()
+                .build(), HttpResponse.BodyHandlers.ofString()).thenComposeAsync(response -> {
+            try {
+                return CompletableFuture.completedFuture(followCookieRedirects(cookieHeader, response, 0));
+            } catch (Throwable t) {
+                return CompletableFuture.failedFuture(t);
+            }
+        }, IAS.executor());
+    }
+
+    /**
+     * Follows OAuth redirects until tokens appear in the URL fragment or redirects are exhausted.
+     */
+    @NotNull
+    private static MSTokens followCookieRedirects(@NotNull String cookieHeader, @NotNull HttpResponse<String> response, int depth)
+            throws Exception {
+        String finalUrl = response.uri().toString();
+        int hash = finalUrl.indexOf('#');
+        String location = response.headers().firstValue("location").orElse(null);
+        if (depth > 10) {
+            throw new FriendlyException("Too many OAuth redirects.", "ias.error.cookie.expired");
+        }
+
+        if (hash >= 0) {
+            Map<String, String> fragment = parseQuery(finalUrl.substring(hash + 1));
+            String access = fragment.get("access_token");
+            String refresh = fragment.get("refresh_token");
+            if (access != null && !access.isBlank()) {
+                if (refresh == null || refresh.isBlank()) {
+                    refresh = "";
+                }
+                return new MSTokens(access, refresh);
+            }
+        }
+        if (location == null) {
+            throw new FriendlyException("No OAuth token in cookie auth response.", "ias.error.cookie.expired");
+        }
+
+        if (location.indexOf('#') >= 0) {
+            Map<String, String> fragment = parseQuery(location.substring(location.indexOf('#') + 1));
+            String access = fragment.get("access_token");
+            String refresh = fragment.get("refresh_token");
+            if (access != null && !access.isBlank()) {
+                if (refresh == null || refresh.isBlank()) {
+                    refresh = "";
+                }
+                return new MSTokens(access, refresh);
+            }
+        }
+
+        URI next = URI.create(location);
+        if (!next.isAbsolute()) {
+            next = response.uri().resolve(location);
+        }
+
+        HttpResponse<String> nextResponse = CLIENT_SYNC.send(HttpRequest.newBuilder()
+                .uri(next)
+                .header("User-Agent", IAS.USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Cookie", cookieHeader)
+                .timeout(IAS.TIMEOUT)
+                .GET()
+                .build(), HttpResponse.BodyHandlers.ofString());
+
+        return followCookieRedirects(cookieHeader, nextResponse, depth + 1);
+    }
+
+    /**
+     * Parses URL query or fragment parameters.
+     */
+    @NotNull
+    private static Map<String, String> parseQuery(@NotNull String query) {
+        Map<String, String> map = new HashMap<>();
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) continue;
+            String key = urlDecode(pair.substring(0, eq));
+            String value = urlDecode(pair.substring(eq + 1));
+            map.put(key, value);
+        }
+        return map;
+    }
+
+    @NotNull
+    private static String urlDecode(@NotNull String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 }

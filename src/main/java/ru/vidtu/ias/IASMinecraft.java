@@ -40,7 +40,7 @@ import net.minecraft.client.gui.components.toasts.ToastManager;
 import net.minecraft.client.gui.layouts.LayoutElement;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.client.gui.screens.social.PlayerSocialManager;
 import net.minecraft.client.main.GameConfig;
@@ -60,6 +60,7 @@ import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.screen.AccountScreen;
 import ru.vidtu.ias.utils.Expression;
 import ru.vidtu.ias.utils.IUtils;
+import ru.vidtu.ias.utils.MainMenuScreens;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
 import java.time.Duration;
@@ -130,6 +131,53 @@ public final class IASMinecraft {
     }
 
     /**
+     * Opens the account switcher when allowed (menus, pause screen, Lunar main menu, etc.).
+     *
+     * @param minecraft Minecraft instance
+     * @return {@code true} if the screen was opened
+     */
+    public static boolean tryOpenAccountSwitcher(Minecraft minecraft) {
+        if (IAS.disabled() || !canOpenAccountSwitcher(minecraft)) return false;
+        //? if >=26.2 {
+        Screen parent = minecraft.gui.screen();
+        //?} else {
+        /*Screen parent = minecraft.screen;
+        *///?}
+        if (parent instanceof AccountScreen) return false;
+        //$ set_screen minecraft 'new AccountScreen(parent)'
+        minecraft.gui.setScreen(new AccountScreen(parent));
+        return true;
+    }
+
+    /**
+     * Returns whether the account switcher may be opened right now.
+     *
+     * @param minecraft Minecraft instance
+     * @return {@code true} if opening is allowed
+     */
+    @SuppressWarnings("ChainOfInstanceofChecks")
+    private static boolean canOpenAccountSwitcher(Minecraft minecraft) {
+        // Main menu / Lunar launcher UI (no world loaded).
+        if (minecraft.player == null && minecraft.level == null) return true;
+        //? if >=26.2 {
+        Screen screen = minecraft.gui.screen();
+        //?} else {
+        /*Screen screen = minecraft.screen;
+        *///?}
+        if (screen == null) return false;
+        if (screen instanceof AccountScreen || screen instanceof ChatScreen || screen instanceof ConnectScreen) return false;
+        return true;
+    }
+
+    /**
+     * @deprecated Use {@link #tryOpenAccountSwitcher(Minecraft)}
+     */
+    @Deprecated
+    public static void openAccountSwitcher(Minecraft minecraft) {
+        tryOpenAccountSwitcher(minecraft);
+    }
+
+    /**
      * Called on title screen initialization.
      *
      * @param minecraft   Minecraft instance
@@ -139,7 +187,7 @@ public final class IASMinecraft {
     @SuppressWarnings({"ChainOfInstanceofChecks", "ConstantValue"}) // <- Abstraction for Minecraft is not possible, mods break user non-nullness.
     public static void onInit(Minecraft minecraft, Screen screen, Consumer<Button> buttonAdder) {
         // Add title button.
-        if (IASConfig.titleButton && screen instanceof TitleScreen) {
+        if (IASConfig.titleButton && MainMenuScreens.isMainMenu(screen)) {
             // Calculate the position.
             int width = screen.width;
             int height = screen.height;
@@ -232,7 +280,7 @@ public final class IASMinecraft {
         *///?}
 
         // Add title text.
-        if (IASConfig.titleText && screen instanceof TitleScreen) {
+        if (IASConfig.titleText && MainMenuScreens.isTitleTextScreen(screen)) {
             // Calculate the position.
             int width = screen.width;
             int height = screen.height;
@@ -306,7 +354,7 @@ public final class IASMinecraft {
     public static void onDraw(Screen screen, Font font, GuiGraphicsExtractor graphics) {
     //?} else
     /*public static void onDraw(Screen screen, Font font, GuiGraphics graphics) {*/
-        if (IASConfig.titleText && screen instanceof TitleScreen) {
+        if (IASConfig.titleText && MainMenuScreens.isTitleTextScreen(screen)) {
             //? if >=26.1 {
             graphics.text(font, text, textX, textY, 0xFF_CC_88_88);
             //?} else

@@ -1,6 +1,11 @@
 .gradle/
 .idea/**
 build/
+cookies/
+RefreshTokenApp/
+.cursor/
+.vscode/
+.riseclient-ref/
 dev/.env
 out/
 run/

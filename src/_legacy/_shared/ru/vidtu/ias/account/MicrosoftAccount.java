@@ -140,6 +140,12 @@ public final class MicrosoftAccount implements Account {
     public static final String MCA_TO_MCP = "ias.login.mcaToMcp";
 
     /**
+     * Converting cookies to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens.
+     */
+    @NotNull
+    public static final String COOKIES_TO_MSA_MSR = "ias.login.cookiesToMsaMsr";
+
+    /**
      * Finalizing login.
      */
     @NotNull
@@ -324,6 +330,11 @@ public final class MicrosoftAccount implements Account {
                 return MSAuth.mcaToMcp(access.get()).exceptionallyComposeAsync(original -> {
                     // Skip if cancelled.
                     if (handler.cancelled()) return CompletableFuture.completedFuture(null);
+
+                    String refreshToken = refresh.get();
+                    if (refreshToken == null || refreshToken.isBlank()) {
+                        throw new FriendlyException("Cookie session expired. Re-import your cookie file to log in again.", original, "ias.error.cookie.expired");
+                    }
 
                     // Log it and display progress.
                     LOGGER.warn("IAS: MCA is (probably) expired. Refreshing...");
