@@ -21,7 +21,9 @@ package ru.vidtu.ias.screen;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.MultiLineLabel;
+import net.minecraft.client.gui.components.Tooltip;
 //? if >=26.1 {
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 //?} else
@@ -47,6 +49,7 @@ import ru.vidtu.ias.crypt.PasswordCrypt;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -61,6 +64,31 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Logger for this class.
      */
     private static final Logger LOGGER = LoggerFactory.getLogger("IAS/CookiePopupScreen");
+
+    /**
+     * Input row width in pixels.
+     */
+    private static final int INPUT_WIDTH = 198;
+
+    /**
+     * Path field width (browse button fills the remaining row width).
+     */
+    private static final int PATH_WIDTH = 178;
+
+    /**
+     * Paste area height in pixels.
+     */
+    private static final int PASTE_HEIGHT = 64;
+
+    /**
+     * Panel half-height in file-path mode.
+     */
+    private static final int PANEL_HALF_PATH = 92;
+
+    /**
+     * Panel half-height in paste mode.
+     */
+    private static final int PANEL_HALF_PASTE = 100;
 
     /**
      * Parent screen.
@@ -93,9 +121,29 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private boolean importing;
 
     /**
-     * Path or hint input.
+     * Whether this screen was closed.
      */
-    private PopupBox input;
+    private volatile boolean closed;
+
+    /**
+     * Cookie file path input.
+     */
+    private PopupBox pathInput;
+
+    /**
+     * Pasted cookie file contents.
+     */
+    private MultiLineEditBox pasteInput;
+
+    /**
+     * Saved path while toggling input modes.
+     */
+    private String savedPath = "";
+
+    /**
+     * Saved paste text while toggling input modes.
+     */
+    private String savedPaste = "";
 
     /**
      * Password box for password-based encryption.
@@ -106,7 +154,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Current stage.
      */
     @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
-    private Component stage = Component.translatable(MicrosoftAccount.INITIALIZING).withStyle(ChatFormatting.YELLOW);
+    private Component stage = Component.empty();
 
     /**
      * Current stage label.
@@ -130,6 +178,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private MultiLineLabel errorNote;
 
     /**
+     * Paste box top-left X for border rendering.
+     */
+    private int pasteBoxX;
+
+    /**
+     * Paste box top-left Y for border rendering.
+     */
+    private int pasteBoxY;
+
+    /**
      * Creates a new cookie import screen.
      *
      * @param parent  Parent screen
@@ -145,8 +203,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
     @Override
     public boolean cancelled() {
-        assert this.minecraft != null;
-        return this != this.currentScreen();
+        return this.closed;
     }
 
     @Override
@@ -164,11 +221,15 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 22, 150, 20,
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+        int backY = centerY + 72;
+
+        this.addRenderableWidget(new PopupButton(centerX - 75, backY, 150, 20,
                 CommonComponents.GUI_BACK, btn -> this.onClose(), Supplier::get));
 
         if (this.crypt == null) {
-            this.password = new PopupBox(this.font, this.width / 2 - 100, this.height / 2 - 10 + 5, 178, 20, this.password,
+            this.password = new PopupBox(this.font, centerX - 100, centerY - 10 + 5, 178, 20, this.password,
                     Component.translatable("ias.password"), this::confirmPassword, true);
             this.password.setHint(Component.translatable("ias.password.hint").withStyle(ChatFormatting.DARK_GRAY));
             //? if >=1.21.10 {
@@ -178,7 +239,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.password.setMaxLength(32);
             this.addRenderableWidget(this.password);
 
-            Button enterPassword = new PopupButton(this.width / 2 - 100 + 180, this.height / 2 - 10 + 5, 20, 20,
+            Button enterPassword = new PopupButton(centerX - 100 + 180, centerY - 10 + 5, 20, 20,
                     Component.literal(">>"), btn -> this.confirmPassword(), Supplier::get);
             enterPassword.active = !this.password.getValue().isBlank();
             this.addRenderableWidget(enterPassword);
@@ -191,10 +252,15 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             return;
         }
 
+        this.pathInput = null;
+        this.pasteInput = null;
+
         int toggleWidth = 74;
         int toggleGap = 2;
-        int toggleY = this.height / 2 - 36;
-        int toggleLeft = this.width / 2 - toggleWidth - toggleGap / 2;
+        int toggleY = centerY - 38;
+        int toggleLeft = centerX - toggleWidth - toggleGap / 2;
+        int inputX = centerX - INPUT_WIDTH / 2;
+        int inputY = centerY - 12;
 
         PopupButton pathBtn = new PopupButton(toggleLeft, toggleY, toggleWidth, 20,
                 Component.translatable("ias.cookie.path"), btn -> this.setPasteMode(false), Supplier::get);
@@ -206,22 +272,51 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         pasteBtn.color(this.pasteMode ? 0.5F : 0.75F, this.pasteMode ? 1.0F : 0.75F, this.pasteMode ? 0.5F : 0.75F, true);
         this.addRenderableWidget(pasteBtn);
 
-        Component inputTitle = this.pasteMode ? Component.translatable("ias.cookie.paste.hint") : Component.translatable("ias.cookie.path.hint");
-        this.input = new PopupBox(this.font, this.width / 2 - 100, this.height / 2 - 4, 198, 20, this.input, inputTitle, this::importCookies, false);
-        if (!this.pasteMode) {
-            this.input.setHint(Component.literal("C:\\alts\\account.txt").withStyle(ChatFormatting.DARK_GRAY));
-        }
-        this.input.setMaxLength(this.pasteMode ? 131072 : 512);
-        this.addRenderableWidget(this.input);
+        if (this.pasteMode) {
+            this.pasteBoxX = inputX;
+            this.pasteBoxY = inputY;
+            this.pasteInput = PopupMultiLineBox.create(this.font, inputX, inputY, INPUT_WIDTH, PASTE_HEIGHT, this.pasteInput,
+                    Component.translatable("ias.cookie.paste.hint"),
+                    Component.translatable("ias.cookie.paste.placeholder").withStyle(ChatFormatting.DARK_GRAY));
+            this.pasteInput.setCharacterLimit(131072);
+            if (!this.savedPaste.isBlank()) {
+                this.pasteInput.setValue(this.savedPaste);
+            }
+            this.addRenderableWidget(this.pasteInput);
+        } else {
+            this.pathInput = new PopupBox(this.font, inputX, inputY, PATH_WIDTH, 20, this.pathInput,
+                    Component.translatable("ias.cookie.path.hint"), this::importCookies, false);
+            this.pathInput.setHint(Component.literal("C:\\alts\\account.txt").withStyle(ChatFormatting.DARK_GRAY));
+            this.pathInput.setMaxLength(512);
+            if (!this.savedPath.isBlank()) {
+                this.pathInput.setValue(this.savedPath);
+            }
+            this.addRenderableWidget(this.pathInput);
 
-        PopupButton importBtn = new PopupButton(this.width / 2 - 75, this.height / 2 + 28, 150, 20,
+            PopupButton browseBtn = new PopupButton(inputX + PATH_WIDTH, inputY, INPUT_WIDTH - PATH_WIDTH, 20,
+                    Component.literal("..."), btn -> this.browseCookieFile(), Supplier::get);
+            browseBtn.setTooltip(Tooltip.create(Component.translatable("ias.cookie.browse")));
+            browseBtn.setTooltipDelay(Duration.ofMillis(250L));
+            this.addRenderableWidget(browseBtn);
+        }
+
+        int importY = this.pasteMode ? centerY + 50 : centerY + 40;
+        PopupButton importBtn = new PopupButton(centerX - 75, importY, 150, 20,
                 Component.translatable("ias.cookie.import"), btn -> this.importCookies(), Supplier::get);
         importBtn.color(0.5F, 1.0F, 0.75F, true);
         this.addRenderableWidget(importBtn);
     }
 
     private void setPasteMode(boolean pasteMode) {
+        if (this.pathInput != null) {
+            this.savedPath = this.pathInput.getValue();
+        }
+        if (this.pasteInput != null) {
+            this.savedPaste = this.pasteInput.getValue();
+        }
         this.pasteMode = pasteMode;
+        this.error = Float.NaN;
+        this.errorNote = null;
         //? if >=1.21.11 {
         this.init(this.width, this.height);
         //?} else
@@ -247,13 +342,13 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         String raw;
         if (this.pasteMode) {
-            raw = this.input != null ? this.input.getValue() : "";
+            raw = this.resolvePasteSource();
             if (raw.isBlank()) {
-                raw = this.minecraft.keyboardHandler.getClipboard();
+                return;
             }
         } else {
-            if (this.input == null) return;
-            raw = this.input.getValue().strip();
+            if (this.pathInput == null) return;
+            raw = this.pathInput.getValue().strip();
             if (raw.isBlank()) return;
         }
 
@@ -272,13 +367,19 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         IAS.executor().execute(() -> {
             try {
-                if (this.cancelled()) return;
+                if (this.closed) {
+                    return;
+                }
 
                 this.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
 
                 CookieParser.ParsedCookies cookies = fromPath
                         ? CookieParser.fromPath(source)
                         : CookieParser.fromText(source);
+
+                if (this.closed) {
+                    return;
+                }
 
                 if (!cookies.refreshToken().isBlank()) {
                     MSAuth.minecraftRefreshToMsaMsr(cookies.refreshToken())
@@ -300,9 +401,71 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         });
     }
 
+    /**
+     * Resolves pasted cookie text, preferring the clipboard when the text box lost tab characters.
+     */
+    private String resolvePasteSource() {
+        assert this.minecraft != null;
+        String box = this.pasteInput != null ? this.pasteInput.getValue() : "";
+        String clip = this.minecraft.keyboardHandler.getClipboard();
+        if (!box.isBlank() && box.contains("\t")) {
+            return box;
+        }
+        if (!clip.isBlank() && clip.contains("\t")) {
+            return clip;
+        }
+        if (!box.isBlank()) {
+            return box;
+        }
+        return clip != null ? clip : "";
+    }
+
+    private void browseCookieFile() {
+        assert this.minecraft != null;
+        String initial = this.pathInput != null ? this.pathInput.getValue().strip() : this.savedPath.strip();
+        if (initial.length() >= 2 && initial.charAt(0) == '"' && initial.charAt(initial.length() - 1) == '"') {
+            initial = initial.substring(1, initial.length() - 1).strip();
+        }
+        final String startPath = initial;
+        final String dialogTitle = Component.translatable("ias.cookie.browse").getString();
+        IAS.executor().execute(() -> {
+            try {
+                String path = CookieFileDialogs.pickFile(dialogTitle, startPath);
+                if (path == null || this.closed) {
+                    return;
+                }
+
+                this.minecraft.execute(() -> {
+                    if (this.closed || this != this.currentScreen()) {
+                        return;
+                    }
+                    this.savedPath = path;
+                    if (this.pathInput != null) {
+                        this.pathInput.setValue(path);
+                    }
+                });
+            } catch (Throwable t) {
+                LOGGER.warn("IAS: Cookie file browse failed.", t);
+                this.minecraft.execute(() -> this.showBrowseError());
+            }
+        });
+    }
+
+    private void showBrowseError() {
+        if (this.closed) {
+            return;
+        }
+        synchronized (this.lock) {
+            this.stage = Component.translatable("ias.cookie.browse.failed").withStyle(ChatFormatting.RED);
+            this.label = null;
+            this.error = 0.0F;
+        }
+    }
+
     @Override
     public void onClose() {
         assert this.minecraft != null;
+        this.closed = true;
         this.importing = false;
         //$set_screen 'this.minecraft' 'this.parent'
         this.minecraft.gui.setScreen(this.parent);
@@ -380,11 +543,25 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 /*this.errorNote.renderCentered(graphics, this.width, this.height + 174, 9, 0xFF_FF_FF | opacityMask);*/
                 pose.popMatrix();
             }
-        } else if (this.input != null) {
-            //? if >=26.1 {
-            graphics.centeredText(this.font, this.input.getMessage(), this.width / 2, this.height / 2 - 20, 0xFF_FF_FF_FF);
-            //?} else
-            /*graphics.drawCenteredString(this.font, this.input.getMessage(), this.width / 2, this.height / 2 - 20, 0xFF_FF_FF_FF);*/
+        } else if (this.pathInput != null || this.pasteInput != null) {
+            int centerY = this.height / 2;
+            if (Float.isFinite(this.error)) {
+                synchronized (this.lock) {
+                    if (this.label == null) {
+                        Component component = Objects.requireNonNullElse(this.stage, Component.empty());
+                        this.label = MultiLineLabel.create(this.font, component, 220);
+                    }
+                    IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, centerY - 54);
+                }
+            } else {
+                Component inputTitle = this.pasteMode
+                        ? Component.translatable("ias.cookie.paste.hint")
+                        : Component.translatable("ias.cookie.path.hint");
+                //? if >=26.1 {
+                graphics.centeredText(this.font, inputTitle, this.width / 2, centerY - 54, 0xFF_FF_FF_FF);
+                //?} else
+                /*graphics.drawCenteredString(this.font, inputTitle, this.width / 2, centerY - 54, 0xFF_FF_FF_FF);*/
+            }
         }
     }
 
@@ -413,50 +590,75 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        graphics.fill(centerX - 125, centerY - 75, centerX + 125, centerY + 75, 0xF8_20_20_30);
-        graphics.fill(centerX - 124, centerY - 76, centerX + 124, centerY - 75, 0xF8_20_20_30);
-        graphics.fill(centerX - 124, centerY + 75, centerX + 124, centerY + 76, 0xF8_20_20_30);
+        int panelHalfHeight = this.pasteMode && this.crypt != null && !this.importing ? PANEL_HALF_PASTE : PANEL_HALF_PATH;
+        graphics.fill(centerX - 125, centerY - panelHalfHeight, centerX + 125, centerY + panelHalfHeight, 0xF8_20_20_30);
+        graphics.fill(centerX - 124, centerY - panelHalfHeight - 1, centerX + 124, centerY - panelHalfHeight, 0xF8_20_20_30);
+        graphics.fill(centerX - 124, centerY + panelHalfHeight, centerX + 124, centerY + panelHalfHeight + 1, 0xF8_20_20_30);
+
+        if (this.pasteMode && this.pasteInput != null && !this.importing) {
+            int x = this.pasteBoxX;
+            int y = this.pasteBoxY;
+            int width = INPUT_WIDTH;
+            int height = PASTE_HEIGHT;
+            graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, 0xFF_00_00_00);
+            graphics.fill(x + 1, y, x + width - 1, y + 1, 0xFF_FF_FF_FF);
+            graphics.fill(x + 1, y + height - 1, x + width - 1, y + height, 0xFF_FF_FF_FF);
+            graphics.fill(x, y + 1, x + 1, y + height - 1, 0xFF_FF_FF_FF);
+            graphics.fill(x + width - 1, y + 1, x + width, y + height - 1, 0xFF_FF_FF_FF);
+        }
     }
 
     @Override
     public void stage(String stage, Object... args) {
         assert this.minecraft != null;
-        if (this != this.currentScreen()) return;
-
         Component component = Component.translatable(stage, args).withStyle(ChatFormatting.YELLOW);
-        synchronized (this.lock) {
-            this.stage = component;
-            this.label = null;
-        }
+        this.minecraft.execute(() -> {
+            if (this.closed || this != this.currentScreen()) {
+                return;
+            }
+            synchronized (this.lock) {
+                this.stage = component;
+                this.label = null;
+            }
+        });
     }
 
     @Override
     public void success(MicrosoftAccount account) {
         assert this.minecraft != null;
-        if (this != this.currentScreen()) return;
-
-        this.stage(MicrosoftAccount.FINALIZING);
         this.minecraft.execute(() -> {
-            if (this != this.currentScreen()) return;
+            if (this.closed || this != this.currentScreen()) {
+                return;
+            }
+            this.importing = false;
+            this.stage(MicrosoftAccount.FINALIZING);
             this.handler.accept(account);
         });
     }
 
     @Override
     public void error(Throwable error) {
-        assert this.minecraft != null;
         LOGGER.error("IAS: Cookie import error.", error);
-
-        if (this != this.currentScreen()) return;
+        assert this.minecraft != null;
 
         FriendlyException probable = FriendlyException.friendlyInChain(error);
         String key = probable != null ? probable.key() : "ias.error";
         Component component = Component.translatable(key).withStyle(ChatFormatting.RED);
-        synchronized (this.lock) {
-            this.stage = component;
-            this.label = null;
-            this.error = 0.0F;
-        }
+        this.minecraft.execute(() -> {
+            if (this.closed) {
+                return;
+            }
+            synchronized (this.lock) {
+                this.stage = component;
+                this.label = null;
+                this.error = 0.0F;
+            }
+            this.importing = false;
+            //? if >=1.21.11 {
+            this.init(this.width, this.height);
+            //?} else
+            /*this.init(this.minecraft, this.width, this.height);*/
+        });
     }
 
     private Screen currentScreen() {

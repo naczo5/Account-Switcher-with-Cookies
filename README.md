@@ -2,9 +2,6 @@
 
 # Account Switcher with Cookies (Lunar / Localts)
 
-## Disclaimer
-Import cookie alts via file path. Pasting the content is currently unreliable.
-
 A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) scoped for **Lunar Client** and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
 
 
@@ -42,8 +39,10 @@ See [docs/LUNAR.md](docs/LUNAR.md) for opening the mod on Lunar, troubleshooting
 1. Open the account switcher — press **`O`** (default keybind) on the main menu, or open **Mod Menu → In-Game Account Switcher**.
 2. **Add** → **Import Cookie**.
 3. Choose how to supply the file:
-   - **File Path** — path to your `.txt` alt file, e.g. `C:\alts\myaccount.txt`
-   - **Paste** — paste file contents into the text box, or copy to clipboard and click **Import**
+   - **File Path** — path to your `.txt` alt file, e.g. `C:\alts\myaccount.txt`, or click **...** to open the OS file picker
+   - **Paste** — paste the full cookie file into the multi-line text box, or leave it empty and click **Import** to use the clipboard
+
+If import fails, check `latest.log` in your instance folder and search for `IAS/Cookie`.
 
 ### Supported file formats
 

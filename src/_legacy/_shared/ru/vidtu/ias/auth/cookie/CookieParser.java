@@ -34,6 +34,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -46,6 +48,13 @@ public final class CookieParser {
      * Microsoft refresh token prefix used by Localts exports.
      */
     private static final String MSA_TOKEN_PREFIX = "M.C";
+
+    /**
+     * Netscape line with spaces instead of tabs (common after GUI paste).
+     */
+    private static final Pattern SPACE_NETSCAPE_LINE = Pattern.compile(
+            "^(\\S+)\\s+(TRUE|FALSE)\\s+(\\S+)\\s+(TRUE|FALSE)\\s+(\\d+)\\s+(\\S+)(?:\\s+(.*))?$",
+            Pattern.CASE_INSENSITIVE);
     /**
      * An instance of this class cannot be created.
      *
@@ -94,22 +103,92 @@ public final class CookieParser {
     @CheckReturnValue
     @NotNull
     public static ParsedCookies fromText(@NotNull String text) {
-        String trimmed = text.strip();
-        String format;
+        String trimmed = normalizeInput(text).strip();
+        if (trimmed.contains("\t") && looksLikeNetscape(trimmed)) {
+            return fromNetscape(trimmed);
+        }
         ParsedCookies parsed;
         if (looksLikeCookieHeader(trimmed)) {
-            format = "header";
             parsed = fromCookieHeader(trimmed);
         } else if (looksLikeLocalts(trimmed)) {
-            format = "localts";
             parsed = fromLocalts(trimmed);
         } else if (trimmed.contains("\t")) {
-            format = "netscape";
             parsed = fromNetscape(trimmed);
         } else {
             throw new FriendlyException("Unrecognized cookie format. Use a Netscape cookie file, semicolon-separated cookie header, or Localts token file.", "ias.error.cookie.invalid");
         }
         return parsed;
+    }
+
+    /**
+     * Normalizes pasted cookie text (line endings, space-separated Netscape exports).
+     */
+    @NotNull
+    private static String normalizeInput(@NotNull String text) {
+        text = text.replace("\uFEFF", "").replace("\r\n", "\n").replace('\r', '\n');
+        if (text.contains("\t")) {
+            return text;
+        }
+        if (!looksLikeSpaceSeparatedNetscape(text)) {
+            return text;
+        }
+        return convertSpaceSeparatedNetscape(text);
+    }
+
+    @Contract(pure = true)
+    private static boolean looksLikeSpaceSeparatedNetscape(@NotNull String text) {
+        for (String line : text.split("\n")) {
+            line = line.strip();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            return SPACE_NETSCAPE_LINE.matcher(line).matches();
+        }
+        return false;
+    }
+
+    @NotNull
+    private static String convertSpaceSeparatedNetscape(@NotNull String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (String line : text.split("\n", -1)) {
+            String stripped = line.strip();
+            if (stripped.isEmpty() || stripped.startsWith("#")) {
+                out.append(line).append('\n');
+                continue;
+            }
+            Matcher matcher = SPACE_NETSCAPE_LINE.matcher(stripped);
+            if (!matcher.matches()) {
+                out.append(line).append('\n');
+                continue;
+            }
+            out.append(matcher.group(1)).append('\t')
+                    .append(matcher.group(2)).append('\t')
+                    .append(matcher.group(3)).append('\t')
+                    .append(matcher.group(4)).append('\t')
+                    .append(matcher.group(5)).append('\t')
+                    .append(matcher.group(6));
+            String value = matcher.group(7);
+            if (value != null && !value.isEmpty()) {
+                out.append('\t').append(value);
+            }
+            out.append('\n');
+        }
+        return out.toString();
+    }
+
+    /**
+     * Whether the text looks like a Netscape cookie export (tab-separated fields per line).
+     */
+    @Contract(pure = true)
+    private static boolean looksLikeNetscape(@NotNull String text) {
+        for (String line : text.split("\n")) {
+            line = line.strip();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            return line.split("\t", -1).length >= 6;
+        }
+        return false;
     }
 
     /**
