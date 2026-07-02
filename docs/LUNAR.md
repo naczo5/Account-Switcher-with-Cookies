@@ -21,7 +21,7 @@ Use the jar whose version **exactly matches** your Lunar Fabric profile. **26.1.
 
 Lunar replaces the vanilla title screen, so the mod uses multiple entry points:
 
-1. **Keybind (default: `O`)** — works on the main menu, pause menu, and multiplayer list. On Lunar's custom main menu, `O` is captured at the keyboard level because Lunar does not use Minecraft screens there.
+1. **Keybind (default: `O`)** — works on the main menu and multiplayer list (not while in a world or when another menu/text field is open). On Lunar's custom main menu, `O` is captured at the keyboard level because Lunar does not use Minecraft screens there.
 2. **Mod Menu** — **In-Game Account Switcher** in the Mod Menu list (bottom-left Lunar logo → Mods).
 3. **Title button** — appears on vanilla `TitleScreen` only; **not** on Lunar's WebOSR main menu.
 

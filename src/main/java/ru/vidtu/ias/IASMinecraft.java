@@ -31,7 +31,9 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 /*import net.minecraft.client.gui.GuiGraphics;*/
 import net.minecraft.client.gui.components.AbstractSelectionList;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.ImageButton;
+import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.WidgetSprites;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -40,7 +42,6 @@ import net.minecraft.client.gui.components.toasts.ToastManager;
 import net.minecraft.client.gui.layouts.LayoutElement;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.client.gui.screens.social.PlayerSocialManager;
 import net.minecraft.client.main.GameConfig;
@@ -131,7 +132,7 @@ public final class IASMinecraft {
     }
 
     /**
-     * Opens the account switcher when allowed (menus, pause screen, Lunar main menu, etc.).
+     * Opens the account switcher when allowed (main menu, multiplayer list, Lunar home screen, etc.).
      *
      * @param minecraft Minecraft instance
      * @return {@code true} if the screen was opened
@@ -157,15 +158,21 @@ public final class IASMinecraft {
      */
     @SuppressWarnings("ChainOfInstanceofChecks")
     private static boolean canOpenAccountSwitcher(Minecraft minecraft) {
-        // Main menu / Lunar launcher UI (no world loaded).
-        if (minecraft.player == null && minecraft.level == null) return true;
+        // Only on main menu / Lunar launcher (not while in a world).
+        if (minecraft.player != null || minecraft.level != null) return false;
         //? if >=26.2 {
         Screen screen = minecraft.gui.screen();
         //?} else {
         /*Screen screen = minecraft.screen;
         *///?}
-        if (screen == null) return false;
-        if (screen instanceof AccountScreen || screen instanceof ChatScreen || screen instanceof ConnectScreen) return false;
+        if (screen instanceof AccountScreen) return false;
+        // Block known sub-menus (Mod Menu, settings, popups, etc.) but allow unknown main-menu screens.
+        if (screen != null && MainMenuScreens.blocksAccountSwitcherOpen(screen)) return false;
+        // Don't intercept the open key while typing in a text field.
+        if (screen != null) {
+            GuiEventListener focused = screen.getFocused();
+            if (focused instanceof EditBox || focused instanceof MultiLineEditBox) return false;
+        }
         return true;
     }
 

@@ -86,6 +86,25 @@ public final class MainMenuScreens {
         return isMainMenu(screen);
     }
 
+    /**
+     * Returns whether the account-switcher open key should be blocked on this screen.
+     * Unknown screens on the main menu are allowed so Lunar Client's home UI keeps working.
+     *
+     * @param screen Target screen
+     * @return {@code true} if the open key should be ignored
+     */
+    @Contract(pure = true)
+    public static boolean blocksAccountSwitcherOpen(@NotNull Screen screen) {
+        if (screen instanceof JoinMultiplayerScreen) return false;
+        if (isMainMenu(screen)) return false;
+        String full = screen.getClass().getName().toLowerCase(Locale.ROOT);
+        String simple = screen.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+        if (full.contains("modmenu")) return true;
+        if (isExcluded(screen)) return true;
+        boolean lunarLike = full.contains("moonsworth") || full.contains("lunar") || full.contains("ichor") || full.contains("genesis");
+        return lunarLike && (simple.contains("mod") || simple.contains("setting") || simple.contains("config") || simple.contains("search"));
+    }
+
     @Contract(pure = true)
     private static boolean isExcluded(@NotNull Screen screen) {
         String simple = screen.getClass().getSimpleName();
@@ -102,7 +121,8 @@ public final class MainMenuScreens {
                 || simple.contains("Credits")
                 || simple.contains("Confirm")
                 || simple.contains("Popup")
-                || simple.contains("Account");
+                || simple.contains("Account")
+                || simple.contains("Config");
     }
 
     @Contract(pure = true)
