@@ -12,6 +12,8 @@
   "ias.accounts.edit": "Edytuj",
   "ias.accounts.delete": "Usuń",
   "ias.accounts.add": "Dodaj",
+  "ias.accounts.logoutCookie": "Wyloguj Cookie",
+  "ias.accounts.logoutCookie.tip": "Wróć do konta Lunar Client wybranego podczas uruchamiania Minecrafta.",
   "ias.accounts.tip.nick": "Nick",
   "ias.accounts.tip.uuid": "UUID",
   "ias.accounts.tip.type": "Typ",

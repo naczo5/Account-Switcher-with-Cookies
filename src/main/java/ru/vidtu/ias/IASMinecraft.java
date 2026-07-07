@@ -115,6 +115,11 @@ public final class IASMinecraft {
     private static Component text = Component.translatable("ias.title", "(not loaded for some reason)");
 
     /**
+     * Account selected by the launcher when Minecraft started.
+     */
+    private static volatile LoginData launchAccount;
+
+    /**
      * An instance of this class cannot be created.
      *
      * @throws AssertionError Always
@@ -138,6 +143,7 @@ public final class IASMinecraft {
      * @return {@code true} if the screen was opened
      */
     public static boolean tryOpenAccountSwitcher(Minecraft minecraft) {
+        captureLaunchAccount(minecraft);
         if (IAS.disabled() || !canOpenAccountSwitcher(minecraft)) return false;
         //? if >=26.2 {
         Screen parent = minecraft.gui.screen();
@@ -193,6 +199,8 @@ public final class IASMinecraft {
      */
     @SuppressWarnings({"ChainOfInstanceofChecks", "ConstantValue"}) // <- Abstraction for Minecraft is not possible, mods break user non-nullness.
     public static void onInit(Minecraft minecraft, Screen screen, Consumer<Button> buttonAdder) {
+        captureLaunchAccount(minecraft);
+
         // Add title button.
         if (IASConfig.titleButton && MainMenuScreens.isMainMenu(screen)) {
             // Calculate the position.
@@ -384,6 +392,8 @@ public final class IASMinecraft {
      * @return Future for logging in
      */
     public static CompletableFuture<Void> account(Minecraft minecraft, LoginData data) {
+        captureLaunchAccount(minecraft);
+
         // Check if not in-game.
         LOGGER.info("IAS: Received login request: {}", data);
         if (minecraft.player != null || minecraft.level != null || minecraft.getConnection() != null ||
@@ -478,5 +488,60 @@ public final class IASMinecraft {
             // Rethrow.
             throw new RuntimeException("Unable to change account to: " + data, t);
         });
+    }
+
+    /**
+     * Gets whether there is a launcher account to restore to.
+     *
+     * @param minecraft Minecraft instance
+     * @return {@code true} if a launcher account is captured
+     */
+    public static boolean hasLaunchAccount(Minecraft minecraft) {
+        captureLaunchAccount(minecraft);
+        return launchAccount != null;
+    }
+
+    /**
+     * Gets whether the current account differs from the launcher account.
+     *
+     * @param minecraft Minecraft instance
+     * @return {@code true} if the current account can be restored to the launcher account
+     */
+    public static boolean canRestoreLaunchAccount(Minecraft minecraft) {
+        captureLaunchAccount(minecraft);
+        LoginData launch = launchAccount;
+        User current = minecraft.getUser();
+        return launch != null && current != null && !launch.uuid().equals(current.getProfileId());
+    }
+
+    /**
+     * Gets the account selected by the launcher when Minecraft started.
+     *
+     * @param minecraft Minecraft instance
+     * @return Launcher account login data, or {@code null} if unavailable
+     */
+    public static LoginData launchAccount(Minecraft minecraft) {
+        captureLaunchAccount(minecraft);
+        return launchAccount;
+    }
+
+    /**
+     * Captures the initial launcher account once.
+     *
+     * @param minecraft Minecraft instance
+     */
+    private static void captureLaunchAccount(Minecraft minecraft) {
+        if (launchAccount != null) return;
+        synchronized (IASMinecraft.class) {
+            if (launchAccount != null) return;
+
+            User user = minecraft.getUser();
+            if (user == null || user.getName() == null || user.getProfileId() == null || user.getAccessToken() == null) {
+                return;
+            }
+
+            launchAccount = new LoginData(user.getName(), user.getProfileId(), user.getAccessToken(), true);
+            LOGGER.info("IAS: Captured launcher account: {}", launchAccount);
+        }
     }
 }

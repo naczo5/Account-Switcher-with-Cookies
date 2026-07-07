@@ -37,7 +37,9 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.vidtu.ias.IAS;
+import ru.vidtu.ias.IASMinecraft;
 import ru.vidtu.ias.account.Account;
+import ru.vidtu.ias.auth.LoginData;
 import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.config.IASConfig;
@@ -89,6 +91,11 @@ public final class AccountScreen extends Screen {
      * Edit button.
      */
     private Button delete;
+
+    /**
+     * Log out cookie button.
+     */
+    private Button logoutCookie;
 
     /**
      * Creates a new screen.
@@ -192,6 +199,13 @@ public final class AccountScreen extends Screen {
                 .build();
         this.addRenderableWidget(this.delete);
 
+        // Add cookie logout button.
+        this.logoutCookie = Button.builder(Component.translatable("ias.accounts.logoutCookie"), btn -> this.logoutCookie())
+                .bounds(this.width / 2 - 50, this.height - 24 - 24 - 24, 100, 20)
+                .build();
+        this.logoutCookie.setTooltip(Tooltip.create(Component.translatable("ias.accounts.logoutCookie.tip")));
+        this.addRenderableWidget(this.logoutCookie);
+
         // Add edit button.
         this.addRenderableWidget(Button.builder(Component.translatable("ias.accounts.add"), btn -> this.list.add())
                 .bounds(this.width / 2 + 50 + 4, this.height - 24 - 24, 100, 20)
@@ -207,9 +221,9 @@ public final class AccountScreen extends Screen {
 
         // Add account list.
         if (this.list != null) {
-            this.list.setRectangle(this.width, this.height - 24 - 24 - 4 - 34, 0, 34);
+            this.list.setRectangle(this.width, this.height - 24 - 24 - 24 - 4 - 34, 0, 34);
         } else {
-            this.list = new AccountList(this, this.minecraft, this.width, this.height - 24 - 24 - 4 - 34, 34, 12);
+            this.list = new AccountList(this, this.minecraft, this.width, this.height - 24 - 24 - 24 - 4 - 34, 34, 12);
         }
         this.addRenderableWidget(this.list);
 
@@ -267,6 +281,7 @@ public final class AccountScreen extends Screen {
         if (selected == null) {
             // Disable every button.
             this.login.active = this.offlineLogin.active = this.edit.active = this.delete.active = false;
+            this.updateLogoutCookieButton();
 
             // Hide tooltip, if exists.
             this.login.setTooltip(null);
@@ -293,6 +308,33 @@ public final class AccountScreen extends Screen {
 
         // Show skin.
         this.skin.visible = true;
+
+        // Update cookie logout button.
+        this.updateLogoutCookieButton();
+    }
+
+    /**
+     * Updates the cookie logout button state.
+     */
+    private void updateLogoutCookieButton() {
+        if (this.logoutCookie == null || this.minecraft == null) return;
+        this.logoutCookie.active = IASMinecraft.canRestoreLaunchAccount(this.minecraft);
+    }
+
+    /**
+     * Logs out of the current cookie account and restores the launcher account.
+     */
+    private void logoutCookie() {
+        // Bruh.
+        assert this.minecraft != null;
+
+        LoginData data = IASMinecraft.launchAccount(this.minecraft);
+        if (data == null || !IASMinecraft.canRestoreLaunchAccount(this.minecraft)) return;
+
+        LoginPopupScreen login = new LoginPopupScreen(this);
+        //$ set_screen 'this.minecraft' 'login'
+        this.minecraft.gui.setScreen(login);
+        login.success(data, false);
     }
 
     @Override
