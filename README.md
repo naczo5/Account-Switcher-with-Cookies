@@ -18,21 +18,30 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 |-----------|--------|-------------------|------------|
 | **26.1.2** | Fabric | `.\gradlew.bat :26.1.2-fabric:jar` | `build\libs\IAS-*+26.1.2-fabric.jar` |
 | **1.21.11** | Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\IAS-*+1.21.11-fabric.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` |
 | 1.20.1 | Fabric / Forge / NeoForge | see `dev/versions/versions_active.txt` | `build\libs\IAS-*+<version>-<loader>.jar` |
 
-**26.1.2** is the primary target for current Lunar Fabric profiles. **1.21.1** is deprecated in this fork (moved to legacy builds). See [docs/LUNAR.md](docs/LUNAR.md) for Lunar-specific setup.
+**26.1.2** is the primary target for current Lunar Fabric profiles. **1.8.9 Forge** is a standard Forge build and can be opened from the title-screen button or the `O` keybind.
 
 ## Dependencies
 
 **Fabric (Lunar):** [Fabric API](https://modrinth.com/mod/fabric-api) (required), [Mod Menu](https://modrinth.com/mod/modmenu) (recommended)
 
-## Install on Lunar Client
+## Install
+
+### 1.8.9 (Forge)
+
+1. Install Forge for **1.8.9**.
+2. Copy `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` into the instance's **mods** folder.
+3. Open the account switcher from its title-screen button or press **`O`**.
+
+### 26.1.2 / 1.21.11 (Fabric)
 
 1. Use a Lunar **Fabric** profile matching one of the supported versions above (26.1.2 recommended).
 2. Copy the matching jar from `build\libs\` into the profile **mods** folder, or install via the Lunar launcher mod browser.
 3. Ensure **Fabric API** is present for that Minecraft version.
 
-See [docs/LUNAR.md](docs/LUNAR.md) for opening the mod on Lunar, troubleshooting, and the remote-disable JVM flag.
+See [docs/LUNAR.md](docs/LUNAR.md) for Lunar Fabric setup and troubleshooting.
 
 ## Import a Localts or cookie alt file
 
@@ -56,8 +65,8 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 
 ## FAQ
 
-**Q:** The mod button doesn't show on Lunar's main menu.  
-**A:** Press **`O`** or use Mod Menu. Lunar replaces the vanilla title screen; the keybind is captured at the keyboard level. Details in [docs/LUNAR.md](docs/LUNAR.md).
+**Q:** The mod button doesn't show on the main menu.
+**A:** Press **`O`** or use Mod Menu (Fabric profiles). On 1.8.9, use the title-screen button or **`O`**.
 
 **Q:** Cookie import says expired or invalid.  
 **A:** Localts tokens and session cookies expire or get revoked. Export a fresh alt from Localts and import again.
@@ -81,6 +90,11 @@ $env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.1.2-fabric"
 # 1.21.11 Fabric
 $env:GRADLE_OPTS = "-Dru.vidtu.ias.only=1.21.11-fabric"
 .\gradlew.bat :1.21.11-fabric:remapJar
+
+# 1.8.9 Forge (standalone module — requires JDK 8)
+cd forge-1.8
+.\gradlew.bat build
+cd ..
 ```
 
 Built jars appear in `build\libs\`.

@@ -148,3 +148,5 @@ val mode = if (onlyId != null) "Only:${onlyId}"
 else if (includeLegacyVersions) "Legacy"
 else "Normal"
 logger.lifecycle("Mode: '${mode}'.")
+
+// Minecraft 1.8.9 Forge uses forge-1.8/ as a standalone FG2 project (see forge-1.8/README in docs).
