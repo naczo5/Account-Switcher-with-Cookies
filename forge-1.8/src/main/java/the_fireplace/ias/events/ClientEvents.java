@@ -6,8 +6,6 @@ import net.minecraft.client.gui.GuiMultiplayer;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.resources.I18n;
-import net.minecraft.util.ChatComponentText;
-import net.minecraft.util.EnumChatFormatting;
 import net.minecraftforge.client.event.GuiScreenEvent;
 import net.minecraftforge.fml.client.event.ConfigChangedEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
@@ -16,7 +14,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 import the_fireplace.ias.IAS;
 import the_fireplace.ias.gui.GuiAccountSelector;
 import the_fireplace.ias.gui.GuiButtonWithImage;
-import the_fireplace.ias.input.LunarInput;
+import the_fireplace.ias.input.OpenKeyInput;
 import the_fireplace.ias.tools.Reference;
 import the_fireplace.ias.utils.MainMenuScreens;
 
@@ -27,13 +25,6 @@ import java.lang.reflect.Field;
  */
 public class ClientEvents {
     private static final int BUTTON_ID = 20;
-
-    private static boolean lunarHintShown;
-    private static long menuOverlayUntil;
-
-    static {
-        menuOverlayUntil = System.currentTimeMillis() + 15000L;
-    }
 
     @SubscribeEvent
     public void guiEvent(GuiScreenEvent.InitGuiEvent.Post event) {
@@ -55,7 +46,7 @@ public class ClientEvents {
 
     @SubscribeEvent
     public void onKeyInput(InputEvent.KeyInputEvent event) {
-        LunarInput.onForgeKeyInput(Minecraft.getMinecraft());
+        OpenKeyInput.onForgeKeyInput(Minecraft.getMinecraft());
     }
 
     @SubscribeEvent
@@ -64,8 +55,7 @@ public class ClientEvents {
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
-        LunarInput.tick(mc);
-        maybeShowLunarHint(mc);
+        OpenKeyInput.tick(mc);
     }
 
     @SubscribeEvent
@@ -74,7 +64,7 @@ public class ClientEvents {
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
-        LunarInput.tick(mc);
+        OpenKeyInput.tick(mc);
         GuiScreen screen = mc.currentScreen;
         if (screen != null && MainMenuScreens.isTitleTextScreen(screen)) {
             screen.drawCenteredString(mc.fontRendererObj,
@@ -86,9 +76,6 @@ public class ClientEvents {
                         screen.width / 2, 10, 16737380);
             }
         }
-        if (shouldDrawMenuOverlay(mc)) {
-            mc.fontRendererObj.drawStringWithShadow(I18n.format("ias.lunar.overlay"), 4, 4, 0x55FF55);
-        }
     }
 
     @SubscribeEvent
@@ -99,7 +86,7 @@ public class ClientEvents {
     }
 
     /**
-     * Entry point for keyboard handlers (Forge key event, LWJGL poll, AWT listener).
+     * Entry point for keyboard handlers.
      */
     public static void tryOpenFromInput(Minecraft mc) {
         if (!canOpenAccountSwitcher(mc)) {
@@ -155,29 +142,4 @@ public class ClientEvents {
         return false;
     }
 
-    private static void maybeShowLunarHint(Minecraft mc) {
-        if (lunarHintShown) {
-            return;
-        }
-        if (mc.thePlayer != null && mc.currentScreen == null) {
-            return;
-        }
-        lunarHintShown = true;
-        if (mc.ingameGUI == null || mc.ingameGUI.getChatGUI() == null) {
-            return;
-        }
-        mc.ingameGUI.getChatGUI().printChatMessage(new ChatComponentText(
-                EnumChatFormatting.GOLD + "In-Game Account Switcher: "
-                        + EnumChatFormatting.GRAY + I18n.format("ias.lunar.hint")));
-    }
-
-    private static boolean shouldDrawMenuOverlay(Minecraft mc) {
-        if (System.currentTimeMillis() > menuOverlayUntil) {
-            return false;
-        }
-        if (mc.thePlayer != null && mc.currentScreen == null) {
-            return false;
-        }
-        return mc.currentScreen == null || MainMenuScreens.isMainMenu(mc.currentScreen);
-    }
 }

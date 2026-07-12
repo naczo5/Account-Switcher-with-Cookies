@@ -10,16 +10,23 @@ import the_fireplace.ias.tools.JavaTools;
  * @author The_Fireplace
  */
 public class ExtendedAccountData extends AccountData {
+	private static final long serialVersionUID = -909128662161235160L;
 
 	public EnumBool premium;
 	public int[] lastused;
 	public int useCount;
+	/** True when {@link #pass} holds a Minecraft services access token, not a password. */
+	public boolean cookieSession;
+	/** Minecraft profile UUID required to restore a cookie-imported session. */
+	public String cookieUuid;
 
 	public ExtendedAccountData(String user, String pass, String alias) {
 		super(user, pass, alias);
 		useCount = 0;
 		lastused = JavaTools.getJavaCompat().getDate();
 		premium = EnumBool.UNKNOWN;
+		cookieSession = false;
+		cookieUuid = "";
 	}
 
 	public ExtendedAccountData(String user, String pass, String alias, int useCount, int[] lastused, EnumBool premium) {
@@ -27,6 +34,23 @@ public class ExtendedAccountData extends AccountData {
 		this.useCount = useCount;
 		this.lastused = lastused;
 		this.premium = premium;
+		this.cookieSession = false;
+		this.cookieUuid = "";
+	}
+
+	/**
+	 * Creates an account backed by a Minecraft services access token obtained
+	 * from a cookie import.
+	 */
+	public static ExtendedAccountData cookieSession(String name, String token, String uuid) {
+		ExtendedAccountData data = new ExtendedAccountData(name, token, name);
+		data.cookieSession = true;
+		data.cookieUuid = uuid;
+		return data;
+	}
+
+	public boolean isCookieSession() {
+		return cookieSession && cookieUuid != null && !cookieUuid.isEmpty();
 	}
 
 	@Override
@@ -50,6 +74,8 @@ public class ExtendedAccountData extends AccountData {
 		if (useCount != other.useCount) {
 			return false;
 		}
-		return user.equals(other.user) && pass.equals(other.pass);
+		return user.equals(other.user) && pass.equals(other.pass)
+				&& cookieSession == other.cookieSession
+				&& (cookieUuid == null ? other.cookieUuid == null : cookieUuid.equals(other.cookieUuid));
 	}
 }

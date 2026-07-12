@@ -2,6 +2,7 @@ package the_fireplace.ias.gui;
 
 import com.github.mrebhan.ingameaccountswitcher.tools.Config;
 import com.github.mrebhan.ingameaccountswitcher.tools.Tools;
+import com.github.mrebhan.ingameaccountswitcher.MR;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AccountData;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltManager;
@@ -15,12 +16,14 @@ import org.apache.commons.lang3.StringUtils;
 import org.lwjgl.input.Keyboard;
 import the_fireplace.ias.account.AlreadyLoggedInException;
 import the_fireplace.ias.account.ExtendedAccountData;
+import the_fireplace.ias.IAS;
 import the_fireplace.ias.config.ConfigValues;
 import the_fireplace.ias.enums.EnumBool;
 import the_fireplace.ias.tools.HttpTools;
 import the_fireplace.ias.tools.JavaTools;
 import the_fireplace.ias.tools.SkinTools;
 import the_fireplace.iasencrypt.EncryptionTools;
+import ru.vidtu.iasfork.cookie.CookieAuth;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,6 +43,7 @@ public class GuiAccountSelector extends GuiScreen {
 	private GuiButton delete;
 	private GuiButton edit;
 	private GuiButton reloadskins;
+	private GuiButton logout;
 	//Search
 	private String query;
 	private GuiTextField search;
@@ -53,6 +57,7 @@ public class GuiAccountSelector extends GuiScreen {
 		this.buttonList.clear();
 		//Above Top Row
 		this.buttonList.add(reloadskins = new GuiButton(8, this.width / 2 - 154 - 10, this.height - 76 - 8, 120, 20, I18n.format("ias.reloadskins")));
+		this.buttonList.add(logout = new GuiButton(9, this.width / 2 - 60, this.height - 76 - 8, 120, 20, I18n.format("ias.logout")));
 		//Top Row
 		this.buttonList.add(new GuiButton(0, this.width / 2 + 4 + 40, this.height - 52, 120, 20, I18n.format("ias.addaccount")));
 		this.buttonList.add(login = new GuiButton(1, this.width / 2 - 154 - 10, this.height - 52, 120, 20, I18n.format("ias.login")));
@@ -157,6 +162,8 @@ public class GuiAccountSelector extends GuiScreen {
 				edit();
 			}else if(button.id == 8){
 				reloadSkins();
+			}else if(button.id == 9){
+				logout();
 			}else{
 				accountsgui.actionPerformed(button);
 			}
@@ -177,6 +184,16 @@ public class GuiAccountSelector extends GuiScreen {
 	 */
 	private void escape(){
 		mc.displayGuiScreen(null);
+	}
+	/** Restores the account Prism/the launcher selected when the game started. */
+	private void logout(){
+		try {
+			IAS.restoreLaunchSession();
+			loginfailed = null;
+			mc.displayGuiScreen(null);
+		} catch (Throwable t) {
+			loginfailed = t;
+		}
 	}
 	/**
 	 * Delete the selected account
@@ -215,7 +232,8 @@ public class GuiAccountSelector extends GuiScreen {
 	 */
 	private void login(int selected){
 		ExtendedAccountData data = queriedaccounts.get(selected);
-		loginfailed = AltManager.getInstance().setUser(data.user, data.pass);
+		boolean cookieAccount = isCookieAccount(data);
+		loginfailed = cookieAccount ? setCookieSession(data) : AltManager.getInstance().setUser(data.user, data.pass);
 		if (loginfailed == null) {
 			Minecraft.getMinecraft().displayGuiScreen(null);
 			ExtendedAccountData current = getCurrentAsEditable();
@@ -224,8 +242,51 @@ public class GuiAccountSelector extends GuiScreen {
 			current.lastused=JavaTools.getJavaCompat().getDate();
 		}else if(loginfailed instanceof AlreadyLoggedInException){
 			getCurrentAsEditable().lastused=JavaTools.getJavaCompat().getDate();
-		}else if(HttpTools.ping("http://minecraft.net")){
+		}else if(!cookieAccount && HttpTools.ping("http://minecraft.net")){
 			getCurrentAsEditable().premium=EnumBool.FALSE;
+		}
+	}
+	/**
+	 * Cookie imports already contain a Minecraft services access token.  Passing
+	 * one to the legacy Yggdrasil password login endpoint causes the
+	 * "Cannot contact authentication server" error when switching accounts.
+	 */
+	private Throwable setCookieSession(ExtendedAccountData data) {
+		try {
+			String username = EncryptionTools.decode(data.user);
+			String token = EncryptionTools.decode(data.pass);
+			String uuid = data.cookieUuid;
+			if (uuid == null || uuid.isEmpty()) {
+				CookieAuth.MinecraftProfile profile = CookieAuth.profileFromAccessToken(token);
+				username = profile.name;
+				uuid = profile.uuid;
+				data.cookieSession = true;
+				data.cookieUuid = uuid;
+				data.alias = username;
+			}
+			if (Minecraft.getMinecraft().getSession().getUsername().equals(username)
+					&& Minecraft.getMinecraft().getSession().getToken().equals(token)
+					&& !ConfigValues.ENABLERELOG) {
+				return new AlreadyLoggedInException();
+			}
+			MR.setSession(new net.minecraft.util.Session(username, uuid, token, "mojang"));
+			return null;
+		} catch (Throwable t) {
+			return t;
+		}
+	}
+
+	/** Recognizes the JWT-shaped access tokens stored by older cookie imports. */
+	private boolean isCookieAccount(ExtendedAccountData data) {
+		if (data.isCookieSession()) {
+			return true;
+		}
+		try {
+			String token = EncryptionTools.decode(data.pass);
+			int firstDot = token.indexOf('.');
+			return token.startsWith("eyJ") && firstDot > 3 && token.indexOf('.', firstDot + 1) > firstDot + 1;
+		} catch (Throwable ignored) {
+			return false;
 		}
 	}
 	/**
@@ -338,6 +399,7 @@ public class GuiAccountSelector extends GuiScreen {
 		delete.enabled = !queriedaccounts.isEmpty();
 		edit.enabled = !queriedaccounts.isEmpty();
 		reloadskins.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
+		logout.enabled = IAS.canRestoreLaunchSession();
 	}
 	class List extends GuiSlot
 	{

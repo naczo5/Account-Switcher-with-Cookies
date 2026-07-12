@@ -27,6 +27,7 @@ import java.util.List;
  */
 public class GuiCookieImport extends GuiScreen {
     private final GuiScreen parent;
+    private final boolean returnToAccountListOnSuccess;
     private boolean pasteMode;
     private boolean importing;
     private volatile boolean closed;
@@ -37,7 +38,12 @@ public class GuiCookieImport extends GuiScreen {
     private final List<String> statusLines = new ArrayList<String>();
 
     public GuiCookieImport(GuiScreen parent) {
+        this(parent, false);
+    }
+
+    public GuiCookieImport(GuiScreen parent, boolean returnToAccountListOnSuccess) {
         this.parent = parent;
+        this.returnToAccountListOnSuccess = returnToAccountListOnSuccess;
     }
 
     @Override
@@ -183,7 +189,7 @@ public class GuiCookieImport extends GuiScreen {
                             }
                             try {
                                 saveAndLogin(profile);
-                                mc.displayGuiScreen(parent);
+                                mc.displayGuiScreen(returnToAccountListOnSuccess ? new GuiAccountSelector() : parent);
                             } catch (Throwable t) {
                                 showError(formatError(t));
                                 importing = false;
@@ -206,7 +212,7 @@ public class GuiCookieImport extends GuiScreen {
     }
 
     private void saveAndLogin(CookieAuth.MinecraftProfile profile) throws Exception {
-        ExtendedAccountData data = new ExtendedAccountData(profile.name, profile.token, profile.name);
+        ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid);
         data.premium = EnumBool.TRUE;
         AltDatabase.getInstance().getAlts().add(data);
         MR.setSession(new Session(profile.name, profile.uuid, profile.token, "mojang"));

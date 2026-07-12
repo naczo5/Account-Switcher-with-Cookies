@@ -37,7 +37,10 @@ class GuiEditAccount extends AbstractAccountGui {
 	@Override
 	public void complete()
 	{
-		AltDatabase.getInstance().getAlts().set(selectedIndex, new ExtendedAccountData(getUsername(), getPassword(), hasUserChanged ? getUsername() : data.alias, data.useCount, data.lastused, data.premium));
+		ExtendedAccountData updated = new ExtendedAccountData(getUsername(), getPassword(), hasUserChanged ? getUsername() : data.alias, data.useCount, data.lastused, data.premium);
+		updated.cookieSession = data.cookieSession;
+		updated.cookieUuid = data.cookieUuid;
+		AltDatabase.getInstance().getAlts().set(selectedIndex, updated);
 	}
 
 }

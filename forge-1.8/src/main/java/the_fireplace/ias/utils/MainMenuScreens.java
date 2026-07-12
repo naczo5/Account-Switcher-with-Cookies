@@ -14,7 +14,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Detects main-menu-like screens, including Lunar Client's custom title screen.
+ * Detects main-menu-like screens.
  */
 public final class MainMenuScreens {
     private static final Set<String> MAIN_MENU_KEYS = new HashSet<String>(Arrays.asList(
@@ -58,7 +58,8 @@ public final class MainMenuScreens {
 
     /**
      * Returns whether the account-switcher open key should be blocked on this screen.
-     * A {@code null} screen is allowed so Lunar Client's home UI keeps working.
+     * A {@code null} screen is allowed so the account switcher can be opened
+     * from the ordinary main-menu state.
      */
     public static boolean blocksAccountSwitcherOpen(GuiScreen screen) {
         if (screen == null) {
@@ -81,10 +82,7 @@ public final class MainMenuScreens {
         if (full.startsWith("the_fireplace.ias.gui")) {
             return true;
         }
-        boolean lunarLike = full.contains("moonsworth") || full.contains("lunar")
-                || full.contains("ichor") || full.contains("genesis");
-        return lunarLike && (simple.contains("mod") || simple.contains("setting")
-                || simple.contains("config") || simple.contains("search"));
+        return false;
     }
 
     private static boolean isExcluded(GuiScreen screen) {
@@ -139,10 +137,7 @@ public final class MainMenuScreens {
 
     private static boolean matchesMainMenuClassName(GuiScreen screen) {
         String simple = screen.getClass().getSimpleName().toLowerCase(Locale.ROOT);
-        String full = screen.getClass().getName().toLowerCase(Locale.ROOT);
-        boolean lunarLike = full.contains("moonsworth") || full.contains("lunar")
-                || full.contains("ichor") || full.contains("genesis");
-        if (!lunarLike && !simple.contains("title") && !simple.contains("mainmenu") && !simple.contains("main_menu")) {
+        if (!simple.contains("title") && !simple.contains("mainmenu") && !simple.contains("main_menu")) {
             return false;
         }
         if (simple.contains("subtitle") || simple.contains("world")) {
@@ -153,7 +148,6 @@ public final class MainMenuScreens {
                 || simple.contains("main_menu")
                 || simple.contains("homescreen")
                 || simple.contains("home_screen")
-                || simple.equals("home")
-                || lunarLike && (simple.contains("menu") || simple.contains("screen") || simple.contains("gui"));
+                || simple.equals("home");
     }
 }

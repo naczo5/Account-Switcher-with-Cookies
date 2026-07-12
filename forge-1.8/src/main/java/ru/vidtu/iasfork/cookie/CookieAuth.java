@@ -33,6 +33,14 @@ public final class CookieAuth {
         return profileFromMca(mca);
     }
 
+    /**
+     * Resolves a previously saved Minecraft services access token.  This also
+     * lets installations made before UUID persistence was added keep working.
+     */
+    public static MinecraftProfile profileFromAccessToken(String token) throws Exception {
+        return profileFromMca(token);
+    }
+
     private static String localtsRefreshToMsa(String refresh) throws Exception {
         PostRequest pr = new PostRequest("https://login.live.com/oauth20_token.srf")
                 .header("Content-Type", "application/x-www-form-urlencoded")

@@ -32,7 +32,9 @@ public class GuiAddAccount extends AbstractAccountGui {
 			return;
 		}
 		if (button.id == 14) {
-			mc.displayGuiScreen(new GuiCookieImport(this));
+			// Keep this initialized form as the import screen's visual parent, then
+			// open a fresh account list once the import succeeds.
+			mc.displayGuiScreen(new GuiCookieImport(this, true));
 			return;
 		}
 		super.actionPerformed(button);

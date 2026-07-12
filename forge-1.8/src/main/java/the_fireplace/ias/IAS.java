@@ -1,7 +1,9 @@
 package the_fireplace.ias;
 
 import com.github.mrebhan.ingameaccountswitcher.MR;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.I18n;
+import net.minecraft.util.Session;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.Configuration;
 import net.minecraftforge.common.config.Property;
@@ -18,6 +20,7 @@ import the_fireplace.ias.input.IASKeyBindings;
 import the_fireplace.ias.tools.Reference;
 import the_fireplace.ias.tools.SkinTools;
 import the_fireplace.iasencrypt.Standards;
+import java.util.Objects;
 /**
  * @author The_Fireplace
  */
@@ -26,6 +29,39 @@ public class IAS {
 	public static Configuration config;
 	private static Property CASESENSITIVE_PROPERTY;
 	private static Property ENABLERELOG_PROPERTY;
+	/** The account selected by the launcher before IAS changes any session. */
+	private static volatile Session launchSession;
+
+	/**
+	 * Captures the launcher-selected session once, before an imported cookie can
+	 * replace it.
+	 */
+	public static void captureLaunchSession() {
+		if (launchSession != null) return;
+		synchronized (IAS.class) {
+			if (launchSession == null) {
+				Session current = Minecraft.getMinecraft().getSession();
+				if (current != null) launchSession = current;
+			}
+		}
+	}
+
+	/** @return whether the launcher session is available and is not current. */
+	public static boolean canRestoreLaunchSession() {
+		captureLaunchSession();
+		Session initial = launchSession;
+		Session current = Minecraft.getMinecraft().getSession();
+		return initial != null && current != null
+				&& (!Objects.equals(initial.getPlayerID(), current.getPlayerID())
+						|| !Objects.equals(initial.getToken(), current.getToken()));
+	}
+
+	/** Restores the session selected by the launcher when Minecraft started. */
+	public static void restoreLaunchSession() throws Exception {
+		captureLaunchSession();
+		if (launchSession == null) throw new IllegalStateException("Launcher session is unavailable.");
+		MR.setSession(launchSession);
+	}
 
 	public static void syncConfig(){
 		ConfigValues.CASESENSITIVE = CASESENSITIVE_PROPERTY.getBoolean();
@@ -49,6 +85,7 @@ public class IAS {
 	@EventHandler
 	public void init(FMLInitializationEvent event){
 		MR.init();
+		captureLaunchSession();
 		ClientRegistry.registerKeyBinding(IASKeyBindings.OPEN);
 		ClientEvents clientEvents = new ClientEvents();
 		MinecraftForge.EVENT_BUS.register(clientEvents);
