@@ -104,8 +104,8 @@ public class ClientEvents {
     }
 
     private static boolean canOpenAccountSwitcher(Minecraft mc) {
-        // In-game with no menu open.
-        if (mc.thePlayer != null && mc.currentScreen == null) {
+        // Only open from menus. A player can have chat or another GUI open while in-game.
+        if (mc.thePlayer != null) {
             return false;
         }
         return canOpenFromScreen(mc.currentScreen);
