@@ -254,21 +254,29 @@ public class GuiAccountSelector extends GuiScreen {
 	private Throwable setCookieSession(ExtendedAccountData data) {
 		try {
 			String username = EncryptionTools.decode(data.user);
-			String token = EncryptionTools.decode(data.pass);
+			String token = data.cookieAccessToken();
 			String uuid = data.cookieUuid;
-			if (uuid == null || uuid.isEmpty()) {
-				CookieAuth.MinecraftProfile profile = CookieAuth.profileFromAccessToken(token);
-				username = profile.name;
-				uuid = profile.uuid;
-				data.cookieSession = true;
-				data.cookieUuid = uuid;
-				data.alias = username;
-			}
 			if (Minecraft.getMinecraft().getSession().getUsername().equals(username)
 					&& Minecraft.getMinecraft().getSession().getToken().equals(token)
 					&& !ConfigValues.ENABLERELOG) {
 				return new AlreadyLoggedInException();
 			}
+
+			CookieAuth.MinecraftProfile profile;
+			try {
+				profile = CookieAuth.profileFromAccessToken(token);
+			} catch (Throwable expired) {
+				String refresh = data.cookieRefreshToken();
+				if (refresh.isEmpty()) {
+					throw expired;
+				}
+				profile = CookieAuth.profileFromRefreshToken(refresh);
+			}
+			username = profile.name;
+			uuid = profile.uuid;
+			token = profile.token;
+			data.updateCookieTokens(token, profile.refreshToken, uuid, username);
+			Config.save();
 			MR.setSession(new net.minecraft.util.Session(username, uuid, token, "mojang"));
 			return null;
 		} catch (Throwable t) {

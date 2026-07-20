@@ -6,6 +6,7 @@ import com.github.mrebhan.ingameaccountswitcher.tools.alt.AccountData;
 
 import the_fireplace.ias.enums.EnumBool;
 import the_fireplace.ias.tools.JavaTools;
+import the_fireplace.iasencrypt.EncryptionTools;
 /**
  * @author The_Fireplace
  */
@@ -19,6 +20,10 @@ public class ExtendedAccountData extends AccountData {
 	public boolean cookieSession;
 	/** Minecraft profile UUID required to restore a cookie-imported session. */
 	public String cookieUuid;
+	/** Latest encrypted Minecraft services access token for a cookie-imported session. */
+	public String cookieAccess;
+	/** Encrypted Localts refresh token, or empty for cookie-only imports. */
+	public String cookieRefresh;
 
 	public ExtendedAccountData(String user, String pass, String alias) {
 		super(user, pass, alias);
@@ -27,6 +32,8 @@ public class ExtendedAccountData extends AccountData {
 		premium = EnumBool.UNKNOWN;
 		cookieSession = false;
 		cookieUuid = "";
+		cookieAccess = "";
+		cookieRefresh = "";
 	}
 
 	public ExtendedAccountData(String user, String pass, String alias, int useCount, int[] lastused, EnumBool premium) {
@@ -36,17 +43,41 @@ public class ExtendedAccountData extends AccountData {
 		this.premium = premium;
 		this.cookieSession = false;
 		this.cookieUuid = "";
+		this.cookieAccess = "";
+		this.cookieRefresh = "";
 	}
 
 	/**
 	 * Creates an account backed by a Minecraft services access token obtained
 	 * from a cookie import.
 	 */
-	public static ExtendedAccountData cookieSession(String name, String token, String uuid) {
+	public static ExtendedAccountData cookieSession(String name, String token, String uuid, String refreshToken) {
 		ExtendedAccountData data = new ExtendedAccountData(name, token, name);
 		data.cookieSession = true;
 		data.cookieUuid = uuid;
+		data.cookieAccess = EncryptionTools.encode(token);
+		data.cookieRefresh = EncryptionTools.encode(refreshToken == null ? "" : refreshToken);
 		return data;
+	}
+
+	public String cookieAccessToken() {
+		return cookieAccess == null || cookieAccess.isEmpty() ? EncryptionTools.decode(pass) : EncryptionTools.decode(cookieAccess);
+	}
+
+	public String cookieRefreshToken() {
+		return cookieRefresh == null || cookieRefresh.isEmpty() ? "" : EncryptionTools.decode(cookieRefresh);
+	}
+
+	public void updateCookieTokens(String accessToken, String refreshToken, String uuid, String name) {
+		cookieSession = true;
+		cookieUuid = uuid;
+		cookieAccess = EncryptionTools.encode(accessToken);
+		if (refreshToken != null && !refreshToken.isEmpty()) {
+			cookieRefresh = EncryptionTools.encode(refreshToken);
+		}
+		if (name != null && !name.isEmpty()) {
+			alias = name;
+		}
 	}
 
 	public boolean isCookieSession() {
@@ -76,6 +107,8 @@ public class ExtendedAccountData extends AccountData {
 		}
 		return user.equals(other.user) && pass.equals(other.pass)
 				&& cookieSession == other.cookieSession
-				&& (cookieUuid == null ? other.cookieUuid == null : cookieUuid.equals(other.cookieUuid));
+				&& (cookieUuid == null ? other.cookieUuid == null : cookieUuid.equals(other.cookieUuid))
+				&& (cookieAccess == null ? other.cookieAccess == null : cookieAccess.equals(other.cookieAccess))
+				&& (cookieRefresh == null ? other.cookieRefresh == null : cookieRefresh.equals(other.cookieRefresh));
 	}
 }

@@ -20,10 +20,8 @@
 package ru.vidtu.ias.screen;
 
 import org.jetbrains.annotations.Nullable;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
-import javax.swing.SwingUtilities;
-import java.awt.FileDialog;
-import java.awt.Frame;
 import java.io.File;
 
 /**
@@ -40,36 +38,19 @@ final class CookieFileDialogs {
     }
 
     /**
-     * Opens a native file-open dialog on the AWT event thread.
+     * Opens a native file-open dialog through LWJGL's Tiny File Dialogs binding.
+     * This is part of Minecraft's runtime and does not depend on AWT being available.
      *
      * @param title     Dialog title
      * @param startPath Optional starting file or directory
      * @return Selected absolute path, or {@code null} if cancelled
      */
     @Nullable
-    static String pickFile(@Nullable String title, @Nullable String startPath) throws Exception {
-        final String[] result = new String[1];
-        SwingUtilities.invokeAndWait(() -> {
-            FileDialog dialog = new FileDialog((Frame) null, title, FileDialog.LOAD);
-            dialog.setAlwaysOnTop(true);
-            if (startPath != null && !startPath.isBlank()) {
-                File file = new File(startPath);
-                File parent = file.isDirectory() ? file : file.getParentFile();
-                if (parent != null && parent.isDirectory()) {
-                    dialog.setDirectory(parent.getAbsolutePath());
-                }
-                if (file.isFile()) {
-                    dialog.setFile(file.getName());
-                }
-            }
-            dialog.setVisible(true);
-            String directory = dialog.getDirectory();
-            String name = dialog.getFile();
-            if (directory != null && name != null) {
-                result[0] = new File(directory, name).getAbsolutePath();
-            }
-            dialog.dispose();
-        });
-        return result[0];
+    static String pickFile(@Nullable String title, @Nullable String startPath) {
+        String initial = null;
+        if (startPath != null && !startPath.isBlank()) {
+            initial = new File(startPath).getAbsolutePath();
+        }
+        return TinyFileDialogs.tinyfd_openFileDialog(title, initial, null, null, false);
     }
 }

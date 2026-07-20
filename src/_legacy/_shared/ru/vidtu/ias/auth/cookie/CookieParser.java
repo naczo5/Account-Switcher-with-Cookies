@@ -257,7 +257,7 @@ public final class CookieParser {
     }
 
     /**
-     * Whether the text looks like a Localts {@code username:token} export rather than Netscape cookies.
+     * Whether the text looks like a Localts bare token or {@code username:token} export rather than Netscape cookies.
      */
     @Contract(pure = true)
     private static boolean looksLikeLocalts(@NotNull String text) {
@@ -267,6 +267,9 @@ public final class CookieParser {
                 continue;
             }
             if (line.contains("Localts")) {
+                return true;
+            }
+            if (looksLikeLocaltsRefreshToken(line)) {
                 return true;
             }
             if (line.contains("\t")) {
@@ -284,7 +287,7 @@ public final class CookieParser {
     }
 
     /**
-     * Parses Localts format: optional header line plus {@code username:M.C...} refresh token.
+     * Parses Localts format: a bare token or an optional header line plus {@code username:M.C...} refresh token.
      */
     @CheckReturnValue
     @NotNull
@@ -292,7 +295,7 @@ public final class CookieParser {
         String token = extractLocaltsToken(text);
 
         if (token == null || token.isBlank()) {
-            throw new FriendlyException("Localts file is missing a valid MSA session token (username:M.C...).", "ias.error.cookie.invalid");
+            throw new FriendlyException("Localts input is missing a valid MSA session token (M.C... or username:M.C...).", "ias.error.cookie.invalid");
         }
         return new ParsedCookies(Map.of(), token);
     }

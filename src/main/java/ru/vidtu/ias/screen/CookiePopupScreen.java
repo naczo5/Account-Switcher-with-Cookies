@@ -314,6 +314,9 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         if (this.pasteInput != null) {
             this.savedPaste = this.pasteInput.getValue();
         }
+        if (pasteMode && !this.pasteMode && this.savedPaste.isBlank()) {
+            this.savedPaste = this.clipboardContents();
+        }
         this.pasteMode = pasteMode;
         this.error = Float.NaN;
         this.errorNote = null;
@@ -405,9 +408,8 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Resolves pasted cookie text, preferring the clipboard when the text box lost tab characters.
      */
     private String resolvePasteSource() {
-        assert this.minecraft != null;
         String box = this.pasteInput != null ? this.pasteInput.getValue() : "";
-        String clip = this.minecraft.keyboardHandler.getClipboard();
+        String clip = this.clipboardContents();
         if (!box.isBlank() && box.contains("\t")) {
             return box;
         }
@@ -417,7 +419,21 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         if (!box.isBlank()) {
             return box;
         }
-        return clip != null ? clip : "";
+        return clip;
+    }
+
+    /**
+     * Reads clipboard text without allowing a platform clipboard failure to break the import screen.
+     */
+    private String clipboardContents() {
+        assert this.minecraft != null;
+        try {
+            String clipboard = this.minecraft.keyboardHandler.getClipboard();
+            return clipboard != null ? clipboard : "";
+        } catch (Throwable t) {
+            LOGGER.warn("IAS: Unable to read cookie import text from the clipboard.", t);
+            return "";
+        }
     }
 
     private void browseCookieFile() {

@@ -1,6 +1,7 @@
 package the_fireplace.ias.gui;
 
 import com.github.mrebhan.ingameaccountswitcher.MR;
+import com.github.mrebhan.ingameaccountswitcher.tools.Config;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
@@ -109,6 +110,9 @@ public class GuiCookieImport extends GuiScreen {
         if (pasteInput != null) {
             savedPaste = pasteInput.getText();
         }
+        if (paste && !pasteMode && savedPaste.isEmpty()) {
+            savedPaste = clipboardContents();
+        }
         pasteMode = paste;
         statusLines.clear();
         initGui();
@@ -212,29 +216,35 @@ public class GuiCookieImport extends GuiScreen {
     }
 
     private void saveAndLogin(CookieAuth.MinecraftProfile profile) throws Exception {
-        ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid);
+        ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
         data.premium = EnumBool.TRUE;
         AltDatabase.getInstance().getAlts().add(data);
+        Config.save();
         MR.setSession(new Session(profile.name, profile.uuid, profile.token, "mojang"));
     }
 
     private String resolvePasteSource() {
         String box = pasteInput != null ? pasteInput.getText() : "";
-        String clip = "";
-        try {
-            clip = (String) Toolkit.getDefaultToolkit().getSystemClipboard().getData(DataFlavor.stringFlavor);
-        } catch (Exception ignored) {
-        }
+        String clip = clipboardContents();
         if (!box.isEmpty() && box.contains("\t")) {
             return box;
         }
-        if (clip != null && !clip.isEmpty() && clip.contains("\t")) {
+        if (!clip.isEmpty() && clip.contains("\t")) {
             return clip;
         }
         if (!box.isEmpty()) {
             return box;
         }
-        return clip != null ? clip : "";
+        return clip;
+    }
+
+    private String clipboardContents() {
+        try {
+            String clipboard = (String) Toolkit.getDefaultToolkit().getSystemClipboard().getData(DataFlavor.stringFlavor);
+            return clipboard != null ? clipboard : "";
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private void showError(String message) {
