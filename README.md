@@ -1,8 +1,8 @@
 <img src="ias.png" alt="In-Game Account Switcher Icon" width=128 height=128/>
 
-# Account Switcher with Cookies (Lunar / Localts)
+# Account Switcher with Cookies (Forge / Fabric / Lunar / Localts)
 
-A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) scoped for **Lunar Client** and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
+A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) with support for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
 
 
 ## What this fork adds
@@ -16,12 +16,12 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 
 | Minecraft | Loader | Build (PowerShell) | Output jar |
 |-----------|--------|-------------------|------------|
-| **26.1.2** | Fabric | `.\gradlew.bat :26.1.2-fabric:jar` | `build\libs\IAS-*+26.1.2-fabric.jar` |
-| **1.21.11** | Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\IAS-*+1.21.11-fabric.jar` |
+| **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\IAS-*+26.2-fabric.jar` |
+| **26.1** | Fabric / Lunar Fabric | `.\gradlew.bat :26.1.2-fabric:jar` | `build\libs\IAS-*+26.1.2-fabric.jar` |
+| **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\IAS-*+1.21.11-fabric.jar` |
 | **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` |
-| 1.20.1 | Fabric / Forge / NeoForge | see `dev/versions/versions_active.txt` | `build\libs\IAS-*+<version>-<loader>.jar` |
 
-**26.1.2** is the primary target for current Lunar Fabric profiles. **1.8.9 Forge** is a standard Forge build and can be opened from the title-screen button or the `O` keybind.
+**26.1** and **26.2** support both standard Fabric and Lunar Fabric profiles. **1.8.9 Forge** is a standard Forge build and can be opened from the title-screen button or the `O` keybind.
 
 ## Dependencies
 
@@ -35,9 +35,9 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 2. Copy `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` into the instance's **mods** folder.
 3. Open the account switcher from its title-screen button or press **`O`**.
 
-### 26.1.2 / 1.21.11 (Fabric)
+### 26.2 / 26.1 / 1.21.11 (Fabric or Lunar Fabric)
 
-1. Use a Lunar **Fabric** profile matching one of the supported versions above (26.1.2 recommended).
+1. Use a **Fabric** or Lunar **Fabric** profile matching one of the supported versions above.
 2. Copy the matching jar from `build\libs\` into the profile **mods** folder, or install via the Lunar launcher mod browser.
 3. Ensure **Fabric API** is present for that Minecraft version.
 
@@ -83,9 +83,13 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 ## Building
 
 ```powershell
-# Primary Lunar target (26.1.2 Fabric)
+# 26.1 Fabric / Lunar Fabric (uses the 26.1.2 version project)
 $env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.1.2-fabric"
 .\gradlew.bat :26.1.2-fabric:jar
+
+# 26.2 Fabric / Lunar Fabric
+$env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.2-fabric"
+.\gradlew.bat :26.2-fabric:jar
 
 # 1.21.11 Fabric
 $env:GRADLE_OPTS = "-Dru.vidtu.ias.only=1.21.11-fabric"
