@@ -34,28 +34,35 @@ import org.joml.Matrix3x2fStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.vidtu.ias.IAS;
-import ru.vidtu.ias.IASMinecraft;
 import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.auth.LoginData;
 import ru.vidtu.ias.auth.handlers.LoginHandler;
+import ru.vidtu.ias.auth.microsoft.MSAuth;
+import ru.vidtu.ias.auth.microsoft.fields.MCProfile;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 /**
- * Login popup screen.
+ * Applies Minecraft profile updates that need a valid stored account token.
  *
- * @author VidTu
+ * @author Articuling
  */
-final class LoginPopupScreen extends Screen implements LoginHandler {
+final class AccountUpdatePopupScreen extends Screen implements LoginHandler {
     /**
      * Logger for this class.
      */
-    private static final Logger LOGGER = LoggerFactory.getLogger("IAS/LoginPopupScreen");
+    private static final Logger LOGGER = LoggerFactory.getLogger("IAS/AccountUpdatePopupScreen");
+
+    enum Operation {
+        NAME,
+        SKIN
+    }
 
     /**
      * Parent screen.
@@ -63,10 +70,29 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
     private final Screen parent;
 
     /**
-     * Whether this screen should only copy the resulting token to the clipboard
-     * once obtained, instead of switching the active account.
+     * Account being updated.
      */
-    private final boolean copyOnly;
+    private final MicrosoftAccount account;
+
+    /**
+     * Operation to apply.
+     */
+    private final Operation operation;
+
+    /**
+     * Target IGN for name update.
+     */
+    private final String targetName;
+
+    /**
+     * Skin PNG file for skin update.
+     */
+    private final Path skinPng;
+
+    /**
+     * Skin model variant for upload.
+     */
+    private final MSAuth.SkinVariant skinVariant;
 
     /**
      * Synchronization lock.
@@ -76,13 +102,13 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
     /**
      * Current stage.
      */
-    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized") // <- toString()
-    private Component stage = Component.translatable(MicrosoftAccount.INITIALIZING).withStyle(ChatFormatting.YELLOW);
+    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
+    private Component stage;
 
     /**
      * Current stage label.
      */
-    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized") // <- toString()
+    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
     private MultiLineLabel label;
 
     /**
@@ -106,53 +132,41 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
     private float error = Float.NaN;
 
     /**
-     * Error note.
+     * Whether the update flow has started.
      */
-    private MultiLineLabel errorNote;
+    private boolean started;
 
     /**
-     * Creates a new login screen.
-     *
-     * @param parent Parent screen
+     * Whether the update flow finished.
      */
-    LoginPopupScreen(Screen parent) {
-        this(parent, false);
-    }
+    private boolean finished;
 
-    /**
-     * Creates a new login screen.
-     *
-     * @param parent   Parent screen
-     * @param copyOnly Whether to only copy the resulting token to the clipboard,
-     *                 instead of switching the active account
-     */
-    LoginPopupScreen(Screen parent, boolean copyOnly) {
-        super(Component.translatable(copyOnly ? "ias.copyToken.title" : "ias.login"));
+    AccountUpdatePopupScreen(Screen parent, MicrosoftAccount account, Operation operation, String targetName,
+            Path skinPng, MSAuth.SkinVariant skinVariant) {
+        super(Component.translatable(operation == Operation.NAME ? "ias.profile.name.title" : "ias.profile.skin.title"));
         this.parent = parent;
-        this.copyOnly = copyOnly;
+        this.account = account;
+        this.operation = operation;
+        this.targetName = targetName;
+        this.skinPng = skinPng;
+        this.skinVariant = skinVariant;
+        this.stage = Component.translatable(operation == Operation.NAME ? "ias.profile.name.preparing" : "ias.profile.skin.preparing").withStyle(ChatFormatting.YELLOW);
     }
 
     @Override
     public boolean cancelled() {
-        // Bruh.
         assert this.minecraft != null;
-
-        // Cancelled if no longer displayed.
         return this != this.currentScreen();
     }
 
     @Override
     protected void init() {
-        // Bruh.
         assert this.minecraft != null;
 
-        // Synchronize to prevent funny things.
         synchronized (this.lock) {
-            // Unbake label.
             this.label = null;
         }
 
-        // Init parent.
         if (this.parent != null) {
             //? if >=1.21.11 {
             this.parent.init(this.width, this.height);
@@ -160,20 +174,15 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        // Add cancel button.
         this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 22, 150, 20,
-                CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
+                this.finished ? CommonComponents.GUI_BACK : CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
 
-        // Add password box, if future exists.
         if (this.passFuture != null) {
-            // Add password box.
-            this.password = new PopupBox(this.font, this.width / 2 - 100, this.height / 2 - 10 + 5, 178, 20, this.password, Component.translatable("ias.password"), () -> {
-                // Prevent NPE, just in case.
+            this.password = new PopupBox(this.font, this.width / 2 - 100, this.height / 2 - 10 + 5, 178, 20, this.password,
+                    Component.translatable("ias.password"), () -> {
                 if (this.passFuture == null || this.password == null) return;
                 String value = this.password.getValue();
                 if (value.isBlank()) return;
-
-                // Complete the future.
                 this.passFuture.complete(value);
             }, true);
             this.password.setHint(Component.translatable("ias.password.hint").withStyle(ChatFormatting.DARK_GRAY));
@@ -184,57 +193,46 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             this.password.setMaxLength(32);
             this.addRenderableWidget(this.password);
 
-            // Add enter password button.
-            PopupButton button = new PopupButton(this.width / 2 - 100 + 180, this.height / 2 - 10 + 5, 20, 20, Component.literal(">>"), btn -> {
-                // Prevent NPE, just in case.
+            PopupButton button = new PopupButton(this.width / 2 - 100 + 180, this.height / 2 - 10 + 5, 20, 20,
+                    Component.literal(">>"), btn -> {
                 if (this.passFuture == null || this.password == null) return;
                 String value = this.password.getValue();
                 if (value.isBlank()) return;
-
-                // Complete the future.
                 this.passFuture.complete(value);
             }, Supplier::get);
             button.active = !this.password.getValue().isBlank();
             this.addRenderableWidget(button);
             this.password.setResponder(value -> button.active = !value.isBlank());
-
-            // Create tip.
             this.cryptPasswordTip = MultiLineLabel.create(this.font, Component.translatable("ias.password.tip").withColor(0xFF_FF_00), 320);
+        } else if (!this.started) {
+            this.started = true;
+            IAS.executor().execute(() -> this.account.login(this, null));
         }
     }
 
     @Override
     public void onClose() {
-        // Bruh.
         assert this.minecraft != null;
-
-        // Complete password future with cancel, if any.
         if (this.passFuture != null) {
             this.passFuture.complete(null);
         }
-
-        // Close to parent.
         //$set_screen 'this.minecraft' 'this.parent'
         this.minecraft.gui.setScreen(this.parent);
     }
 
-    @SuppressWarnings("NonPrivateFieldAccessedInSynchronizedContext") // <- Supertype.
     @Override
     //? if >=26.1 {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
     //?} else
     /*public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {*/
-        // Bruh.
         assert this.minecraft != null;
         Matrix3x2fStack pose = graphics.pose();
 
-        // Render background and widgets.
         //? if >=26.1 {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         //?} else
         /*super.render(graphics, mouseX, mouseY, delta);*/
 
-        // Render the title.
         pose.pushMatrix();
         pose.scale(2.0F, 2.0F);
         //? if >=26.1 {
@@ -243,7 +241,6 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
         /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 74 / 2, 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
-        // Render password OR label.
         if (this.passFuture != null && this.password != null && this.cryptPasswordTip != null) {
             //? if >=26.1 {
             graphics.centeredText(this.font, this.password.getMessage(), this.width / 2, this.height / 2 - 10 - 5, 0xFF_FF_FF_FF);
@@ -253,67 +250,16 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             pose.scale(0.5F, 0.5F);
             IStonecutter.renderMultilineLabelCentered(this.cryptPasswordTip, graphics, this.width, this.height + 40);
             pose.popMatrix();
-        } else {
-            // Synchronize to prevent funny things.
-            synchronized (this.lock) {
-                // Label is unbaked.
-                if (this.label == null) {
-                    // Get the component.
-                    Component component = Objects.requireNonNullElse(this.stage, Component.empty());
+            return;
+        }
 
-                    // Bake the label.
-                    this.label = MultiLineLabel.create(this.font, component, 240);
-
-                    // Narrate.
-                    this.minecraft.getNarrator().saySystemQueued(component);
-                }
-
-                // Render the label.
-                IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - 4);
+        synchronized (this.lock) {
+            if (this.label == null) {
+                Component component = Objects.requireNonNullElse(this.stage, Component.empty());
+                this.label = MultiLineLabel.create(this.font, component, 240);
+                this.minecraft.getNarrator().saySystemQueued(component);
             }
-
-            // Render the error note, if errored.
-            if (Float.isFinite(this.error)) {
-                // Create it first.
-                if (this.errorNote == null) {
-                    this.errorNote = MultiLineLabel.create(this.font, Component.translatable("ias.error.note").withStyle(ChatFormatting.AQUA), 245);
-                }
-
-                // Wow, opacity. So fluent.
-                float opacityFloat;
-                int opacityMask;
-                if (this.error < 1.0F) {
-                    this.error = Math.min(this.error + delta * 0.1F, 1.0F);
-                    opacityFloat = (this.error * this.error * this.error * this.error);
-                    int opacity = Math.max(9, (int) (opacityFloat * 255.0F));
-                    opacityMask = opacity << 24;
-                } else {
-                    opacityFloat = 1.0F;
-                    opacityMask = -16777216;
-                }
-
-                // Render BG.
-                int w = this.errorNote.getWidth() / 4 + 2;
-                int h = (this.errorNote.getLineCount() * 9) / 2 + 1;
-                int cx = this.width / 2;
-                int sy = this.height / 2 + 87;
-                graphics.fill(cx - w, sy, cx + w, sy + h, 0x101010 | opacityMask);
-                graphics.fill(cx - w + 1, sy - 1, cx + w - 1, sy, 0x101010 | opacityMask);
-                graphics.fill(cx - w + 1, sy + h, cx + w - 1, sy + h + 1, 0x101010 | opacityMask);
-
-                // Render scaled.
-                pose.pushMatrix();
-                pose.scale(0.5F, 0.5F);
-                //? if >= 1.21.11 {
-                var renderer = graphics.textRenderer();
-                renderer.defaultParameters(renderer.defaultParameters().withOpacity(opacityFloat));
-                this.errorNote.visitLines(net.minecraft.client.gui.TextAlignment.CENTER, this.width, this.height + 174, 9, renderer);
-                //?} elif >= 1.21.10 {
-                /*this.errorNote.render(graphics, MultiLineLabel.Align.CENTER, this.width, this.height + 174, 9, false, 0xFF_FF_FF | opacityMask);
-                *///?} else
-                /*this.errorNote.renderCentered(graphics, this.width, this.height + 174, 9, 0xFF_FF_FF | opacityMask);*/
-                pose.popMatrix();
-            }
+            IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - 4);
         }
     }
 
@@ -322,12 +268,9 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
     //?} else
     /*public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float delta) {*/
-        // Bruh.
         assert this.minecraft != null;
 
-        // Render transparent background if parent exists.
         if (this.parent != null) {
-            // Render gradient.
             //? if >=26.1 {
             this.parent.extractRenderStateWithTooltipAndSubtitles(graphics, 0, 0, delta);
             //?} elif >= 1.21.10 {
@@ -343,7 +286,6 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             /*super.renderBackground(graphics, mouseX, mouseY, delta);*/
         }
 
-        // Render "form".
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         graphics.fill(centerX - 125, centerY - 75, centerX + 125, centerY + 75, 0xF8_20_20_30);
@@ -353,152 +295,119 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
 
     @Override
     public void stage(String stage, Object... args) {
-        // Bruh.
-        assert this.minecraft != null;
-
-        // Skip if not current screen.
-        if (this != this.currentScreen()) return;
-
-        // Flush the stage.
-        Component component = Component.translatable(stage, args).withStyle(ChatFormatting.YELLOW);
-        synchronized (this.lock) {
-            this.stage = component;
-            this.label = null;
-        }
+        this.setStage(Component.translatable(stage, args).withStyle(ChatFormatting.YELLOW));
     }
 
     @Override
     public CompletableFuture<String> password() {
-        // Bruh.
         assert this.minecraft != null;
-
-        // Return current future if exists.
         if (this.passFuture != null) return this.passFuture;
 
-        // Create a new future.
         this.passFuture = new CompletableFuture<>();
-
-        // Inject into pass future.
         this.passFuture.thenAcceptAsync(password -> {
-            // Remove future on completion.
             this.passFuture = null;
             this.password = null;
             this.cryptPasswordTip = null;
-
-            // Redraw.
             //? if >=1.21.11 {
             this.init(this.width, this.height);
             //?} else
             /*this.init(this.minecraft, this.width, this.height);*/
         }, this.minecraft);
 
-        // Schedule rerender.
         this.minecraft.execute(() -> {
             //? if >=1.21.11 {
             this.init(this.width, this.height);
             //?} else
             /*this.init(this.minecraft, this.width, this.height);*/
         });
-
-        // Return created future.
         return this.passFuture;
     }
 
     @Override
     public void success(LoginData data, boolean changed) {
-        // Bruh.
-        assert this.minecraft != null;
-
-        // Skip if not current screen.
-        if (this != this.currentScreen()) return;
-
-        // User cancelled.
         if (data == null) {
-            // Schedule on main.
-            this.minecraft.execute(() -> {
-                // Skip if not current screen.
-                if (this != this.currentScreen()) return;
-
-                // Back to parent screen.
-                //$set_screen 'this.minecraft' 'this.parent'
-                this.minecraft.gui.setScreen(this.parent);
-            });
-
-            // Don't log in.
             return;
         }
-
-        // Save storage. (may be needed even in copy-only mode, e.g. if a token was refreshed)
         if (changed) {
-            try {
-                IAS.disclaimersStorage();
-                IAS.saveStorage();
-            } catch (Throwable t) {
-                LOGGER.error("IAS: Unable to save storage.", t);
+            this.saveStorage();
+        }
+
+        CompletableFuture<MCProfile> update = switch (this.operation) {
+            case NAME -> {
+                this.setStage(Component.translatable("ias.profile.name.applying", this.targetName).withStyle(ChatFormatting.YELLOW));
+                yield MSAuth.changeName(data.token(), this.targetName);
             }
-        }
+            case SKIN -> {
+                this.setStage(Component.translatable("ias.profile.skin.applying").withStyle(ChatFormatting.YELLOW));
+                yield MSAuth.uploadSkin(data.token(), this.skinPng, this.skinVariant);
+            }
+        };
 
-        // Copy-only mode: never switch the active account, just copy the token and return.
-        if (this.copyOnly) {
-            this.minecraft.keyboardHandler.setClipboard(data.token());
-            this.minecraft.execute(() -> {
-                // Skip if not current screen.
-                if (this != this.currentScreen()) return;
-
-                // Back to parent screen.
-                //$set_screen 'this.minecraft' 'this.parent'
-                this.minecraft.gui.setScreen(this.parent);
-            });
-            return;
-        }
-
-        // Log in.
-        this.stage(MicrosoftAccount.SERVICES);
-
-        IASMinecraft.account(this.minecraft, data).thenRunAsync(() -> {
-            // Skip if not current screen.
-            if (this != this.currentScreen()) return;
-
-            // Back to parent screen.
-            //$set_screen 'this.minecraft' 'this.parent'
-            this.minecraft.gui.setScreen(this.parent);
-        }, this.minecraft).exceptionally(ex -> {
-            // Handle error on error.
-            this.error(new RuntimeException("Unable to change account.", ex));
-
-            // Nothing...
+        update.thenAcceptAsync(profile -> {
+            AccountList.clearSkin(profile.uuid());
+            AccountList.clearNameChange(this.account.uuid());
+            AccountList.clearNameChange(profile.uuid());
+            this.account.updateProfile(profile.uuid(), profile.name());
+            this.saveStorage();
+            this.finish(Component.translatable(this.operation == Operation.NAME ? "ias.profile.name.done" : "ias.profile.skin.done").withStyle(ChatFormatting.GREEN));
+        }, IAS.executor()).exceptionallyAsync(t -> {
+            this.error(t);
             return null;
-        });
+        }, IAS.executor());
     }
 
     @Override
     public void error(Throwable error) {
-        // Bruh.
-        assert this.minecraft != null;
-
-        // Log it.
-        LOGGER.error("IAS: Login error.", error);
-
-        // Skip if not current screen.
-        if (this != this.currentScreen()) return;
-
-        // Flush the stage.
+        LOGGER.error("IAS: Account profile update error.", error);
         FriendlyException probable = FriendlyException.friendlyInChain(error);
-        String key = probable != null ? probable.key() : "ias.error";
-        Component component = Component.translatable(key).withStyle(ChatFormatting.RED);
-        synchronized (this.lock) {
-            this.stage = component;
-            this.label = null;
-            this.error = 0.0F;
-        }
+        String key = probable != null ? probable.key() : "ias.profile.failed";
+        this.setStage(Component.translatable(key).withStyle(ChatFormatting.RED));
+        this.finished = true;
+        this.error = 0.0F;
+        assert this.minecraft != null;
+        this.minecraft.execute(() -> {
+            if (this != this.currentScreen()) return;
+            //? if >=1.21.11 {
+            this.init(this.width, this.height);
+            //?} else
+            /*this.init(this.minecraft, this.width, this.height);*/
+        });
     }
 
-    @Override
-    public String toString() {
-        return "LoginPopupScreen{" +
-                "stage=" + this.stage +
-                ", label=" + this.label +
-                '}';
+    private void finish(Component component) {
+        assert this.minecraft != null;
+        this.finished = true;
+        this.setStage(component);
+        this.minecraft.execute(() -> {
+            if (this.parent instanceof AccountScreen accountScreen) {
+                accountScreen.refreshAccounts();
+            }
+            if (this != this.currentScreen()) return;
+            //? if >=1.21.11 {
+            this.init(this.width, this.height);
+            //?} else
+            /*this.init(this.minecraft, this.width, this.height);*/
+        });
+    }
+
+    private void setStage(Component component) {
+        assert this.minecraft != null;
+        this.minecraft.execute(() -> {
+            if (this != this.currentScreen()) return;
+            synchronized (this.lock) {
+                this.stage = component;
+                this.label = null;
+            }
+        });
+    }
+
+    private void saveStorage() {
+        try {
+            IAS.disclaimersStorage();
+            IAS.saveStorage();
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Unable to save storage.", t);
+        }
     }
 
     private Screen currentScreen() {
@@ -507,5 +416,13 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
         //?} else {
         /*return this.minecraft.screen;
         *///?}
+    }
+
+    @Override
+    public String toString() {
+        return "AccountUpdatePopupScreen{" +
+                "operation=" + this.operation +
+                ", account=" + this.account +
+                '}';
     }
 }

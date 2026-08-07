@@ -66,6 +66,78 @@ public final class MSAccountFactory {
     }
 
     /**
+     * Creates a {@link MicrosoftAccount} from an existing Minecraft access token.
+     *
+     * @param crypt        Account encryption
+     * @param accessToken  Minecraft access token
+     * @param handler      Creation handler
+     * @return Future that completes when creation finishes or fails
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<Void> createFromMinecraftAccess(@NotNull Crypt crypt, @NotNull String accessToken, @NotNull CreateHandler handler) {
+        Holder<byte[]> data = new Holder<>();
+
+        return CompletableFuture.completedFuture(null).thenComposeAsync(ignored -> {
+            if (handler.cancelled()) return CompletableFuture.completedFuture(null);
+
+            LOGGER.info("IAS: Converting MCA to MCP (token import)...");
+            handler.stage(MicrosoftAccount.MCA_TO_MCP);
+            return MSAuth.mcaToMcp(accessToken);
+        }, IAS.executor()).exceptionallyAsync(t -> {
+            if (IUtils.anyInCausalChain(t, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
+                throw new FriendlyException("Unable to connect to MS servers.", t, "ias.error.connect");
+            }
+            FriendlyException friendly = FriendlyException.friendlyInChain(t);
+            if (friendly != null) {
+                throw friendly;
+            }
+            throw new RuntimeException("Unable to perform token auth.", t);
+        }, IAS.executor()).thenApplyAsync(profile -> {
+            if (profile == null || handler.cancelled()) return null;
+
+            LOGGER.info("IAS: Encrypting tokens (token import)...");
+            handler.stage(MicrosoftAccount.ENCRYPTING);
+
+            byte[] unencrypted;
+            try (ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+                 DataOutputStream out = new DataOutputStream(byteOut)) {
+                out.writeUTF(accessToken);
+                out.writeUTF("");
+                unencrypted = byteOut.toByteArray();
+            } catch (Throwable t) {
+                throw new RuntimeException("Unable to write the tokens.", t);
+            }
+
+            try (ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+                 DataOutputStream out = new DataOutputStream(byteOut)) {
+                byte[] encrypted = crypt.encrypt(unencrypted);
+                out.writeUTF(crypt.type());
+                out.write(encrypted);
+                data.set(byteOut.toByteArray());
+            } catch (Throwable t) {
+                throw new RuntimeException("Unable to encrypt the tokens.", t);
+            }
+
+            return profile;
+        }, IAS.executor()).thenAcceptAsync(profile -> {
+            if (profile == null || handler.cancelled()) return;
+
+            UUID uuid = profile.uuid();
+            String name = profile.name();
+
+            LOGGER.info("IAS: Successfully added {} (token import)", profile);
+            handler.stage(MicrosoftAccount.FINALIZING);
+
+            MicrosoftAccount account = new MicrosoftAccount(crypt.insecure(), uuid, name, data.get());
+            handler.success(account);
+        }, IAS.executor()).exceptionallyAsync(t -> {
+            handler.error(t instanceof RuntimeException re ? re : new RuntimeException("Unable to create an MS account from token.", t));
+            return null;
+        }, IAS.executor());
+    }
+
+    /**
      * Creates a {@link MicrosoftAccount} from browser session cookies (SISU flow, no refresh token).
      *
      * @param crypt        Account encryption
@@ -84,7 +156,8 @@ public final class MSAccountFactory {
             if (result == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
 
             access.set(result.mca());
-            refresh.set(result.refresh());
+            String nextRefresh = result.refresh();
+            refresh.set(nextRefresh.isBlank() ? MicrosoftAccount.cookieRefresh(cookieHeader) : nextRefresh);
 
             LOGGER.info("IAS: Converting MCA to MCP (cookie import)...");
             handler.stage(MicrosoftAccount.MCA_TO_MCP);

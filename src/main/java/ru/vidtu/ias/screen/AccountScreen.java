@@ -39,18 +39,29 @@ import org.slf4j.LoggerFactory;
 import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.IASMinecraft;
 import ru.vidtu.ias.account.Account;
+import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.auth.LoginData;
+import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.config.IASConfig;
 
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 public final class AccountScreen extends Screen {
     /**
      * Logger for this class.
      */
     private static final Logger LOGGER = LoggerFactory.getLogger("IAS/AccountScreen");
+
+    /**
+     * Minecraft IGN validation pattern.
+     */
+    private static final Pattern MINECRAFT_NAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
 
     /**
      * Parent screen, {@code null} if none.
@@ -71,6 +82,51 @@ public final class AccountScreen extends Screen {
      * Player skin widget.
      */
     private PlayerSkinWidget skin;
+
+    /**
+     * Skin PNG picker button.
+     */
+    private PopupButton skinPng;
+
+    /**
+     * Skin model toggle button.
+     */
+    private PopupButton skinModel;
+
+    /**
+     * Apply selected skin button.
+     */
+    private PopupButton applySkin;
+
+    /**
+     * IGN edit box.
+     */
+    private PopupBox nameInput;
+
+    /**
+     * Apply IGN button.
+     */
+    private PopupButton applyName;
+
+    /**
+     * Last account shown in profile controls.
+     */
+    private Account controlsAccount;
+
+    /**
+     * Selected skin PNG path.
+     */
+    private String skinPngPath = "";
+
+    /**
+     * Whether the selected skin should be uploaded as slim model.
+     */
+    private boolean slimSkin;
+
+    /**
+     * Small profile update status line.
+     */
+    private Component profileStatus = Component.empty();
 
     /**
      * Login button.
@@ -96,6 +152,11 @@ public final class AccountScreen extends Screen {
      * Log out cookie button.
      */
     private Button logoutCookie;
+
+    /**
+     * Copy token button.
+     */
+    private Button copyToken;
 
     /**
      * Creates a new screen.
@@ -163,6 +224,46 @@ public final class AccountScreen extends Screen {
         this.skin.setPosition(5, this.height / 2 - 60);
         this.addRenderableWidget(this.skin);
 
+        // Add profile controls under skin preview.
+        int profileX = 4;
+        int profileW = 160;
+        int profileY = this.height / 2 + 64;
+        this.skinPng = new PopupButton(profileX, profileY, profileW, 20,
+                Component.translatable("ias.profile.skin.png"), btn -> this.browseSkinPng(), Supplier::get);
+        this.skinPng.color(0.25F, 1.0F, 1.0F, true);
+        this.skinPng.setTooltip(Tooltip.create(Component.translatable("ias.profile.skin.png.tip")));
+        this.skinPng.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.skinPng);
+
+        this.skinModel = new PopupButton(profileX, profileY + 24, 78, 20,
+                this.skinModelMessage(), btn -> {
+            this.slimSkin = !this.slimSkin;
+            this.skinModel.setMessage(this.skinModelMessage());
+        }, Supplier::get);
+        this.skinModel.color(0.75F, 0.75F, 1.0F, true);
+        this.skinModel.setTooltip(Tooltip.create(Component.translatable("ias.profile.skin.model.tip")));
+        this.skinModel.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.skinModel);
+
+        this.applySkin = new PopupButton(profileX + 82, profileY + 24, 78, 20,
+                Component.translatable("ias.profile.skin.apply"), btn -> this.applySkinPng(), Supplier::get);
+        this.applySkin.color(0.5F, 1.0F, 0.5F, true);
+        this.addRenderableWidget(this.applySkin);
+
+        this.nameInput = new PopupBox(this.font, profileX, profileY + 48, profileW, 20, this.nameInput,
+                Component.translatable("ias.profile.name.input"), this::confirmNameChange, false);
+        this.nameInput.setMaxLength(16);
+        this.nameInput.setHint(Component.translatable("ias.profile.name.input").withStyle(ChatFormatting.DARK_GRAY));
+        this.nameInput.setResponder(value -> this.updateProfileControlState());
+        this.addRenderableWidget(this.nameInput);
+
+        this.applyName = new PopupButton(profileX, profileY + 72, profileW, 20,
+                Component.translatable("ias.profile.name.apply"), btn -> this.confirmNameChange(), Supplier::get);
+        this.applyName.color(0.5F, 1.0F, 0.5F, true);
+        this.applyName.setTooltip(Tooltip.create(Component.translatable("ias.profile.name.apply.tip")));
+        this.applyName.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.applyName);
+
         // Add login button.
         this.login = Button.builder(Component.translatable("ias.accounts.login"), btn -> {
             this.list.login(true, IASConfig.closeOnLogin ? () -> {
@@ -205,6 +306,14 @@ public final class AccountScreen extends Screen {
                 .build();
         this.logoutCookie.setTooltip(Tooltip.create(Component.translatable("ias.accounts.logoutCookie.tip")));
         this.addRenderableWidget(this.logoutCookie);
+
+        // Add copy token button.
+        this.copyToken = Button.builder(Component.translatable("ias.accounts.copyToken"), btn -> this.list.copyToken())
+                .bounds(this.width / 2 + 50 + 4, this.height - 24 - 24 - 24, 100, 20)
+                .build();
+        this.copyToken.setTooltip(Tooltip.create(Component.translatable("ias.accounts.copyToken.tip")));
+        this.copyToken.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.copyToken);
 
         // Add edit button.
         this.addRenderableWidget(Button.builder(Component.translatable("ias.accounts.add"), btn -> this.list.add())
@@ -259,6 +368,13 @@ public final class AccountScreen extends Screen {
         graphics.centeredText(this.font, this.title, this.width / 2, 1, 0xFF_FF_FF_FF);
         //?} else
         /*graphics.drawCenteredString(this.font, this.title, this.width / 2, 1, 0xFF_FF_FF_FF);*/
+
+        if (!this.profileStatus.getString().isBlank()) {
+            //? if >=26.1 {
+            graphics.text(this.font, this.profileStatus, 4, this.height / 2 + 158, 0xFF_FF_FF_FF);
+            //?} else
+            /*graphics.drawString(this.font, this.profileStatus, 4, this.height / 2 + 158, 0xFF_FF_FF_FF);*/
+        }
     }
 
     /**
@@ -271,16 +387,36 @@ public final class AccountScreen extends Screen {
     }
 
     /**
+     * Refreshes the account list from storage.
+     */
+    void refreshAccounts() {
+        if (this.list == null || this.search == null) return;
+        this.list.update(this.search.getValue());
+    }
+
+    /**
      * Updates the selected entry.
      */
     void updateSelected() {
         // Get the selected.
         AccountEntry selected = this.list != null ? this.list.getSelected() : null;
+        boolean multiSelected = this.list != null && this.list.hasMultiSelection();
+
+        if (multiSelected) {
+            this.login.active = this.offlineLogin.active = this.edit.active = false;
+            this.delete.active = true;
+            this.copyToken.active = false;
+            this.login.setTooltip(null);
+            this.skin.visible = selected != null;
+            this.updateProfileControls(selected);
+            this.updateLogoutCookieButton();
+            return;
+        }
 
         // Nothing is selected.
         if (selected == null) {
             // Disable every button.
-            this.login.active = this.offlineLogin.active = this.edit.active = this.delete.active = false;
+            this.login.active = this.offlineLogin.active = this.edit.active = this.delete.active = this.copyToken.active = false;
             this.updateLogoutCookieButton();
 
             // Hide tooltip, if exists.
@@ -288,13 +424,14 @@ public final class AccountScreen extends Screen {
 
             // Hide skin.
             this.skin.visible = false;
+            this.updateProfileControls(null);
 
             // Stop here.
             return;
         }
 
         // Enable always-on buttons.
-        this.offlineLogin.active = this.edit.active = this.delete.active = true;
+        this.offlineLogin.active = this.edit.active = this.delete.active = this.copyToken.active = true;
 
         // Enable online login button if we can log in.
         if (selected.account().canLogin()) {
@@ -308,9 +445,110 @@ public final class AccountScreen extends Screen {
 
         // Show skin.
         this.skin.visible = true;
+        this.updateProfileControls(selected);
 
         // Update cookie logout button.
         this.updateLogoutCookieButton();
+    }
+
+    private void updateProfileControls(AccountEntry selected) {
+        Account account = selected != null ? selected.account() : null;
+        if (this.controlsAccount != account) {
+            this.controlsAccount = account;
+            this.profileStatus = Component.empty();
+            this.skinPngPath = "";
+            if (this.nameInput != null) {
+                this.nameInput.setValue(account != null ? account.name() : "");
+            }
+        }
+        this.updateProfileControlState();
+    }
+
+    private void updateProfileControlState() {
+        boolean microsoft = this.selectedMicrosoftAccount() != null;
+        if (this.skinPng != null) {
+            this.skinPng.visible = this.skinModel.visible = this.applySkin.visible = this.nameInput.visible = this.applyName.visible = microsoft;
+            this.skinPng.active = microsoft;
+            this.skinModel.active = microsoft;
+            this.applySkin.active = microsoft && !this.skinPngPath.isBlank();
+            String value = this.nameInput != null ? this.nameInput.getValue().strip() : "";
+            this.applyName.active = microsoft && MINECRAFT_NAME.matcher(value).matches() && !value.equals(this.controlsAccount != null ? this.controlsAccount.name() : "");
+        }
+    }
+
+    private Component skinModelMessage() {
+        return Component.translatable(this.slimSkin ? "ias.profile.skin.model.slim" : "ias.profile.skin.model.wide");
+    }
+
+    private MicrosoftAccount selectedMicrosoftAccount() {
+        if (this.list == null) return null;
+        AccountEntry selected = this.list.getSelected();
+        if (selected == null) return null;
+        Account account = selected.account();
+        return account instanceof MicrosoftAccount microsoft ? microsoft : null;
+    }
+
+    private void browseSkinPng() {
+        assert this.minecraft != null;
+        String title = Component.translatable("ias.profile.skin.choose").getString();
+        String startPath = this.skinPngPath;
+        IAS.executor().execute(() -> {
+            try {
+                String path = CookieFileDialogs.pickPngFile(title, startPath);
+                if (path == null) {
+                    return;
+                }
+                this.minecraft.execute(() -> {
+                    if (this.minecraft == null || this != this.currentScreen()) return;
+                    this.skinPngPath = path;
+                    this.profileStatus = Component.translatable("ias.profile.skin.selected", Path.of(path).getFileName().toString()).withStyle(ChatFormatting.AQUA);
+                    this.updateProfileControlState();
+                });
+            } catch (Throwable t) {
+                LOGGER.warn("IAS: Skin PNG browse failed.", t);
+                this.minecraft.execute(() -> this.profileStatus = Component.translatable("ias.profile.skin.browse.failed").withStyle(ChatFormatting.RED));
+            }
+        });
+    }
+
+    private void applySkinPng() {
+        assert this.minecraft != null;
+        MicrosoftAccount account = this.selectedMicrosoftAccount();
+        if (account == null || this.skinPngPath.isBlank()) return;
+
+        Path path;
+        try {
+            path = Path.of(this.skinPngPath);
+        } catch (InvalidPathException e) {
+            this.profileStatus = Component.translatable("ias.profile.skin.file").withStyle(ChatFormatting.RED);
+            return;
+        }
+
+        this.minecraft.gui.setScreen(new AccountUpdatePopupScreen(this, account, AccountUpdatePopupScreen.Operation.SKIN, "",
+                path, this.slimSkin ? MSAuth.SkinVariant.SLIM : MSAuth.SkinVariant.CLASSIC));
+    }
+
+    private void confirmNameChange() {
+        assert this.minecraft != null;
+        MicrosoftAccount account = this.selectedMicrosoftAccount();
+        if (account == null || this.nameInput == null) return;
+
+        String value = this.nameInput.getValue().strip();
+        if (!MINECRAFT_NAME.matcher(value).matches()) {
+            this.profileStatus = Component.translatable("ias.profile.name.invalid").withStyle(ChatFormatting.RED);
+            return;
+        }
+        if (value.equals(account.name())) {
+            this.profileStatus = Component.translatable("ias.profile.name.same").withStyle(ChatFormatting.YELLOW);
+            return;
+        }
+
+        this.minecraft.gui.setScreen(new ConfirmPopupScreen(this,
+                Component.translatable("ias.profile.name.confirm.title"),
+                Component.translatable("ias.profile.name.confirm", account.name(), value),
+                Component.translatable("ias.profile.name.apply"),
+                () -> this.minecraft.gui.setScreen(new AccountUpdatePopupScreen(this, account, AccountUpdatePopupScreen.Operation.NAME,
+                        value, null, MSAuth.SkinVariant.CLASSIC))));
     }
 
     /**
@@ -335,6 +573,14 @@ public final class AccountScreen extends Screen {
         //$ set_screen 'this.minecraft' 'login'
         this.minecraft.gui.setScreen(login);
         login.success(data, false);
+    }
+
+    private Screen currentScreen() {
+        //? if >=26.2 {
+        return this.minecraft.gui.screen();
+        //?} else {
+        /*return this.minecraft.screen;
+        *///?}
     }
 
     @Override

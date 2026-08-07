@@ -24,20 +24,29 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.DefaultPlayerSkin;
+import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.account.Account;
+import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.account.OfflineAccount;
 import ru.vidtu.ias.auth.LoginData;
+import ru.vidtu.ias.auth.handlers.LoginHandler;
+import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.config.IASStorage;
+import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
 import java.util.Locale;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 //? if >= 1.21.10 {
@@ -57,6 +66,31 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private static final Map<UUID, PlayerSkin> SKINS = new WeakHashMap<>(4);
 
     /**
+     * Name-change availability cache.
+     */
+    private static final Map<UUID, NameChangeState> NAME_CHANGES = new WeakHashMap<>(4);
+
+    /**
+     * Name-change availability check queue.
+     */
+    private static final Map<UUID, MicrosoftAccount> NAME_CHANGE_QUEUE = new LinkedHashMap<>();
+
+    /**
+     * Synchronization lock for name-change checks.
+     */
+    private static final Object NAME_CHANGE_LOCK = new Object();
+
+    /**
+     * Whether a name-change check worker is active.
+     */
+    private static boolean nameChangeWorkerRunning;
+
+    /**
+     * Delay between name-change checks, to avoid rate-limiting normal logins.
+     */
+    private static final long NAME_CHANGE_CHECK_DELAY_MS = 5000L;
+
+    /**
      * Logger for this class.
      */
     private static final Logger LOGGER = LoggerFactory.getLogger("IAS/AccountList");
@@ -65,6 +99,18 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * Parent screen.
      */
     private final AccountScreen screen;
+
+    /**
+     * Accounts marked for bulk operations.
+     */
+    private final Set<Account> selectedAccounts = new LinkedHashSet<>();
+
+    enum NameChangeState {
+        UNKNOWN,
+        CHECKING,
+        AVAILABLE,
+        UNAVAILABLE
+    }
 
     /**
      * Creates a new accounts list widget.
@@ -101,6 +147,8 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * @param query Search query
      */
     void update(String query) {
+        this.selectedAccounts.removeIf(account -> !IASStorage.ACCOUNTS.contains(account));
+
         // Add all if blank.
         if (query == null || query.isBlank()) {
             // Add every account.
@@ -175,6 +223,75 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         if (onComplete != null) onComplete.run();
     }
 
+    /**
+     * Copies a fresh session token for the selected account to the clipboard.
+     * Shows a confirmation screen first, since the token grants full access to the account.
+     * Does nothing if nothing is selected.
+     */
+    void copyToken() {
+        // Skip if nothing is selected.
+        AccountEntry selected = this.getSelected();
+        if (selected == null) return;
+        Account account = selected.account();
+
+        // Display confirmation screen before copying the sensitive token.
+        final Screen confirm = new ConfirmPopupScreen(this.screen,
+                Component.translatable("ias.copyToken.confirm.title"),
+                Component.translatable("ias.copyToken.confirm", account.name()),
+                Component.translatable("ias.copyToken.confirm.button"),
+                () -> this.doCopyToken(account));
+        //$ set_screen 'this.minecraft' confirm
+        this.minecraft.gui.setScreen(confirm);
+    }
+
+    /**
+     * Obtains a fresh token for the given account and copies it to the clipboard.
+     * Called only after the user has confirmed the action.
+     *
+     * @param account Account to copy the token of
+     */
+    private void doCopyToken(Account account) {
+        // Initialize and set the (re)login screen, used in copy-only mode.
+        LoginPopupScreen login = new LoginPopupScreen(this.screen, true);
+        //$ set_screen 'this.minecraft' 'login'
+        this.minecraft.gui.setScreen(login);
+
+        // Refresh online, if the account supports it.
+        if (account.canLogin()) {
+            IAS.executor().execute(() -> account.login(login, null));
+            return;
+        }
+
+        // Otherwise, fall back to the placeholder offline token, same as the offline login flow.
+        String name = account.name();
+        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", false);
+        login.success(data, false);
+    }
+
+    boolean hasMultiSelection() {
+        return !this.selectedAccounts.isEmpty();
+    }
+
+    boolean isMultiSelected(AccountEntry entry) {
+        return this.selectedAccounts.contains(entry.account());
+    }
+
+    void toggleMultiSelection(AccountEntry entry) {
+        Account account = entry.account();
+        if (!this.selectedAccounts.remove(account)) {
+            this.selectedAccounts.add(account);
+        }
+        this.screen.updateSelected();
+    }
+
+    void clearMultiSelection() {
+        if (this.selectedAccounts.isEmpty()) {
+            return;
+        }
+        this.selectedAccounts.clear();
+        this.screen.updateSelected();
+    }
+
     void edit() {
         // Skip if nothing is selected.
         AccountEntry selected = this.getSelected();
@@ -217,6 +334,11 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * @param confirm Whether to show the confirmation
      */
     void delete(boolean confirm) {
+        if (!this.selectedAccounts.isEmpty()) {
+            this.deleteSelected(confirm);
+            return;
+        }
+
         // Skip if nothing is selected.
         AccountEntry selected = this.getSelected();
         if (selected == null) return;
@@ -256,6 +378,34 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             // Update.
             this.update(this.screen.search().getValue());
         });
+        //$ set_screen 'this.minecraft' delete
+        this.minecraft.gui.setScreen(delete);
+    }
+
+    private void deleteSelected(boolean confirm) {
+        Set<Account> accounts = new LinkedHashSet<>(this.selectedAccounts);
+        if (accounts.isEmpty()) {
+            return;
+        }
+
+        Runnable remove = () -> {
+            IASStorage.ACCOUNTS.removeIf(accounts::contains);
+            this.selectedAccounts.clear();
+            try {
+                IAS.disclaimersStorage();
+                IAS.saveStorage();
+            } catch (Throwable t) {
+                LOGGER.error("IAS: Unable to save storage.", t);
+            }
+            this.update(this.screen.search().getValue());
+        };
+
+        if (!confirm) {
+            remove.run();
+            return;
+        }
+
+        final Screen delete = new DeletePopupScreen(this.screen, Component.translatable("ias.delete.confirm.multi", accounts.size()), remove);
         //$ set_screen 'this.minecraft' delete
         this.minecraft.gui.setScreen(delete);
     }
@@ -342,6 +492,120 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Return quick skin.
         return skin;
+    }
+
+    static void clearSkin(UUID uuid) {
+        SKINS.remove(uuid);
+    }
+
+    static void clearNameChange(UUID uuid) {
+        synchronized (NAME_CHANGE_LOCK) {
+            NAME_CHANGES.remove(uuid);
+            NAME_CHANGE_QUEUE.remove(uuid);
+        }
+    }
+
+    NameChangeState nameChangeState(AccountEntry entry) {
+        Account account = entry.account();
+        if (!(account instanceof MicrosoftAccount microsoft)) {
+            return NameChangeState.UNKNOWN;
+        }
+
+        UUID uuid = microsoft.uuid();
+        synchronized (NAME_CHANGE_LOCK) {
+            NameChangeState state = NAME_CHANGES.get(uuid);
+            if (state != null) {
+                return state;
+            }
+            NAME_CHANGES.put(uuid, NameChangeState.CHECKING);
+            NAME_CHANGE_QUEUE.putIfAbsent(uuid, microsoft);
+            if (!nameChangeWorkerRunning) {
+                nameChangeWorkerRunning = true;
+                this.scheduleNextNameChangeCheck(0L);
+            }
+        }
+        return NameChangeState.CHECKING;
+    }
+
+    private void scheduleNextNameChangeCheck(long delayMillis) {
+        CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS, IAS.executor()).execute(this::runNextNameChangeCheck);
+    }
+
+    private void runNextNameChangeCheck() {
+        MicrosoftAccount account;
+        synchronized (NAME_CHANGE_LOCK) {
+            if (NAME_CHANGE_QUEUE.isEmpty()) {
+                nameChangeWorkerRunning = false;
+                return;
+            }
+            UUID uuid = NAME_CHANGE_QUEUE.keySet().iterator().next();
+            account = NAME_CHANGE_QUEUE.remove(uuid);
+        }
+
+        MSAuth.nameChangeInfoFromNameMc(account.uuid())
+                .exceptionallyComposeAsync(publicError -> {
+                    FriendlyException friendly = FriendlyException.friendlyInChain(publicError);
+                    if (friendly != null && "ias.profile.name.unknown".equals(friendly.key())) {
+                        return this.loginForNameChange(account).thenComposeAsync(data -> MSAuth.nameChangeInfo(data.token()), IAS.executor());
+                    }
+                    return CompletableFuture.failedFuture(publicError);
+                }, IAS.executor())
+                .whenCompleteAsync((info, error) -> {
+                    UUID uuid = account.uuid();
+                    synchronized (NAME_CHANGE_LOCK) {
+                        if (error != null || info == null) {
+                            LOGGER.warn("IAS: Unable to check name-change availability for {}.", account, error);
+                            NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
+                        } else {
+                            NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
+                        }
+                    }
+                    this.scheduleNextNameChangeCheck(NAME_CHANGE_CHECK_DELAY_MS);
+                }, IAS.executor());
+    }
+
+    private CompletableFuture<LoginData> loginForNameChange(MicrosoftAccount account) {
+        CompletableFuture<LoginData> token = new CompletableFuture<>();
+        IAS.executor().execute(() -> account.login(new LoginHandler() {
+            @Override
+            public boolean cancelled() {
+                return AccountList.this.minecraft.gui.screen() != AccountList.this.screen;
+            }
+
+            @Override
+            public void stage(String stage, Object... args) {
+                // Row availability checks do not show global login progress.
+            }
+
+            @Override
+            public CompletableFuture<String> password() {
+                token.completeExceptionally(new IllegalStateException("Password required for name-change availability check."));
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public void success(LoginData data, boolean changed) {
+                if (changed) {
+                    AccountList.this.saveStorage();
+                }
+                token.complete(data);
+            }
+
+            @Override
+            public void error(Throwable error) {
+                token.completeExceptionally(error);
+            }
+        }, null));
+        return token;
+    }
+
+    private void saveStorage() {
+        try {
+            IAS.disclaimersStorage();
+            IAS.saveStorage();
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Unable to save storage.", t);
+        }
     }
 
     /**

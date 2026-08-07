@@ -158,6 +158,12 @@ public final class MicrosoftAccount implements Account {
     public static final Logger LOGGER = LoggerFactory.getLogger("IAS/MicrosoftAccount");
 
     /**
+     * Marker for cookie-backed accounts where the stored refresh field contains a cookie header.
+     */
+    @NotNull
+    public static final String COOKIE_HEADER_PREFIX = "ias:cookie-header:";
+
+    /**
      * Whether the account is insecurely stored.
      */
     private final boolean insecure;
@@ -243,6 +249,29 @@ public final class MicrosoftAccount implements Account {
         return this.uuid;
     }
 
+    /**
+     * Updates the stored profile identity after Minecraft Services confirms a change.
+     *
+     * @param uuid New account UUID
+     * @param name New account name
+     */
+    public void updateProfile(@NotNull UUID uuid, @NotNull String name) {
+        this.uuid = uuid;
+        this.name = name;
+    }
+
+    /**
+     * Creates the stored refresh marker used for cookie-backed accounts.
+     *
+     * @param cookieHeader HTTP cookie header used for refresh
+     * @return Stored refresh marker
+     */
+    @Contract(pure = true)
+    @NotNull
+    public static String cookieRefresh(@NotNull String cookieHeader) {
+        return COOKIE_HEADER_PREFIX + cookieHeader;
+    }
+
     @Override
     public void login(@NotNull LoginHandler handler, Runnable onComplete) {
         try {
@@ -257,6 +286,7 @@ public final class MicrosoftAccount implements Account {
             Holder<Crypt> crypt = new Holder<>();
             Holder<String> access = new Holder<>();
             Holder<String> refresh = new Holder<>();
+            Holder<String> cookieHeader = new Holder<>("");
             Holder<Boolean> recrypt = new Holder<>(false);
 
             // Read the crypt.
@@ -304,8 +334,12 @@ public final class MicrosoftAccount implements Account {
                     // Read the access token.
                     access.set(in.readUTF());
 
-                    // Read the refresh token.
-                    refresh.set(in.readUTF());
+                    // Read the refresh token, or the saved cookie refresh marker for cookie-backed imports.
+                    String refreshToken = in.readUTF();
+                    refresh.set(refreshToken);
+                    if (refreshToken.startsWith(COOKIE_HEADER_PREFIX)) {
+                        cookieHeader.set(refreshToken.substring(COOKIE_HEADER_PREFIX.length()));
+                    }
 
                     // Verify the buffer.
                     int available = in.available();
@@ -330,6 +364,41 @@ public final class MicrosoftAccount implements Account {
                 return MSAuth.mcaToMcp(access.get()).exceptionallyComposeAsync(original -> {
                     // Skip if cancelled.
                     if (handler.cancelled()) return CompletableFuture.completedFuture(null);
+
+                    String cookie = cookieHeader.get();
+                    if (cookie != null && !cookie.isBlank()) {
+                        LOGGER.warn("IAS: MCA is (probably) expired. Refreshing from stored cookies...");
+                        LOGGER.info("IAS: Converting cookies to MCA...");
+                        handler.stage(COOKIES_TO_MSA_MSR);
+
+                        recrypt.set(true);
+
+                        return MSAuth.cookiesToMcaFromCookies(cookie).thenComposeAsync(result -> {
+                            if (result == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
+
+                            access.set(result.mca());
+                            String nextRefresh = result.refresh();
+                            refresh.set(nextRefresh == null || nextRefresh.isBlank() ? cookieRefresh(cookie) : nextRefresh);
+
+                            LOGGER.info("IAS: Converting MCA TO MCP... (cookie refreshed)");
+                            handler.stage(MCA_TO_MCP);
+
+                            return MSAuth.mcaToMcp(result.mca());
+                        }, IAS.executor()).exceptionallyAsync(t -> {
+                            t.addSuppressed(original);
+
+                            if (IUtils.anyInCausalChain(t, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
+                                throw new FriendlyException("Unable to connect to cookie auth servers.", t, "ias.error.connect");
+                            }
+
+                            FriendlyException friendly = FriendlyException.friendlyInChain(t);
+                            if (friendly != null) {
+                                throw friendly;
+                            }
+
+                            throw new RuntimeException("Unable to refresh cookie session.", t);
+                        }, IAS.executor());
+                    }
 
                     String refreshToken = refresh.get();
                     if (refreshToken == null || refreshToken.isBlank()) {
@@ -558,5 +627,27 @@ public final class MicrosoftAccount implements Account {
 
         // Create and return.
         return new MicrosoftAccount(insecure, uuid, name, data);
+    }
+
+    /**
+     * Reads a version 4 account from the input.
+     *
+     * @param in Target input
+     * @return Read account
+     * @throws IOException On I/O error
+     */
+    @CheckReturnValue
+    @NotNull
+    public static MicrosoftAccount readV4(@NotNull DataInput in) throws IOException {
+        MicrosoftAccount account = read(in);
+
+        // v4 stored local skin PNG metadata after the normal Microsoft account data.
+        // Keep the login data and drop those local paths while migrating back to the current format.
+        in.readBoolean();
+        in.readUTF();
+        in.readUTF();
+        in.readUTF();
+
+        return account;
     }
 }

@@ -44,14 +44,18 @@ import ru.vidtu.ias.auth.handlers.CreateHandler;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.auth.microsoft.MSAccountFactory;
 import ru.vidtu.ias.config.IASConfig;
+import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.crypt.PasswordCrypt;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -139,6 +143,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Saved path while toggling input modes.
      */
     private String savedPath = "";
+
+    /**
+     * Cookie files selected by the native multi-file picker.
+     */
+    private List<String> selectedCookieFiles = List.of();
 
     /**
      * Saved paste text while toggling input modes.
@@ -291,6 +300,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             if (!this.savedPath.isBlank()) {
                 this.pathInput.setValue(this.savedPath);
             }
+            this.pathInput.setResponder(value -> {
+                if (!Objects.equals(value, this.savedPath)) {
+                    this.selectedCookieFiles = List.of();
+                }
+            });
             this.addRenderableWidget(this.pathInput);
 
             PopupButton browseBtn = new PopupButton(inputX + PATH_WIDTH, inputY, INPUT_WIDTH - PATH_WIDTH, 20,
@@ -317,6 +331,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.pasteMode = pasteMode;
         this.error = Float.NaN;
         this.errorNote = null;
+        this.selectedCookieFiles = List.of();
         //? if >=1.21.11 {
         this.init(this.width, this.height);
         //?} else
@@ -348,6 +363,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
         } else {
             if (this.pathInput == null) return;
+            if (!this.selectedCookieFiles.isEmpty()) {
+                this.importCookieFiles(this.selectedCookieFiles);
+                return;
+            }
             raw = this.pathInput.getValue().strip();
             if (raw.isBlank()) return;
         }
@@ -365,40 +384,144 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         //?} else
         /*this.init(this.minecraft, this.width, this.height);*/
 
-        IAS.executor().execute(() -> {
-            try {
-                if (this.closed) {
-                    return;
-                }
+        IAS.executor().execute(() -> this.startCreateFromSource(source, fromPath, this));
+    }
 
-                this.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
+    private void importCookieFiles(List<String> sources) {
+        assert this.minecraft != null;
+        if (this.crypt == null || this.importing || sources.isEmpty()) return;
 
-                CookieParser.ParsedCookies cookies = fromPath
-                        ? CookieParser.fromPath(source)
-                        : CookieParser.fromText(source);
+        this.importing = true;
+        this.error = Float.NaN;
+        this.errorNote = null;
+        this.selectedCookieFiles = List.copyOf(sources);
+        this.stage(Component.translatable("ias.cookie.multi.progress", 1, sources.size()).withStyle(ChatFormatting.YELLOW));
 
-                if (this.closed) {
-                    return;
-                }
+        //? if >=1.21.11 {
+        this.init(this.width, this.height);
+        //?} else
+        /*this.init(this.minecraft, this.width, this.height);*/
 
-                if (!cookies.refreshToken().isBlank()) {
-                    MSAuth.minecraftRefreshToMsaMsr(cookies.refreshToken())
-                            .thenComposeAsync(ms -> MSAccountFactory.createFromMinecraftRefresh(this.crypt, ms, this), IAS.executor())
-                            .exceptionallyAsync(t -> {
-                                this.error(t);
-                                return null;
-                            }, IAS.executor());
-                    return;
-                }
+        IAS.executor().execute(() -> this.importCookieFileAt(this.selectedCookieFiles, 0, 0, 0, 0));
+    }
 
-                MSAccountFactory.createFromCookies(this.crypt, cookies.toSisuCookieHeader(), this).exceptionallyAsync(t -> {
-                    this.error(t);
-                    return null;
-                }, IAS.executor());
-            } catch (Throwable t) {
-                this.error(t);
+    private void importCookieFileAt(List<String> sources, int index, int imported, int failed, int duplicate) {
+        if (this.closed) {
+            return;
+        }
+        if (index >= sources.size()) {
+            this.finishCookieFileImport(imported, failed, duplicate, sources.size());
+            return;
+        }
+
+        int number = index + 1;
+        this.stage(Component.translatable("ias.cookie.multi.progress", number, sources.size()).withStyle(ChatFormatting.YELLOW));
+        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
+        this.startCreateFromSource(sources.get(index), true, new CreateHandler() {
+            @Override
+            public boolean cancelled() {
+                return CookiePopupScreen.this.closed;
+            }
+
+            @Override
+            public void stage(String stage, Object... args) {
+                CookiePopupScreen.this.stage(stage, args);
+            }
+
+            @Override
+            public void success(MicrosoftAccount account) {
+                future.complete(account);
+            }
+
+            @Override
+            public void error(Throwable error) {
+                future.completeExceptionally(error);
             }
         });
+
+        future.whenCompleteAsync((account, error) -> {
+            if (this.closed) {
+                return;
+            }
+            if (error != null || account == null) {
+                LOGGER.warn("IAS: Cookie file {}/{} failed during batch import: {}", number, sources.size(), sources.get(index), error);
+                this.importCookieFileAt(sources, index + 1, imported, failed + 1, duplicate);
+                return;
+            }
+
+            boolean wasDuplicate = this.storeImportedAccount(account);
+            this.importCookieFileAt(sources, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0));
+        }, IAS.executor());
+    }
+
+    private boolean storeImportedAccount(MicrosoftAccount account) {
+        boolean duplicate = IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
+        IASStorage.ACCOUNTS.add(account);
+        try {
+            IAS.disclaimersStorage();
+            IAS.saveStorage();
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Unable to save storage.", t);
+        }
+        return duplicate;
+    }
+
+    private void finishCookieFileImport(int imported, int failed, int duplicate, int total) {
+        assert this.minecraft != null;
+        this.minecraft.execute(() -> {
+            if (this.closed) {
+                return;
+            }
+            this.importing = false;
+            this.selectedCookieFiles = List.of();
+            synchronized (this.lock) {
+                this.stage = Component.translatable("ias.cookie.multi.done", imported, total, failed, duplicate).withStyle(failed == 0 ? ChatFormatting.GREEN : ChatFormatting.YELLOW);
+                this.label = null;
+                this.error = 0.0F;
+            }
+            if (this.parent instanceof AccountScreen accountScreen) {
+                accountScreen.refreshAccounts();
+            }
+            //? if >=1.21.11 {
+            this.init(this.width, this.height);
+            //?} else
+            /*this.init(this.minecraft, this.width, this.height);*/
+        });
+    }
+
+    private void startCreateFromSource(String source, boolean fromPath, CreateHandler createHandler) {
+        try {
+            if (this.closed) {
+                return;
+            }
+
+            createHandler.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
+
+            CookieParser.ParsedCookies cookies = fromPath
+                    ? CookieParser.fromPath(source)
+                    : CookieParser.fromText(source);
+
+            if (this.closed) {
+                return;
+            }
+
+            if (!cookies.refreshToken().isBlank()) {
+                MSAuth.minecraftRefreshToMsaMsr(cookies.refreshToken())
+                        .thenComposeAsync(ms -> MSAccountFactory.createFromMinecraftRefresh(this.crypt, ms, createHandler), IAS.executor())
+                        .exceptionallyAsync(t -> {
+                            createHandler.error(t);
+                            return null;
+                        }, IAS.executor());
+                return;
+            }
+
+            MSAccountFactory.createFromCookies(this.crypt, cookies.toSisuCookieHeader(), createHandler).exceptionallyAsync(t -> {
+                createHandler.error(t);
+                return null;
+            }, IAS.executor());
+        } catch (Throwable t) {
+            createHandler.error(t);
+        }
     }
 
     /**
@@ -430,8 +553,8 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         final String dialogTitle = Component.translatable("ias.cookie.browse").getString();
         IAS.executor().execute(() -> {
             try {
-                String path = CookieFileDialogs.pickFile(dialogTitle, startPath);
-                if (path == null || this.closed) {
+                List<String> paths = CookieFileDialogs.pickCookieFiles(dialogTitle, startPath);
+                if (paths.isEmpty() || this.closed) {
                     return;
                 }
 
@@ -439,9 +562,12 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     if (this.closed || this != this.currentScreen()) {
                         return;
                     }
-                    this.savedPath = path;
+                    this.selectedCookieFiles = List.copyOf(paths);
+                    this.savedPath = paths.size() == 1
+                            ? paths.get(0)
+                            : Component.translatable("ias.cookie.selected", paths.size()).getString();
                     if (this.pathInput != null) {
-                        this.pathInput.setValue(path);
+                        this.pathInput.setValue(this.savedPath);
                     }
                 });
             } catch (Throwable t) {
@@ -611,7 +737,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     @Override
     public void stage(String stage, Object... args) {
         assert this.minecraft != null;
-        Component component = Component.translatable(stage, args).withStyle(ChatFormatting.YELLOW);
+        this.stage(Component.translatable(stage, args).withStyle(ChatFormatting.YELLOW));
+    }
+
+    private void stage(Component component) {
+        assert this.minecraft != null;
         this.minecraft.execute(() -> {
             if (this.closed || this != this.currentScreen()) {
                 return;

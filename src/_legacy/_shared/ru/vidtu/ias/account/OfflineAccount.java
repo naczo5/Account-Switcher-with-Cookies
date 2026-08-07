@@ -206,6 +206,26 @@ public final class OfflineAccount implements Account {
     }
 
     /**
+     * Reads the account (version 4) from the input.
+     *
+     * @param in Target input
+     * @return Read account
+     * @throws IOException On I/O error
+     */
+    @CheckReturnValue
+    @NotNull
+    public static OfflineAccount readV4(DataInput in) throws IOException {
+        OfflineAccount account = readV2(in);
+
+        // v4 stored local skin PNG metadata after the normal offline account data.
+        // The current skin preview uses the Minecraft skin APIs, so these paths are ignored.
+        in.readUTF();
+        in.readUTF();
+
+        return account;
+    }
+
+    /**
      * Creates a conventional offline UUID from name.
      *
      * @param name Target name

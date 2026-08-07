@@ -24,23 +24,20 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 //?} else
 /*import net.minecraft.client.gui.GuiGraphics;*/
 import net.minecraft.client.gui.components.MultiLineLabel;
-import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import org.joml.Matrix3x2fStack;
-import ru.vidtu.ias.account.Account;
 import ru.vidtu.ias.platform.IStonecutter;
 
-import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
- * Delete confirmation screen.
+ * Small confirmation popup with custom text and action.
  *
- * @author VidTu
+ * @author Articuling
  */
-final class DeletePopupScreen extends Screen {
+final class ConfirmPopupScreen extends Screen {
     /**
      * Parent screen.
      */
@@ -52,6 +49,11 @@ final class DeletePopupScreen extends Screen {
     private final Component prompt;
 
     /**
+     * Confirmation button label.
+     */
+    private final Component confirm;
+
+    /**
      * Callback handler.
      */
     private final Runnable handler;
@@ -61,37 +63,18 @@ final class DeletePopupScreen extends Screen {
      */
     private MultiLineLabel label;
 
-    /**
-     * Creates a new delete confirmation screen.
-     *
-     * @param parent  Parent screen
-     * @param account Account to delete
-     * @param handler Callback handler
-     */
-    DeletePopupScreen(Screen parent, Account account, Runnable handler) {
-        this(parent, Component.translatable("ias.delete.confirm", account.name()), handler);
-    }
-
-    /**
-     * Creates a new delete confirmation screen.
-     *
-     * @param parent  Parent screen
-     * @param prompt  Confirmation prompt
-     * @param handler Callback handler
-     */
-    DeletePopupScreen(Screen parent, Component prompt, Runnable handler) {
-        super(Component.translatable("ias.delete"));
+    ConfirmPopupScreen(Screen parent, Component title, Component prompt, Component confirm, Runnable handler) {
+        super(title);
         this.parent = parent;
         this.prompt = prompt;
+        this.confirm = confirm;
         this.handler = handler;
     }
 
     @Override
     protected void init() {
-        // Bruh.
         assert this.minecraft != null;
 
-        // Init parent.
         if (this.parent != null) {
             //? if >=1.21.11 {
             this.parent.init(this.width, this.height);
@@ -99,24 +82,16 @@ final class DeletePopupScreen extends Screen {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        // Add delete button.
-        PopupButton button = new PopupButton(this.width / 2 - 75, this.height / 2 + 49 - 22, 74, 20, this.title, btn -> {
-            // Delete.
+        PopupButton confirmButton = new PopupButton(this.width / 2 - 75, this.height / 2 + 49 - 22, 74, 20,
+                this.confirm, btn -> {
             this.handler.run();
-
-            // Close.
-            this.onClose();
         }, Supplier::get);
-        button.setTooltip(Tooltip.create(Component.translatable("ias.delete.hint", Component.translatable("key.keyboard.left.shift"))));
-        button.setTooltipDelay(Duration.ofMillis(250L));
-        button.color(1.0F, 0.5F, 0.5F, true);
-        this.addRenderableWidget(button);
+        confirmButton.color(0.5F, 1.0F, 0.5F, true);
+        this.addRenderableWidget(confirmButton);
 
-        // Add cancel button.
         this.addRenderableWidget(new PopupButton(this.width / 2 + 1, this.height / 2 + 49 - 22, 74, 20,
                 CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
 
-        // Build label.
         this.label = MultiLineLabel.create(this.font, this.prompt, 150);
     }
 
@@ -125,17 +100,14 @@ final class DeletePopupScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
     //?} else
     /*public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {*/
-        // Bruh.
         assert this.minecraft != null;
         Matrix3x2fStack pose = graphics.pose();
 
-        // Render background and widgets.
         //? if >=26.1 {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         //?} else
         /*super.render(graphics, mouseX, mouseY, delta);*/
 
-        // Render the title.
         pose.pushMatrix();
         pose.scale(2.0F, 2.0F);
         //? if >=26.1 {
@@ -144,7 +116,6 @@ final class DeletePopupScreen extends Screen {
         /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 49 / 2, 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
-        // Render the prompt.
         IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - 4);
     }
 
@@ -153,12 +124,9 @@ final class DeletePopupScreen extends Screen {
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
     //?} else
     /*public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float delta) {*/
-        // Bruh.
         assert this.minecraft != null;
 
-        // Render transparent background if parent exists.
         if (this.parent != null) {
-            // Render gradient.
             //? if >=26.1 {
             this.parent.extractRenderStateWithTooltipAndSubtitles(graphics, 0, 0, delta);
             //?} elif >= 1.21.10 {
@@ -174,7 +142,6 @@ final class DeletePopupScreen extends Screen {
             /*super.renderBackground(graphics, mouseX, mouseY, delta);*/
         }
 
-        // Render "form".
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         graphics.fill(centerX - 80, centerY - 50, centerX + 80, centerY + 50, 0xF8_20_20_30);
@@ -183,41 +150,14 @@ final class DeletePopupScreen extends Screen {
     }
 
     @Override
-    //? if >=1.21.10 {
-    public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-        boolean select = event.isSelection();
-    //?} else {
-    /*public boolean keyPressed(int key, int scan, int mods) {
-        boolean select = net.minecraft.client.gui.navigation.CommonInputs.selected(key);
-    *///?}
-        // Enter to confirm.
-        if (select) {
-            // Delete.
-            this.handler.run();
-
-            // Close.
-            this.onClose();
-            return true;
-        }
-
-        //? if >=1.21.10 {
-        return super.keyPressed(event);
-        //?} else
-        /*return super.keyPressed(key, scan, mods);*/
-    }
-
-    @Override
     public void onClose() {
-        // Bruh.
         assert this.minecraft != null;
-
-        // Close to parent.
         //$set_screen 'this.minecraft' 'this.parent'
         this.minecraft.gui.setScreen(this.parent);
     }
 
     @Override
     public String toString() {
-        return "DeletePopupScreen{}";
+        return "ConfirmPopupScreen{}";
     }
 }

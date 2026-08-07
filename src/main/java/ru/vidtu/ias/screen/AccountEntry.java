@@ -180,6 +180,45 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
         //?} else
         /*graphics.drawString(this.minecraft.font, this.account.name(), x + 10, y, color);*/
 
+        // Render exact name-change availability when it can be checked.
+        AccountList.NameChangeState nameChange = this.list.nameChangeState(this);
+        if (nameChange != AccountList.NameChangeState.UNKNOWN || this.account.canLogin()) {
+            Component marker = switch (nameChange) {
+                case AVAILABLE -> Component.literal("\u2713");
+                case UNAVAILABLE -> Component.literal("\u2715");
+                case CHECKING -> Component.literal("?");
+                case UNKNOWN -> Component.literal("?");
+            };
+            int markerColor = switch (nameChange) {
+                case AVAILABLE -> 0xFF_00_FF_00;
+                case UNAVAILABLE -> 0xFF_FF_40_40;
+                case CHECKING -> 0xFF_FF_FF_00;
+                case UNKNOWN -> 0xFF_80_80_80;
+            };
+            int markerX = Math.min(x + 10 + this.minecraft.font.width(this.account.name()) + 5, x + width - 40);
+            //? if >=26.1 {
+            graphics.text(this.minecraft.font, marker, markerX, y, markerColor);
+            //?} else
+            /*graphics.drawString(this.minecraft.font, marker, markerX, y, markerColor);*/
+            if (mouseX >= markerX && mouseX <= markerX + 8 && mouseY >= y && mouseY <= y + height) {
+                String key = switch (nameChange) {
+                    case AVAILABLE -> "ias.profile.name.available";
+                    case UNAVAILABLE -> "ias.profile.name.unavailable";
+                    case CHECKING -> "ias.profile.name.checking";
+                    case UNKNOWN -> "ias.profile.name.unknown";
+                };
+                graphics.setTooltipForNextFrame(Component.translatable(key), mouseX, mouseY);
+            }
+        }
+
+        // Render bulk-selection marker.
+        if (this.list.isMultiSelected(this)) {
+            //? if >=26.1 {
+            graphics.text(this.minecraft.font, Component.literal("+"), x - 10, y, 0xFF_00_FF_FF);
+            //?} else
+            /*graphics.drawString(this.minecraft.font, Component.literal("+"), x - 10, y, 0xFF_00_FF_FF);*/
+        }
+
         // Render warning if insecure.
         if (this.account.insecure()) {
             boolean warning = (System.nanoTime() / 1_000_000_000L) % 2L == 0;
@@ -229,6 +268,17 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
         double mouseX = event.x();
     //?} else
     /*public boolean mouseClicked(double mouseX, double mouseY, int button) {*/
+        // Ctrl-click toggles bulk selection for deletion.
+        //? if >=1.21.10 {
+        if (event.hasControlDown()) {
+            this.list.setSelected(this);
+            this.list.toggleMultiSelection(this);
+            return true;
+        }
+        //?}
+
+        this.list.clearMultiSelection();
+
         // Swap if selected.
         if (this.equals(this.list.getFocused()) || this.equals(this.list.getSelected())) {
             int right = this.list.getRowRight();

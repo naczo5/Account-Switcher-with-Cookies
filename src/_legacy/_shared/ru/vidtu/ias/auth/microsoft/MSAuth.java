@@ -42,11 +42,20 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Class for Microsoft authentication system.
@@ -96,12 +105,48 @@ public final class MSAuth {
     private static final String MINECRAFT_OAUTH_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
 
     /**
+     * ISO-8601 timestamps exposed on NameMC profile history pages.
+     */
+    @NotNull
+    private static final Pattern NAMEMC_TIMESTAMP = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z");
+
+    /**
      * MCA token plus optional refresh from cookie-based import.
      *
      * @param mca     Minecraft access token
      * @param refresh Microsoft refresh token, may be empty for cookie-only accounts
      */
     public record CookieMcaResult(@NotNull String mca, @NotNull String refresh) {
+    }
+
+    /**
+     * Minecraft account name-change state.
+     *
+     * @param allowed   Whether the authenticated account can change its name right now
+     * @param createdAt Optional account creation timestamp
+     * @param changedAt Optional last name-change timestamp
+     */
+    public record NameChangeInfo(boolean allowed, @Nullable String createdAt, @Nullable String changedAt) {
+    }
+
+    /**
+     * Minecraft skin model variant.
+     */
+    public enum SkinVariant {
+        CLASSIC("classic"),
+        SLIM("slim");
+
+        @NotNull
+        private final String apiName;
+
+        SkinVariant(@NotNull String apiName) {
+            this.apiName = apiName;
+        }
+
+        @NotNull
+        public String apiName() {
+            return this.apiName;
+        }
     }
 
     /**
@@ -140,6 +185,9 @@ public final class MSAuth {
             try {
                 // Check the code.
                 int status = response.statusCode();
+                if (status == 429) {
+                    throw new FriendlyException("Minecraft authentication is rate-limited.", "ias.error.rateLimited");
+                }
                 if (status != HttpURLConnection.HTTP_OK) {
                     throw new IllegalArgumentException("Invalid status code: " + status);
                 }
@@ -498,6 +546,9 @@ public final class MSAuth {
                 }
 
                 // Other errors.
+                if (status == 429) {
+                    throw new FriendlyException("Minecraft profile lookup is rate-limited.", "ias.error.rateLimited");
+                }
                 if (status != HttpURLConnection.HTTP_OK) {
                     throw new IllegalArgumentException("Invalid status code: " + status);
                 }
@@ -556,6 +607,9 @@ public final class MSAuth {
             try {
                 // Check the code.
                 int status = response.statusCode();
+                if (status == 429) {
+                    throw new FriendlyException("Minecraft name-change check is rate-limited.", "ias.error.rateLimited");
+                }
                 if (status != HttpURLConnection.HTTP_OK) {
                     throw new IllegalArgumentException("Invalid status code: " + status);
                 }
@@ -616,6 +670,205 @@ public final class MSAuth {
                 String message = "Unable to convert Minecraft Access (MCA) token to Minecraft Profile (MCP) (" + response + " with " + response.headers() + "): " + response.body();
                 message = message.replace(access, "[MCA]");
                 throw new RuntimeException(message, t);
+            }
+        }, IAS.executor());
+    }
+
+    /**
+     * Gets the authenticated profile's name-change state.
+     *
+     * @param access Minecraft Access (MCA) token
+     * @return Future with name-change state
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<NameChangeInfo> nameChangeInfo(@NotNull String access) {
+        return CLIENT.sendAsync(HttpRequest.newBuilder()
+                .uri(URI.create("https://api.minecraftservices.com/minecraft/profile/namechange"))
+                .header("User-Agent", IAS.USER_AGENT)
+                .header("Authorization", "Bearer " + access)
+                .header("Accept", "application/json")
+                .timeout(IAS.TIMEOUT)
+                .GET()
+                .build(), HttpResponse.BodyHandlers.ofString()).thenApplyAsync(response -> {
+            try {
+                int status = response.statusCode();
+                if (status != HttpURLConnection.HTTP_OK) {
+                    throw new IllegalArgumentException("Invalid status code: " + status);
+                }
+
+                JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
+                Objects.requireNonNull(json, "Response is null");
+                boolean allowed = json.has("nameChangeAllowed") && json.get("nameChangeAllowed").getAsBoolean();
+                String createdAt = json.has("createdAt") && !json.get("createdAt").isJsonNull()
+                        ? json.get("createdAt").getAsString()
+                        : null;
+                String changedAt = json.has("changedAt") && !json.get("changedAt").isJsonNull()
+                        ? json.get("changedAt").getAsString()
+                        : null;
+                return new NameChangeInfo(allowed, createdAt, changedAt);
+            } catch (Throwable t) {
+                String message = "Unable to query Minecraft profile name-change state (" + response + " with " + response.headers() + "): " + response.body();
+                message = message.replace(access, "[MCA]");
+                throw new RuntimeException(message, t);
+            }
+        }, IAS.executor());
+    }
+
+    /**
+     * Infers name-change availability from public NameMC username history.
+     *
+     * @param uuid Minecraft profile UUID
+     * @return Future with inferred name-change state
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<NameChangeInfo> nameChangeInfoFromNameMc(@NotNull UUID uuid) {
+        return CLIENT.sendAsync(HttpRequest.newBuilder()
+                .uri(URI.create("https://namemc.com/profile/" + uuid))
+                .header("User-Agent", COOKIE_AUTH_USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .timeout(IAS.TIMEOUT)
+                .GET()
+                .build(), HttpResponse.BodyHandlers.ofString()).thenApplyAsync(response -> {
+            try {
+                int status = response.statusCode();
+                if (status != HttpURLConnection.HTTP_OK) {
+                    throw new IllegalArgumentException("Invalid status code: " + status);
+                }
+
+                String body = response.body();
+                int start = body.indexOf("Name History");
+                if (start < 0) {
+                    throw new IllegalArgumentException("NameMC profile has no visible name history section.");
+                }
+                int end = body.length();
+                for (String marker : new String[]{"Favorite Servers", "Skins", "Capes", "Head Command"}) {
+                    int markerIndex = body.indexOf(marker, start);
+                    if (markerIndex > start && markerIndex < end) {
+                        end = markerIndex;
+                    }
+                }
+                String history = body.substring(start, end);
+
+                Instant latest = null;
+                Matcher matcher = NAMEMC_TIMESTAMP.matcher(history);
+                while (matcher.find()) {
+                    Instant found = Instant.parse(matcher.group());
+                    if (latest == null || found.isAfter(latest)) {
+                        latest = found;
+                    }
+                }
+                if (latest == null) {
+                    throw new FriendlyException("NameMC profile has no public name-change timestamp.", "ias.profile.name.unknown");
+                }
+
+                boolean allowed = !latest.plus(30L, ChronoUnit.DAYS).isAfter(Instant.now());
+                return new NameChangeInfo(allowed, null, latest.toString());
+            } catch (Throwable t) {
+                throw new RuntimeException("Unable to infer Minecraft profile name-change state from NameMC (" + response + "): " + response.body(), t);
+            }
+        }, IAS.executor());
+    }
+
+    /**
+     * Changes the authenticated Minecraft profile name.
+     *
+     * @param access Minecraft Access (MCA) token
+     * @param name   New Minecraft profile name
+     * @return Future with refreshed profile
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<MCProfile> changeName(@NotNull String access, @NotNull String name) {
+        return CLIENT.sendAsync(HttpRequest.newBuilder()
+                .uri(URI.create("https://api.minecraftservices.com/minecraft/profile/name/" + URLEncoder.encode(name, StandardCharsets.UTF_8)))
+                .header("User-Agent", IAS.USER_AGENT)
+                .header("Authorization", "Bearer " + access)
+                .header("Accept", "application/json")
+                .timeout(IAS.TIMEOUT)
+                .PUT(HttpRequest.BodyPublishers.noBody())
+                .build(), HttpResponse.BodyHandlers.ofString()).thenApplyAsync(response -> {
+            try {
+                int status = response.statusCode();
+                if (status == HttpURLConnection.HTTP_BAD_REQUEST || status == HttpURLConnection.HTTP_FORBIDDEN) {
+                    throw new FriendlyException("Minecraft name is unavailable or cannot be changed right now.", "ias.profile.name.failed");
+                }
+                if (status == 429) {
+                    throw new FriendlyException("Minecraft name change is rate-limited.", "ias.profile.name.rateLimited");
+                }
+                if (status != HttpURLConnection.HTTP_OK) {
+                    throw new IllegalArgumentException("Invalid status code: " + status);
+                }
+
+                JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
+                Objects.requireNonNull(json, "Response is null");
+                return MCProfile.fromJson(json);
+            } catch (FriendlyException e) {
+                throw e;
+            } catch (Throwable t) {
+                String message = "Unable to change Minecraft profile name to '" + name + "' (" + response + " with " + response.headers() + "): " + response.body();
+                message = message.replace(access, "[MCA]");
+                throw new RuntimeException(message, t);
+            }
+        }, IAS.executor());
+    }
+
+    /**
+     * Uploads a Minecraft profile skin PNG.
+     *
+     * @param access  Minecraft Access (MCA) token
+     * @param skinPng Skin PNG file
+     * @param variant Skin model variant
+     * @return Future with refreshed profile
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<MCProfile> uploadSkin(@NotNull String access, @NotNull Path skinPng, @NotNull SkinVariant variant) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                byte[] png = Files.readAllBytes(skinPng);
+                String boundary = "ias-" + UUID.randomUUID();
+                List<byte[]> parts = new ArrayList<>(4);
+                parts.add(("--" + boundary + "\r\n" +
+                        "Content-Disposition: form-data; name=\"variant\"\r\n\r\n" +
+                        variant.apiName() + "\r\n").getBytes(StandardCharsets.UTF_8));
+                parts.add(("--" + boundary + "\r\n" +
+                        "Content-Disposition: form-data; name=\"file\"; filename=\"" + skinPng.getFileName() + "\"\r\n" +
+                        "Content-Type: image/png\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                parts.add(png);
+                parts.add(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+                return Map.entry(boundary, parts);
+            } catch (Throwable t) {
+                throw new FriendlyException("Unable to read the selected skin PNG.", t, "ias.profile.skin.file");
+            }
+        }, IAS.executor()).thenComposeAsync(upload -> CLIENT.sendAsync(HttpRequest.newBuilder()
+                .uri(URI.create("https://api.minecraftservices.com/minecraft/profile/skins"))
+                .header("User-Agent", IAS.USER_AGENT)
+                .header("Authorization", "Bearer " + access)
+                .header("Accept", "application/json")
+                .header("Content-Type", "multipart/form-data; boundary=" + upload.getKey())
+                .timeout(IAS.TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofByteArrays(upload.getValue()))
+                .build(), HttpResponse.BodyHandlers.ofString()), IAS.executor()).thenComposeAsync(response -> {
+            try {
+                int status = response.statusCode();
+                if (status == HttpURLConnection.HTTP_BAD_REQUEST || status == HttpURLConnection.HTTP_FORBIDDEN) {
+                    throw new FriendlyException("Minecraft rejected the selected skin PNG.", "ias.profile.skin.failed");
+                }
+                if (status == 429) {
+                    throw new FriendlyException("Minecraft skin upload is rate-limited.", "ias.profile.skin.rateLimited");
+                }
+                if (status != HttpURLConnection.HTTP_OK && status != HttpURLConnection.HTTP_NO_CONTENT) {
+                    throw new IllegalArgumentException("Invalid status code: " + status);
+                }
+                return mcaToMcp(access);
+            } catch (FriendlyException e) {
+                return CompletableFuture.failedFuture(e);
+            } catch (Throwable t) {
+                String message = "Unable to upload Minecraft profile skin (" + response + " with " + response.headers() + "): " + response.body();
+                message = message.replace(access, "[MCA]");
+                return CompletableFuture.failedFuture(new RuntimeException(message, t));
             }
         }, IAS.executor());
     }

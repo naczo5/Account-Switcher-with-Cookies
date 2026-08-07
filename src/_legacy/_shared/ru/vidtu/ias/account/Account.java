@@ -149,7 +149,9 @@ public sealed interface Account permits OfflineAccount, MicrosoftAccount {
         return switch (type) {
             case "ias:offline_v1" -> OfflineAccount.readV1(in);
             case "ias:offline_v2" -> OfflineAccount.readV2(in);
+            case "ias:offline_v4" -> OfflineAccount.readV4(in);
             case "ias:microsoft_v1" -> MicrosoftAccount.read(in);
+            case "ias:microsoft_v4" -> MicrosoftAccount.readV4(in);
             default -> throw new IllegalArgumentException("Unknown account type: " + type);
         };
     }
