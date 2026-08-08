@@ -83,12 +83,27 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     /**
      * Whether a name-change check worker is active.
      */
-    private static boolean nameChangeWorkerRunning;
+    private static int nameChangePublicWorkers;
 
     /**
-     * Delay between name-change checks, to avoid rate-limiting normal logins.
+     * Name-change availability token fallback queue.
      */
-    private static final long NAME_CHANGE_CHECK_DELAY_MS = 5000L;
+    private static final Map<UUID, MicrosoftAccount> NAME_CHANGE_TOKEN_QUEUE = new LinkedHashMap<>();
+
+    /**
+     * Whether a token fallback worker is active.
+     */
+    private static boolean nameChangeTokenWorkerRunning;
+
+    /**
+     * Maximum concurrent NameMC checks.
+     */
+    private static final int NAME_CHANGE_PUBLIC_WORKERS = 6;
+
+    /**
+     * Delay between token fallback checks, to avoid rate-limiting normal logins.
+     */
+    private static final long NAME_CHANGE_TOKEN_CHECK_DELAY_MS = 5000L;
 
     /**
      * Logger for this class.
@@ -502,7 +517,26 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         synchronized (NAME_CHANGE_LOCK) {
             NAME_CHANGES.remove(uuid);
             NAME_CHANGE_QUEUE.remove(uuid);
+            NAME_CHANGE_TOKEN_QUEUE.remove(uuid);
         }
+    }
+
+    static void updateNameChangeFromToken(UUID uuid, String token) {
+        synchronized (NAME_CHANGE_LOCK) {
+            NAME_CHANGES.put(uuid, NameChangeState.CHECKING);
+            NAME_CHANGE_QUEUE.remove(uuid);
+            NAME_CHANGE_TOKEN_QUEUE.remove(uuid);
+        }
+        MSAuth.nameChangeInfo(token).whenCompleteAsync((info, error) -> {
+            synchronized (NAME_CHANGE_LOCK) {
+                if (error != null || info == null) {
+                    LOGGER.debug("IAS: Unable to update logged-in name-change availability for {}.", uuid, error);
+                    NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
+                } else {
+                    NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
+                }
+            }
+        }, IAS.executor());
     }
 
     NameChangeState nameChangeState(AccountEntry entry) {
@@ -519,48 +553,84 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             }
             NAME_CHANGES.put(uuid, NameChangeState.CHECKING);
             NAME_CHANGE_QUEUE.putIfAbsent(uuid, microsoft);
-            if (!nameChangeWorkerRunning) {
-                nameChangeWorkerRunning = true;
-                this.scheduleNextNameChangeCheck(0L);
-            }
+            this.startNameChangePublicWorkers();
         }
         return NameChangeState.CHECKING;
     }
 
-    private void scheduleNextNameChangeCheck(long delayMillis) {
-        CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS, IAS.executor()).execute(this::runNextNameChangeCheck);
+    private void startNameChangePublicWorkers() {
+        while (true) {
+            MicrosoftAccount account;
+            synchronized (NAME_CHANGE_LOCK) {
+                if (nameChangePublicWorkers >= NAME_CHANGE_PUBLIC_WORKERS || NAME_CHANGE_QUEUE.isEmpty()) {
+                    return;
+                }
+                UUID uuid = NAME_CHANGE_QUEUE.keySet().iterator().next();
+                account = NAME_CHANGE_QUEUE.remove(uuid);
+                nameChangePublicWorkers++;
+            }
+
+            MicrosoftAccount checkAccount = account;
+            MSAuth.nameChangeInfoFromNameMc(checkAccount.uuid()).whenCompleteAsync((info, error) -> {
+                UUID uuid = checkAccount.uuid();
+                boolean needsTokenFallback = false;
+                synchronized (NAME_CHANGE_LOCK) {
+                    nameChangePublicWorkers--;
+                    if (error != null || info == null) {
+                        FriendlyException friendly = FriendlyException.friendlyInChain(error);
+                        if (friendly != null && "ias.profile.name.unknown".equals(friendly.key())) {
+                            needsTokenFallback = true;
+                            NAME_CHANGE_TOKEN_QUEUE.putIfAbsent(uuid, checkAccount);
+                        } else {
+                            LOGGER.warn("IAS: Unable to check public name-change availability for {}.", checkAccount, error);
+                            NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
+                        }
+                    } else {
+                        NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
+                    }
+                }
+                if (needsTokenFallback) {
+                    this.startNameChangeTokenWorker();
+                }
+                this.startNameChangePublicWorkers();
+            }, IAS.executor());
+        }
     }
 
-    private void runNextNameChangeCheck() {
-        MicrosoftAccount account;
+    private void startNameChangeTokenWorker() {
         synchronized (NAME_CHANGE_LOCK) {
-            if (NAME_CHANGE_QUEUE.isEmpty()) {
-                nameChangeWorkerRunning = false;
+            if (nameChangeTokenWorkerRunning) {
                 return;
             }
-            UUID uuid = NAME_CHANGE_QUEUE.keySet().iterator().next();
-            account = NAME_CHANGE_QUEUE.remove(uuid);
+            nameChangeTokenWorkerRunning = true;
+        }
+        CompletableFuture.delayedExecutor(NAME_CHANGE_TOKEN_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor()).execute(this::runNextNameChangeTokenCheck);
+    }
+
+    private void runNextNameChangeTokenCheck() {
+        MicrosoftAccount account;
+        synchronized (NAME_CHANGE_LOCK) {
+            if (NAME_CHANGE_TOKEN_QUEUE.isEmpty()) {
+                nameChangeTokenWorkerRunning = false;
+                return;
+            }
+            UUID uuid = NAME_CHANGE_TOKEN_QUEUE.keySet().iterator().next();
+            account = NAME_CHANGE_TOKEN_QUEUE.remove(uuid);
         }
 
-        MSAuth.nameChangeInfoFromNameMc(account.uuid())
-                .exceptionallyComposeAsync(publicError -> {
-                    FriendlyException friendly = FriendlyException.friendlyInChain(publicError);
-                    if (friendly != null && "ias.profile.name.unknown".equals(friendly.key())) {
-                        return this.loginForNameChange(account).thenComposeAsync(data -> MSAuth.nameChangeInfo(data.token()), IAS.executor());
-                    }
-                    return CompletableFuture.failedFuture(publicError);
-                }, IAS.executor())
+        this.loginForNameChange(account)
+                .thenComposeAsync(data -> MSAuth.nameChangeInfo(data.token()), IAS.executor())
                 .whenCompleteAsync((info, error) -> {
                     UUID uuid = account.uuid();
                     synchronized (NAME_CHANGE_LOCK) {
                         if (error != null || info == null) {
-                            LOGGER.warn("IAS: Unable to check name-change availability for {}.", account, error);
+                            LOGGER.debug("IAS: Unable to check token name-change availability for {}.", account, error);
                             NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
                         } else {
                             NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
                         }
                     }
-                    this.scheduleNextNameChangeCheck(NAME_CHANGE_CHECK_DELAY_MS);
+                    CompletableFuture.delayedExecutor(NAME_CHANGE_TOKEN_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor()).execute(this::runNextNameChangeTokenCheck);
                 }, IAS.executor());
     }
 

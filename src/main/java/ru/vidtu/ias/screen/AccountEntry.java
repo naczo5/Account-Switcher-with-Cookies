@@ -137,15 +137,6 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
     *///?} else {
     /*public void render(GuiGraphics graphics, int index, int y, int x, int width, int height, int mouseX, int mouseY, boolean hovered, float delta) {*/
     //?}
-        // Render tooltip.
-        if (hovered) {
-            if ((System.nanoTime() - this.lastFree) >= 500_000_000L) {
-                graphics.setTooltipForNextFrame(this.tooltip, mouseX, mouseY);
-            }
-        } else {
-            this.lastFree = System.nanoTime();
-        }
-
         // Render the skin.
         PlayerSkin skin = this.list.skin(this);
         //? if >=1.21.10 {
@@ -175,12 +166,15 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
         }
 
         // Render name.
+        int nameX = x + 10;
+        int nameWidth = this.minecraft.font.width(this.account.name());
         //? if >=26.1 {
-        graphics.text(this.minecraft.font, this.account.name(), x + 10, y, color);
+        graphics.text(this.minecraft.font, this.account.name(), nameX, y, color);
         //?} else
-        /*graphics.drawString(this.minecraft.font, this.account.name(), x + 10, y, color);*/
+        /*graphics.drawString(this.minecraft.font, this.account.name(), nameX, y, color);*/
 
         // Render exact name-change availability when it can be checked.
+        boolean markerHovered = false;
         AccountList.NameChangeState nameChange = this.list.nameChangeState(this);
         if (nameChange != AccountList.NameChangeState.UNKNOWN || this.account.canLogin()) {
             Component marker = switch (nameChange) {
@@ -195,12 +189,13 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
                 case CHECKING -> 0xFF_FF_FF_00;
                 case UNKNOWN -> 0xFF_80_80_80;
             };
-            int markerX = Math.min(x + 10 + this.minecraft.font.width(this.account.name()) + 5, x + width - 40);
+            int markerX = Math.min(nameX + nameWidth + 5, x + width - 40);
             //? if >=26.1 {
             graphics.text(this.minecraft.font, marker, markerX, y, markerColor);
             //?} else
             /*graphics.drawString(this.minecraft.font, marker, markerX, y, markerColor);*/
-            if (mouseX >= markerX && mouseX <= markerX + 8 && mouseY >= y && mouseY <= y + height) {
+            markerHovered = mouseX >= markerX && mouseX <= markerX + 8 && mouseY >= y && mouseY <= y + height;
+            if (markerHovered) {
                 String key = switch (nameChange) {
                     case AVAILABLE -> "ias.profile.name.available";
                     case UNAVAILABLE -> "ias.profile.name.unavailable";
@@ -209,6 +204,16 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
                 };
                 graphics.setTooltipForNextFrame(Component.translatable(key), mouseX, mouseY);
             }
+        }
+
+        // Render account tooltip only above the name, so it does not override marker tooltips.
+        boolean nameHovered = mouseX >= nameX && mouseX <= nameX + nameWidth && mouseY >= y && mouseY <= y + height;
+        if (hovered && nameHovered && !markerHovered) {
+            if ((System.nanoTime() - this.lastFree) >= 500_000_000L) {
+                graphics.setTooltipForNextFrame(this.tooltip, mouseX, mouseY);
+            }
+        } else {
+            this.lastFree = System.nanoTime();
         }
 
         // Render bulk-selection marker.

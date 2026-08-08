@@ -438,6 +438,10 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             }
         }
 
+        if (data.online()) {
+            AccountList.updateNameChangeFromToken(data.uuid(), data.token());
+        }
+
         // Copy-only mode: never switch the active account, just copy the token and return.
         if (this.copyOnly) {
             this.minecraft.keyboardHandler.setClipboard(data.token());
