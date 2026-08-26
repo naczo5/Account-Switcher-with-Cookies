@@ -56,24 +56,6 @@ import net.minecraft.world.entity.player.PlayerSkin;
  */
 final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
     /**
-     * Up button sprites.
-     */
-    private static final WidgetSprites UP = new WidgetSprites(
-            IStonecutter.identifier("up_plain"),
-            IStonecutter.identifier("up_disabled"),
-            IStonecutter.identifier("up_focus")
-    );
-
-    /**
-     * Down button sprites.
-     */
-    private static final WidgetSprites DOWN = new WidgetSprites(
-            IStonecutter.identifier("down_plain"),
-            IStonecutter.identifier("down_disabled"),
-            IStonecutter.identifier("down_focus")
-    );
-
-    /**
      * Warning sprites.
      */
     private static final WidgetSprites WARNING = new WidgetSprites(
@@ -232,39 +214,6 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
                 graphics.setTooltipForNextFrame(Component.translatable("ias.accounts.tip.insecure"), mouseX, mouseY);
             }
         }
-
-        // Render only for focused, selected or hovered.
-        if (this.equals(this.list.getFocused()) || this.equals(this.list.getSelected())) {
-            // Render up widget.
-            //? if >=1.21.11 {
-            net.minecraft.resources.Identifier upTexture;
-            //?} else
-            /*net.minecraft.resources.ResourceLocation upTexture;*/
-            int upX = x + width - 28;
-            if (this == this.list.children().getFirst()) {
-                upTexture = UP.disabled();
-            } else if (mouseX >= upX && mouseY >= y && mouseX <= upX + 11 && mouseY <= y + height) {
-                upTexture = UP.enabledFocused();
-            } else {
-                upTexture = UP.enabled();
-            }
-            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, upTexture, upX, y, 11, 7);
-
-            // Render down widget.
-            //? if >=1.21.11 {
-            net.minecraft.resources.Identifier downTexture;
-            //?} else
-            /*net.minecraft.resources.ResourceLocation downTexture;*/
-            int downX = x + width - 15;
-            if (this == this.list.children().getLast()) {
-                downTexture = DOWN.disabled();
-            } else if (mouseX >= downX && mouseY >= y && mouseX <= downX + 11 && mouseY <= y + height) {
-                downTexture = DOWN.enabledFocused();
-            } else {
-                downTexture = DOWN.enabled();
-            }
-            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, downTexture, downX, y, 11, 7);
-        }
     }
 
     @Override
@@ -284,25 +233,6 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
 
         this.list.clearMultiSelection();
 
-        // Swap if selected.
-        if (this.equals(this.list.getFocused()) || this.equals(this.list.getSelected())) {
-            int right = this.list.getRowRight();
-
-            // Up widget.
-            int upX = right - 28;
-            if (mouseX >= upX && mouseX <= upX + 11) {
-                this.list.swapUp(this);
-                return true;
-            }
-
-            // Down widget.
-            int downX = right - 15;
-            if (mouseX >= downX && mouseX <= downX + 11) {
-                this.list.swapDown(this);
-                return true;
-            }
-        }
-
         // Login on double click.
         if (IStonecutter.internalMillisClock() - this.clicked < 250L) {
             //? if >=1.21.10 {
@@ -312,10 +242,17 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
             } : null);
             //?} else
             /*this.list.login(!net.minecraft.client.gui.screens.Screen.hasShiftDown(), IASConfig.closeOnLogin ? () -> this.minecraft.setScreen(this.list.screen().parent()) : null);*/
+            this.clicked = IStonecutter.internalMillisClock();
+            return true;
         }
 
         // Set time for double click.
         this.clicked = IStonecutter.internalMillisClock();
+        //? if >=1.21.10 {
+        if (event.button() == 0) {
+            this.list.startDragging(this);
+        }
+        //?}
         return true;
     }
 

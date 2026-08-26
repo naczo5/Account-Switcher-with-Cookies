@@ -163,7 +163,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Login offline.
         String name = account.name();
-        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", false);
+        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", null, false);
         login.success(data, false);
         if (onComplete != null) onComplete.run();
     }

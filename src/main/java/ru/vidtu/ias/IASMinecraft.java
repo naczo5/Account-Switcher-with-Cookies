@@ -540,7 +540,7 @@ public final class IASMinecraft {
                 return;
             }
 
-            launchAccount = new LoginData(user.getName(), user.getProfileId(), user.getAccessToken(), true);
+            launchAccount = new LoginData(user.getName(), user.getProfileId(), user.getAccessToken(), null, true);
             LOGGER.info("IAS: Captured launcher account: {}", launchAccount);
         }
     }

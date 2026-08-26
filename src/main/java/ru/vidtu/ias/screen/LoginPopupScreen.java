@@ -63,10 +63,10 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
     private final Screen parent;
 
     /**
-     * Whether this screen should only copy the resulting token to the clipboard
-     * once obtained, instead of switching the active account.
+     * Which value (if any) this screen should copy to the clipboard once obtained,
+     * instead of switching the active account.
      */
-    private final boolean copyOnly;
+    private final CopyMode copyMode;
 
     /**
      * Synchronization lock.
@@ -111,25 +111,44 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
     private MultiLineLabel errorNote;
 
     /**
+     * What (if anything) a {@link LoginPopupScreen} should copy to the clipboard
+     * once a login/refresh completes, instead of switching the active account.
+     */
+    enum CopyMode {
+        /**
+         * Normal login: switch the active account, copy nothing.
+         */
+        NONE,
+        /**
+         * Copy the resulting Minecraft session (access) token to the clipboard.
+         */
+        ACCESS_TOKEN,
+        /**
+         * Copy the resulting Microsoft/Minecraft refresh token to the clipboard.
+         */
+        REFRESH_TOKEN
+    }
+
+    /**
      * Creates a new login screen.
      *
      * @param parent Parent screen
      */
     LoginPopupScreen(Screen parent) {
-        this(parent, false);
+        this(parent, CopyMode.NONE);
     }
 
     /**
      * Creates a new login screen.
      *
      * @param parent   Parent screen
-     * @param copyOnly Whether to only copy the resulting token to the clipboard,
-     *                 instead of switching the active account
+     * @param copyMode What (if anything) to copy to the clipboard instead of switching the active account
      */
-    LoginPopupScreen(Screen parent, boolean copyOnly) {
-        super(Component.translatable(copyOnly ? "ias.copyToken.title" : "ias.login"));
+    LoginPopupScreen(Screen parent, CopyMode copyMode) {
+        super(Component.translatable(copyMode == CopyMode.REFRESH_TOKEN ? "ias.copyRefreshToken.title"
+                : copyMode == CopyMode.ACCESS_TOKEN ? "ias.copyToken.title" : "ias.login"));
         this.parent = parent;
-        this.copyOnly = copyOnly;
+        this.copyMode = copyMode;
     }
 
     @Override
@@ -442,9 +461,18 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             AccountList.updateNameChangeFromToken(data.uuid(), data.token());
         }
 
-        // Copy-only mode: never switch the active account, just copy the token and return.
-        if (this.copyOnly) {
-            this.minecraft.keyboardHandler.setClipboard(data.token());
+        // Copy-only mode: never switch the active account, just copy the requested value and return.
+        if (this.copyMode != CopyMode.NONE) {
+            if (this.copyMode == CopyMode.REFRESH_TOKEN) {
+                String refreshToken = data.refreshToken();
+                if (refreshToken == null || refreshToken.isBlank()) {
+                    this.error(new FriendlyException("No refresh token available for this account.", "ias.error.noRefreshToken"));
+                    return;
+                }
+                this.minecraft.keyboardHandler.setClipboard(refreshToken);
+            } else {
+                this.minecraft.keyboardHandler.setClipboard(data.token());
+            }
             this.minecraft.execute(() -> {
                 // Skip if not current screen.
                 if (this != this.currentScreen()) return;

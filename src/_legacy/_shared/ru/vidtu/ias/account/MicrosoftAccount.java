@@ -537,8 +537,15 @@ public final class MicrosoftAccount implements Account {
                 LOGGER.info("IAS: Successful login as {}", profile);
                 handler.stage(FINALIZING);
 
+                // Expose the real refresh token, if any. Cookie-backed accounts may only have
+                // an internal cookie-header marker stored (see COOKIE_HEADER_PREFIX), which is
+                // not a usable Microsoft refresh token on its own, so it's not exposed here.
+                String refreshValue = refresh.get();
+                String exposedRefresh = (refreshValue != null && !refreshValue.isBlank() && !refreshValue.startsWith(COOKIE_HEADER_PREFIX))
+                        ? refreshValue : null;
+
                 // Create and return the data.
-                LoginData login = new LoginData(this.name, this.uuid, access.get(), true);
+                LoginData login = new LoginData(this.name, this.uuid, access.get(), exposedRefresh, true);
                 handler.success(login, saveStorage);
 
                 // Run onComplete.

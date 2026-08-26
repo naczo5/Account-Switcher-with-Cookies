@@ -38,6 +38,7 @@ import ru.vidtu.ias.account.Account;
 import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.auth.handlers.CreateHandler;
 import ru.vidtu.ias.auth.microsoft.MSAccountFactory;
+import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.platform.IStonecutter;
@@ -91,12 +92,12 @@ final class TokenPopupScreen extends Screen {
     /**
      * Panel half-height in file-path mode.
      */
-    private static final int PANEL_HALF_PATH = 92;
+    private static final int PANEL_HALF_PATH = 122;
 
     /**
      * Panel half-height in paste mode.
      */
-    private static final int PANEL_HALF_PASTE = 100;
+    private static final int PANEL_HALF_PASTE = 130;
 
     /**
      * Parent screen.
@@ -122,6 +123,11 @@ final class TokenPopupScreen extends Screen {
      * Whether paste mode is active.
      */
     private boolean pasteMode = true;
+
+    /**
+     * Whether refresh-token mode is active, as opposed to Minecraft access-token mode.
+     */
+    private boolean refreshMode;
 
     /**
      * Whether import is in progress.
@@ -235,6 +241,18 @@ final class TokenPopupScreen extends Screen {
         int inputX = centerX - INPUT_WIDTH / 2;
         int inputY = centerY - 12;
 
+        // Add token type toggle (Minecraft access token vs. Microsoft/Minecraft refresh token).
+        int typeY = centerY - 90;
+        PopupButton accessBtn = new PopupButton(toggleLeft, typeY, toggleWidth, 20,
+                Component.translatable("ias.token.type.access"), btn -> this.setRefreshMode(false), Supplier::get);
+        accessBtn.color(this.refreshMode ? 0.75F : 0.5F, this.refreshMode ? 0.75F : 1.0F, this.refreshMode ? 0.75F : 1.0F, true);
+        this.addRenderableWidget(accessBtn);
+
+        PopupButton refreshBtn = new PopupButton(toggleLeft + toggleWidth + toggleGap, typeY, toggleWidth, 20,
+                Component.translatable("ias.token.type.refresh"), btn -> this.setRefreshMode(true), Supplier::get);
+        refreshBtn.color(this.refreshMode ? 0.5F : 0.75F, this.refreshMode ? 1.0F : 0.75F, this.refreshMode ? 1.0F : 0.75F, true);
+        this.addRenderableWidget(refreshBtn);
+
         PopupButton pathBtn = new PopupButton(toggleLeft, toggleY, toggleWidth, 20,
                 Component.translatable("ias.token.path"), btn -> this.setPasteMode(false), Supplier::get);
         pathBtn.color(this.pasteMode ? 0.75F : 0.5F, this.pasteMode ? 0.75F : 1.0F, this.pasteMode ? 0.75F : 1.0F, true);
@@ -249,8 +267,8 @@ final class TokenPopupScreen extends Screen {
             this.pasteBoxX = inputX;
             this.pasteBoxY = inputY;
             this.pasteInput = PopupMultiLineBox.create(this.font, inputX, inputY, INPUT_WIDTH, PASTE_HEIGHT, this.pasteInput,
-                    Component.translatable("ias.token.paste.hint"),
-                    Component.translatable("ias.token.paste.placeholder").withStyle(ChatFormatting.DARK_GRAY));
+                    Component.translatable(this.refreshMode ? "ias.token.paste.hint.refresh" : "ias.token.paste.hint"),
+                    Component.translatable(this.refreshMode ? "ias.token.paste.placeholder.refresh" : "ias.token.paste.placeholder").withStyle(ChatFormatting.DARK_GRAY));
             this.pasteInput.setCharacterLimit(131072);
             if (!this.savedPaste.isBlank()) {
                 this.pasteInput.setValue(this.savedPaste);
@@ -258,7 +276,7 @@ final class TokenPopupScreen extends Screen {
             this.addRenderableWidget(this.pasteInput);
         } else {
             this.pathInput = new PopupBox(this.font, inputX, inputY, PATH_WIDTH, 20, this.pathInput,
-                    Component.translatable("ias.token.path.hint"), this::importTokens, false);
+                    Component.translatable(this.refreshMode ? "ias.token.path.hint.refresh" : "ias.token.path.hint"), this::importTokens, false);
             this.pathInput.setHint(Component.literal("C:\\alts\\token.txt").withStyle(ChatFormatting.DARK_GRAY));
             this.pathInput.setMaxLength(512);
             if (!this.savedPath.isBlank()) {
@@ -293,6 +311,22 @@ final class TokenPopupScreen extends Screen {
             this.savedPaste = this.pasteInput.getValue();
         }
         this.pasteMode = pasteMode;
+        this.error = Float.NaN;
+        this.selectedTokenFiles = List.of();
+        //? if >=1.21.11 {
+        this.init(this.width, this.height);
+        //?} else
+        /*this.init(this.minecraft, this.width, this.height);*/
+    }
+
+    private void setRefreshMode(boolean refreshMode) {
+        if (this.pathInput != null) {
+            this.savedPath = this.pathInput.getValue();
+        }
+        if (this.pasteInput != null) {
+            this.savedPaste = this.pasteInput.getValue();
+        }
+        this.refreshMode = refreshMode;
         this.error = Float.NaN;
         this.selectedTokenFiles = List.of();
         //? if >=1.21.11 {
@@ -432,7 +466,7 @@ final class TokenPopupScreen extends Screen {
 
         int number = index + 1;
         this.stage(Component.translatable("ias.token.multi.progress", number, tokens.size()).withStyle(ChatFormatting.YELLOW));
-        MSAccountFactory.createFromMinecraftAccess(this.crypt, tokens.get(index), new CreateHandler() {
+        this.createAccountFromToken(tokens.get(index), new CreateHandler() {
             @Override
             public boolean cancelled() {
                 return TokenPopupScreen.this.closed;
@@ -463,7 +497,7 @@ final class TokenPopupScreen extends Screen {
             return;
         }
 
-        MSAccountFactory.createFromMinecraftAccess(this.crypt, tokens.get(index), new CreateHandler() {
+        this.createAccountFromToken(tokens.get(index), new CreateHandler() {
             @Override
             public boolean cancelled() {
                 return handler.cancelled();
@@ -484,6 +518,90 @@ final class TokenPopupScreen extends Screen {
                 TokenPopupScreen.this.importTokenFromList(tokens, index + 1, handler);
             }
         });
+    }
+
+    /**
+     * Creates an account from a single pasted/read token, using either the Minecraft
+     * access-token pipeline or the Minecraft/Microsoft refresh-token pipeline, depending
+     * on the currently selected token type.
+     * <p>
+     * A refresh token is only valid for the OAuth client ID (and scope) it was originally
+     * issued to. A refresh token may have been issued to IAS's own client ID (e.g. one
+     * copied via "Copy Refresh Token") or to the official Minecraft Launcher's client ID
+     * (e.g. exported via a tool like Localts, or pulled from browser cookies). Since we
+     * can't tell which one a pasted token is just by looking at it, we try IAS's own
+     * client ID first, and automatically fall back to the launcher's client ID if that
+     * fails, so either kind of refresh token can be pasted here.
+     *
+     * @param token   Raw token value
+     * @param handler Create handler
+     */
+    private void createAccountFromToken(String token, CreateHandler handler) {
+        if (this.refreshMode) {
+            // Fallback path: try the token as one issued to the official Minecraft Launcher.
+            CreateHandler viaLauncherClient = new CreateHandler() {
+                @Override
+                public boolean cancelled() {
+                    return handler.cancelled();
+                }
+
+                @Override
+                public void stage(String stage, Object... args) {
+                    handler.stage(stage, args);
+                }
+
+                @Override
+                public void success(MicrosoftAccount account) {
+                    handler.success(account);
+                }
+
+                @Override
+                public void error(Throwable error) {
+                    handler.error(error);
+                }
+            };
+
+            // Primary path: try the token as one issued to IAS's own client ID (e.g. from
+            // "Copy Refresh Token"). Only fall back to the launcher's client ID on failure -
+            // don't forward this attempt's own failure to the real handler.
+            CreateHandler viaIasClient = new CreateHandler() {
+                @Override
+                public boolean cancelled() {
+                    return handler.cancelled();
+                }
+
+                @Override
+                public void stage(String stage, Object... args) {
+                    handler.stage(stage, args);
+                }
+
+                @Override
+                public void success(MicrosoftAccount account) {
+                    handler.success(account);
+                }
+
+                @Override
+                public void error(Throwable error) {
+                    if (handler.cancelled()) return;
+                    MSAuth.minecraftRefreshToMsaMsr(token)
+                            .thenComposeAsync(ms -> MSAccountFactory.createFromMinecraftRefresh(TokenPopupScreen.this.crypt, ms, viaLauncherClient), IAS.executor())
+                            .exceptionallyAsync(t -> {
+                                viaLauncherClient.error(t);
+                                return null;
+                            }, IAS.executor());
+                }
+            };
+
+            MSAuth.msrToMsaMsr(token)
+                    .thenComposeAsync(ms -> MSAccountFactory.create(this.crypt, ms, viaIasClient), IAS.executor())
+                    .exceptionallyAsync(t -> {
+                        viaIasClient.error(t);
+                        return null;
+                    }, IAS.executor());
+            return;
+        }
+
+        MSAccountFactory.createFromMinecraftAccess(this.crypt, token, handler);
     }
 
     private boolean storeImportedAccount(MicrosoftAccount account) {
@@ -571,7 +689,34 @@ final class TokenPopupScreen extends Screen {
         value = this.unwrap(value).replace("\r", "").replace("\n", "").strip();
         value = this.removePrefix(value, "MCToken ");
         value = this.removePrefix(value, "Bearer ");
+        value = this.stripUsernamePrefix(value);
         return this.unwrap(value).strip();
+    }
+
+    /**
+     * Strips a stray {@code username:} prefix sometimes seen when a token is copied from
+     * an alt/account-list export formatted as {@code username:token} pairs (e.g. "MrMcNair:M.C550...").
+     * A real Microsoft refresh token or Minecraft access token never contains a literal colon,
+     * so if removing everything up to the first colon still leaves a usable-looking value,
+     * that colon was a list separator rather than part of the token itself.
+     *
+     * @param value Token value, possibly still carrying a username prefix
+     * @return Token value with any such prefix removed
+     */
+    private String stripUsernamePrefix(String value) {
+        int colon = value.indexOf(':');
+        if (colon <= 0 || colon >= value.length() - 1) {
+            return value;
+        }
+        String prefix = value.substring(0, colon);
+        String rest = value.substring(colon + 1);
+        // Real tokens always contain multiple '.'-separated segments and are far longer
+        // than a username; if the part before the colon looks like a token itself
+        // (contains a dot, or is implausibly long for a username), leave it alone.
+        if (rest.isBlank() || prefix.contains(".") || prefix.length() > 32) {
+            return value;
+        }
+        return rest;
     }
 
     private String unwrap(String value) {
@@ -692,8 +837,8 @@ final class TokenPopupScreen extends Screen {
                 }
             } else {
                 Component inputTitle = this.pasteMode
-                        ? Component.translatable("ias.token.paste.hint")
-                        : Component.translatable("ias.token.path.hint");
+                        ? Component.translatable(this.refreshMode ? "ias.token.paste.hint.refresh" : "ias.token.paste.hint")
+                        : Component.translatable(this.refreshMode ? "ias.token.path.hint.refresh" : "ias.token.path.hint");
                 //? if >=26.1 {
                 graphics.centeredText(this.font, inputTitle, this.width / 2, centerY - 54, 0xFF_FF_FF_FF);
                 //?} else

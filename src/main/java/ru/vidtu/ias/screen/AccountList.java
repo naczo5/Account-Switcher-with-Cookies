@@ -120,6 +120,17 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      */
     private final Set<Account> selectedAccounts = new LinkedHashSet<>();
 
+    /**
+     * Entry currently being dragged for reordering.
+     */
+    @Nullable
+    private AccountEntry draggedEntry;
+
+    /**
+     * Whether the active drag changed storage order.
+     */
+    private boolean draggedMoved;
+
     enum NameChangeState {
         UNKNOWN,
         CHECKING,
@@ -168,10 +179,11 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         if (query == null || query.isBlank()) {
             // Add every account.
             AccountEntry selected = this.getSelected();
+            Account selectedAccount = selected != null ? selected.account() : null;
             this.replaceEntries(IASStorage.ACCOUNTS.stream()
                     .map(account -> new AccountEntry(this.minecraft, this, account))
                     .toList());
-            this.setSelected(this.children().contains(selected) ? selected : null);
+            this.setSelected(this.entryFor(selectedAccount));
 
             // Notify the root.
             this.screen.updateSelected();
@@ -185,6 +197,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Add every account.
         AccountEntry selected = this.getSelected();
+        Account selectedAccount = selected != null ? selected.account() : null;
         this.replaceEntries(IASStorage.ACCOUNTS.stream()
                 .filter(account -> account.name().toLowerCase(Locale.ROOT).contains(lowerQuery))
                 .sorted((f, s) -> Boolean.compare(
@@ -193,10 +206,23 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
                 ))
                 .map(account -> new AccountEntry(this.minecraft, this, account))
                 .toList());
-        this.setSelected(this.children().contains(selected) ? selected : null);
+        this.setSelected(this.entryFor(selectedAccount));
 
         // Notify the root.
         this.screen.updateSelected();
+    }
+
+    @Nullable
+    private AccountEntry entryFor(@Nullable Account account) {
+        if (account == null) {
+            return null;
+        }
+        for (AccountEntry entry : this.children()) {
+            if (entry.account().equals(account)) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     /**
@@ -233,7 +259,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Login offline.
         String name = account.name();
-        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", false);
+        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", null, false);
         login.success(data, false);
         if (onComplete != null) onComplete.run();
     }
@@ -266,8 +292,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * @param account Account to copy the token of
      */
     private void doCopyToken(Account account) {
+        // Keep the background name-change checker from independently logging into (and
+        // potentially rotating the refresh token of) this account while we copy from it.
+        suppressNameChangeCheck(account.uuid());
+
         // Initialize and set the (re)login screen, used in copy-only mode.
-        LoginPopupScreen login = new LoginPopupScreen(this.screen, true);
+        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.ACCESS_TOKEN);
         //$ set_screen 'this.minecraft' 'login'
         this.minecraft.gui.setScreen(login);
 
@@ -279,7 +309,57 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Otherwise, fall back to the placeholder offline token, same as the offline login flow.
         String name = account.name();
-        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", false);
+        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", null, false);
+        login.success(data, false);
+    }
+
+    /**
+     * Copies a fresh Microsoft/Minecraft refresh token for the selected account to the clipboard.
+     * Shows a confirmation screen first, since the refresh token grants full, long-lived access
+     * to the account (it can mint new session tokens indefinitely, until revoked).
+     * Does nothing if nothing is selected.
+     */
+    void copyRefreshToken() {
+        // Skip if nothing is selected.
+        AccountEntry selected = this.getSelected();
+        if (selected == null) return;
+        Account account = selected.account();
+
+        // Display confirmation screen before copying the sensitive refresh token.
+        final Screen confirm = new ConfirmPopupScreen(this.screen,
+                Component.translatable("ias.copyRefreshToken.confirm.title"),
+                Component.translatable("ias.copyRefreshToken.confirm", account.name()),
+                Component.translatable("ias.copyRefreshToken.confirm.button"),
+                () -> this.doCopyRefreshToken(account));
+        //$ set_screen 'this.minecraft' confirm
+        this.minecraft.gui.setScreen(confirm);
+    }
+
+    /**
+     * Obtains a fresh refresh token for the given account and copies it to the clipboard.
+     * Called only after the user has confirmed the action.
+     *
+     * @param account Account to copy the refresh token of
+     */
+    private void doCopyRefreshToken(Account account) {
+        // Same race-avoidance as doCopyToken() - see suppressNameChangeCheck() javadoc.
+        suppressNameChangeCheck(account.uuid());
+
+        // Initialize and set the (re)login screen, used in copy-only mode.
+        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.REFRESH_TOKEN);
+        //$ set_screen 'this.minecraft' 'login'
+        this.minecraft.gui.setScreen(login);
+
+        // Refresh online, if the account supports it. (Offline accounts never have a refresh
+        // token, so there's nothing meaningful to copy for them; the login screen will show
+        // a friendly error if this ends up being called on one anyway.)
+        if (account.canLogin()) {
+            IAS.executor().execute(() -> account.login(login, null));
+            return;
+        }
+
+        String name = account.name();
+        LoginData data = new LoginData(name, OfflineAccount.uuid(name), "ias:offline", null, false);
         login.success(data, false);
     }
 
@@ -521,6 +601,28 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         }
     }
 
+    /**
+     * Removes the given account from the background name-change availability queues and,
+     * if it wasn't already resolved, marks it as unresolved rather than leaving it queued.
+     * <p>
+     * The background name-change checker calls {@link MicrosoftAccount#login} on its own,
+     * completely independently of anything the user does. Since Microsoft rotates an
+     * account's refresh token on every redemption, that unrelated background login can
+     * silently invalidate a refresh token the user just copied (or is about to copy) via
+     * "Copy Token"/"Copy Refresh Token". This doesn't eliminate every possible race (e.g.
+     * gameplay logins elsewhere still refresh independently), but it stops this specific,
+     * very common source of it for the account currently being copied.
+     *
+     * @param uuid Account UUID
+     */
+    private static void suppressNameChangeCheck(UUID uuid) {
+        synchronized (NAME_CHANGE_LOCK) {
+            NAME_CHANGE_QUEUE.remove(uuid);
+            NAME_CHANGE_TOKEN_QUEUE.remove(uuid);
+            NAME_CHANGES.putIfAbsent(uuid, NameChangeState.UNKNOWN);
+        }
+    }
+
     static void updateNameChangeFromToken(UUID uuid, String token) {
         synchronized (NAME_CHANGE_LOCK) {
             NAME_CHANGES.put(uuid, NameChangeState.CHECKING);
@@ -675,6 +777,88 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             IAS.saveStorage();
         } catch (Throwable t) {
             LOGGER.error("IAS: Unable to save storage.", t);
+        }
+    }
+
+    void startDragging(AccountEntry entry) {
+        if (entry == null || !this.children().contains(entry) || !this.screen.search().getValue().isBlank()) {
+            return;
+        }
+        this.clearMultiSelection();
+        this.setSelected(entry);
+        this.draggedEntry = entry;
+        this.draggedMoved = false;
+        this.setDragging(true);
+    }
+
+    @Override
+    public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent event, double dragX, double dragY) {
+        if (this.draggedEntry != null && event.button() == 0) {
+            this.autoScrollWhileDragging(event.y());
+            AccountEntry target = this.getEntryAtPosition(event.x(), event.y());
+            if (target != null && !target.equals(this.draggedEntry)) {
+                this.moveDraggedEntry(target);
+            }
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent event) {
+        if (this.draggedEntry != null && event.button() == 0) {
+            this.finishDragging();
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+
+    private void autoScrollWhileDragging(double mouseY) {
+        int edge = 16;
+        if (mouseY < this.getY() + edge) {
+            this.setScrollAmount(this.scrollAmount() - this.defaultEntryHeight);
+        } else if (mouseY > this.getBottom() - edge) {
+            this.setScrollAmount(this.scrollAmount() + this.defaultEntryHeight);
+        }
+    }
+
+    private void moveDraggedEntry(AccountEntry target) {
+        AccountEntry dragged = this.draggedEntry;
+        if (dragged == null) {
+            return;
+        }
+
+        int fromRow = this.children().indexOf(dragged);
+        int targetRow = this.children().indexOf(target);
+        int fromStorage = IASStorage.ACCOUNTS.indexOf(dragged.account());
+        int targetStorage = IASStorage.ACCOUNTS.indexOf(target.account());
+        if (fromRow < 0 || targetRow < 0 || fromStorage < 0 || targetStorage < 0 || fromStorage == targetStorage) {
+            return;
+        }
+
+        Account account = IASStorage.ACCOUNTS.remove(fromStorage);
+        if (fromStorage < targetStorage) {
+            targetStorage--;
+        }
+        int insert = targetStorage + (targetRow > fromRow ? 1 : 0);
+        insert = Math.max(0, Math.min(insert, IASStorage.ACCOUNTS.size()));
+        IASStorage.ACCOUNTS.add(insert, account);
+
+        this.draggedMoved = true;
+        this.update(this.screen.search().getValue());
+        this.draggedEntry = this.entryFor(account);
+        if (this.draggedEntry != null) {
+            this.setSelected(this.draggedEntry);
+        }
+    }
+
+    private void finishDragging() {
+        boolean save = this.draggedMoved;
+        this.draggedEntry = null;
+        this.draggedMoved = false;
+        this.setDragging(false);
+        if (save) {
+            this.saveStorage();
         }
     }
 

@@ -159,6 +159,11 @@ public final class AccountScreen extends Screen {
     private Button copyToken;
 
     /**
+     * Copy refresh token button.
+     */
+    private Button copyRefreshToken;
+
+    /**
      * Creates a new screen.
      *
      * @param parent Parent screen, {@code null} if none
@@ -315,6 +320,14 @@ public final class AccountScreen extends Screen {
         this.copyToken.setTooltipDelay(Duration.ofMillis(250L));
         this.addRenderableWidget(this.copyToken);
 
+        // Add copy refresh token button.
+        this.copyRefreshToken = Button.builder(Component.translatable("ias.accounts.copyRefreshToken"), btn -> this.list.copyRefreshToken())
+                .bounds(this.width / 2 - 50 - 100 - 4, this.height - 24 - 24 - 24, 100, 20)
+                .build();
+        this.copyRefreshToken.setTooltip(Tooltip.create(Component.translatable("ias.accounts.copyRefreshToken.tip")));
+        this.copyRefreshToken.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.copyRefreshToken);
+
         // Add edit button.
         this.addRenderableWidget(Button.builder(Component.translatable("ias.accounts.add"), btn -> this.list.add())
                 .bounds(this.width / 2 + 50 + 4, this.height - 24 - 24, 100, 20)
@@ -406,6 +419,7 @@ public final class AccountScreen extends Screen {
             this.login.active = this.offlineLogin.active = this.edit.active = false;
             this.delete.active = true;
             this.copyToken.active = false;
+            this.copyRefreshToken.active = false;
             this.login.setTooltip(null);
             this.skin.visible = selected != null;
             this.updateProfileControls(selected);
@@ -416,7 +430,7 @@ public final class AccountScreen extends Screen {
         // Nothing is selected.
         if (selected == null) {
             // Disable every button.
-            this.login.active = this.offlineLogin.active = this.edit.active = this.delete.active = this.copyToken.active = false;
+            this.login.active = this.offlineLogin.active = this.edit.active = this.delete.active = this.copyToken.active = this.copyRefreshToken.active = false;
             this.updateLogoutCookieButton();
 
             // Hide tooltip, if exists.
@@ -437,11 +451,17 @@ public final class AccountScreen extends Screen {
         if (selected.account().canLogin()) {
             this.login.active = true;
             this.login.setTooltip(null);
+            // Only accounts that can log in online may have a refresh token to copy.
+            this.copyRefreshToken.active = true;
+            this.copyRefreshToken.setTooltip(Tooltip.create(Component.translatable("ias.accounts.copyRefreshToken.tip")));
         } else {
             this.login.active = false;
             this.login.setTooltip(Tooltip.create(Component.translatable("ias.accounts.login.offline")));
             this.login.setTooltipDelay(Duration.ZERO);
+            this.copyRefreshToken.active = false;
+            this.copyRefreshToken.setTooltip(Tooltip.create(Component.translatable("ias.accounts.copyRefreshToken.offline")));
         }
+        this.copyRefreshToken.setTooltipDelay(Duration.ZERO);
 
         // Show skin.
         this.skin.visible = true;
