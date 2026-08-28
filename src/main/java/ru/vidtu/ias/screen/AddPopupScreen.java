@@ -87,7 +87,7 @@ final class AddPopupScreen extends Screen {
         button.color(0.5F, 1.0F, 0.5F, true);
         this.addRenderableWidget(button);
 
-        // Add cookie import button.
+        // Add cookie / token import button.
         button = new PopupButton(this.width / 2 - 75, this.height / 2 - 24, 150, 20, Component.translatable("ias.add.cookie"), btn -> {
             //$set_screen 'this.minecraft' 'new MicrosoftCryptPopupScreen(this.parent, this.handler, true)'
             this.minecraft.gui.setScreen(new MicrosoftCryptPopupScreen(this.parent, this.handler, true));
@@ -97,18 +97,8 @@ final class AddPopupScreen extends Screen {
         button.color(0.5F, 0.75F, 1.0F, true);
         this.addRenderableWidget(button);
 
-        // Add token import button.
-        button = new PopupButton(this.width / 2 - 75, this.height / 2, 150, 20, Component.translatable("ias.add.token"), btn -> {
-            //$set_screen 'this.minecraft' 'new TokenPopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE)'
-            this.minecraft.gui.setScreen(new TokenPopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE));
-        }, Supplier::get);
-        button.setTooltip(Tooltip.create(Component.translatable("ias.add.token.tip")));
-        button.setTooltipDelay(Duration.ofMillis(250L));
-        button.color(0.5F, 1.0F, 1.0F, true);
-        this.addRenderableWidget(button);
-
         // Add offline button.
-        button = new PopupButton(this.width / 2 - 75, this.height / 2 + 24, 150, 20, Component.translatable("ias.add.offline"), btn -> {
+        button = new PopupButton(this.width / 2 - 75, this.height / 2, 150, 20, Component.translatable("ias.add.offline"), btn -> {
             //$set_screen 'this.minecraft' 'new OfflinePopupScreen(this.parent, this.handler)'
             this.minecraft.gui.setScreen(new OfflinePopupScreen(this.parent, this.handler));
         }, Supplier::get);
@@ -118,7 +108,7 @@ final class AddPopupScreen extends Screen {
         this.addRenderableWidget(button);
 
         // Add cancel button.
-        this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 73 - 22, 150, 20,
+        this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 48, 150, 20,
                 CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
     }
 

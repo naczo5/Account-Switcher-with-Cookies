@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.account.Account;
 import ru.vidtu.ias.account.MicrosoftAccount;
+import ru.vidtu.ias.auth.TokenImporter;
 import ru.vidtu.ias.auth.cookie.CookieParser;
 import ru.vidtu.ias.auth.handlers.CreateHandler;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
@@ -50,6 +51,8 @@ import ru.vidtu.ias.crypt.PasswordCrypt;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -531,33 +534,103 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 return;
             }
 
-            createHandler.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
+            final String text;
+            if (fromPath) {
+                try {
+                    text = Files.readString(Path.of(unwrapPath(source)));
+                } catch (java.io.IOException e) {
+                    createHandler.error(new FriendlyException("Unable to read cookie file: " + source, e, "ias.error.cookie.file"));
+                    return;
+                }
+            } else {
+                text = source;
+            }
 
-            CookieParser.ParsedCookies cookies = fromPath
-                    ? CookieParser.fromPath(source)
-                    : CookieParser.fromText(source);
+            try {
+                createHandler.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
 
-            if (this.closed) {
+                CookieParser.ParsedCookies cookies = CookieParser.fromText(text);
+
+                if (this.closed) {
+                    return;
+                }
+
+                if (!cookies.refreshToken().isBlank()) {
+                    MSAuth.minecraftRefreshToMsaMsr(cookies.refreshToken())
+                            .thenComposeAsync(ms -> MSAccountFactory.createFromMinecraftRefresh(this.crypt, ms, createHandler), IAS.executor())
+                            .exceptionallyAsync(t -> {
+                                createHandler.error(t);
+                                return null;
+                            }, IAS.executor());
+                    return;
+                }
+
+                MSAccountFactory.createFromCookies(this.crypt, cookies.toSisuCookieHeader(), createHandler).exceptionallyAsync(t -> {
+                    createHandler.error(t);
+                    return null;
+                }, IAS.executor());
+                return;
+            } catch (FriendlyException cookieError) {
+                if (!"ias.error.cookie.invalid".equals(cookieError.key())) {
+                    createHandler.error(cookieError);
+                    return;
+                }
+            }
+
+            List<String> tokens = TokenImporter.extractValues(text);
+            if (tokens.size() > 1) {
+                this.importTokenValues(tokens, 0, 0, 0, 0, createHandler);
                 return;
             }
 
-            if (!cookies.refreshToken().isBlank()) {
-                MSAuth.minecraftRefreshToMsaMsr(cookies.refreshToken())
-                        .thenComposeAsync(ms -> MSAccountFactory.createFromMinecraftRefresh(this.crypt, ms, createHandler), IAS.executor())
-                        .exceptionallyAsync(t -> {
-                            createHandler.error(t);
-                            return null;
-                        }, IAS.executor());
-                return;
-            }
-
-            MSAccountFactory.createFromCookies(this.crypt, cookies.toSisuCookieHeader(), createHandler).exceptionallyAsync(t -> {
-                createHandler.error(t);
-                return null;
-            }, IAS.executor());
+            TokenImporter.importText(this.crypt, text, createHandler);
         } catch (Throwable t) {
             createHandler.error(t);
         }
+    }
+
+    private void importTokenValues(List<String> tokens, int index, int imported, int failed, int duplicate, CreateHandler handler) {
+        if (this.closed) {
+            return;
+        }
+        if (index >= tokens.size()) {
+            this.finishCookieFileImport(imported, failed, duplicate, tokens.size());
+            return;
+        }
+
+        int number = index + 1;
+        this.stage(Component.translatable("ias.cookie.multi.progress", number, tokens.size()).withStyle(ChatFormatting.YELLOW));
+        TokenImporter.createAccountFromToken(this.crypt, tokens.get(index), new CreateHandler() {
+            @Override
+            public boolean cancelled() {
+                return CookiePopupScreen.this.closed || handler.cancelled();
+            }
+
+            @Override
+            public void stage(String stage, Object... args) {
+                handler.stage(stage, args);
+            }
+
+            @Override
+            public void success(MicrosoftAccount account) {
+                boolean wasDuplicate = CookiePopupScreen.this.storeImportedAccount(account);
+                CookiePopupScreen.this.importTokenValues(tokens, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), handler);
+            }
+
+            @Override
+            public void error(Throwable error) {
+                LOGGER.warn("IAS: Token {}/{} failed during batch import.", number, tokens.size(), error);
+                CookiePopupScreen.this.importTokenValues(tokens, index + 1, imported, failed + 1, duplicate, handler);
+            }
+        });
+    }
+
+    private static String unwrapPath(String path) {
+        String value = path.strip();
+        if (value.length() >= 2 && value.charAt(0) == '"' && value.charAt(value.length() - 1) == '"') {
+            value = value.substring(1, value.length() - 1).strip();
+        }
+        return value;
     }
 
     /**

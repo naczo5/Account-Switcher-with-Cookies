@@ -544,8 +544,10 @@ public final class AccountScreen extends Screen {
             return;
         }
 
-        this.minecraft.gui.setScreen(new AccountUpdatePopupScreen(this, account, AccountUpdatePopupScreen.Operation.SKIN, "",
-                path, this.slimSkin ? MSAuth.SkinVariant.SLIM : MSAuth.SkinVariant.CLASSIC));
+        Screen update = new AccountUpdatePopupScreen(this, account, AccountUpdatePopupScreen.Operation.SKIN, "",
+                path, this.slimSkin ? MSAuth.SkinVariant.SLIM : MSAuth.SkinVariant.CLASSIC);
+        //$ set_screen 'this.minecraft' 'update'
+        this.minecraft.gui.setScreen(update);
     }
 
     private void confirmNameChange() {
@@ -563,12 +565,20 @@ public final class AccountScreen extends Screen {
             return;
         }
 
-        this.minecraft.gui.setScreen(new ConfirmPopupScreen(this,
+        Screen confirm = new ConfirmPopupScreen(this,
                 Component.translatable("ias.profile.name.confirm.title"),
                 Component.translatable("ias.profile.name.confirm", account.name(), value),
                 Component.translatable("ias.profile.name.apply"),
-                () -> this.minecraft.gui.setScreen(new AccountUpdatePopupScreen(this, account, AccountUpdatePopupScreen.Operation.NAME,
-                        value, null, MSAuth.SkinVariant.CLASSIC))));
+                () -> this.openNameUpdate(account, value));
+        //$ set_screen 'this.minecraft' 'confirm'
+        this.minecraft.gui.setScreen(confirm);
+    }
+
+    private void openNameUpdate(MicrosoftAccount account, String value) {
+        Screen update = new AccountUpdatePopupScreen(this, account, AccountUpdatePopupScreen.Operation.NAME,
+                value, null, MSAuth.SkinVariant.CLASSIC);
+        //$ set_screen 'this.minecraft' 'update'
+        this.minecraft.gui.setScreen(update);
     }
 
     /**

@@ -29,6 +29,8 @@ import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.auth.LoginData;
 import ru.vidtu.ias.auth.handlers.LoginHandler;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
+import ru.vidtu.ias.auth.microsoft.fields.MSTokens;
+import ru.vidtu.ias.auth.microsoft.fields.XHashedToken;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.utils.Holder;
 import ru.vidtu.ias.utils.IUtils;
@@ -413,21 +415,10 @@ public final class MicrosoftAccount implements Account {
                     // Require recrypting data.
                     recrypt.set(true);
 
-                    // Convert MSR to MSA/MSR.
-                    return MSAuth.msrToMsaMsr(refresh.get()).thenComposeAsync(ms -> {
-                        // Skip if cancelled.
-                        if (ms == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
-
-                        // Update the refresh token.
-                        refresh.set(ms.refresh());
-
-                        // Log it and display progress.
-                        LOGGER.info("IAS: Converting MSA to XBL...");
-                        handler.stage(MSA_TO_XBL);
-
-                        // Convert MSA to XBL.
-                        return MSAuth.msaToXbl(ms.access());
-                    }, IAS.executor()).thenComposeAsync(xbl -> {
+                    // Convert MSR to MSA/MSR, then MSA to XBL.
+                    // Localts / Minecraft launcher tokens (M.C...) must use the launcher OAuth client + t=;
+                    // IAS-copied refresh tokens use the IAS client + d=.
+                    return refreshToXbl(refreshToken, refresh, handler).thenComposeAsync(xbl -> {
                         // Skip if cancelled.
                         if (xbl == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
 
@@ -561,6 +552,52 @@ public final class MicrosoftAccount implements Account {
             // Handle.
             handler.error(new RuntimeException("Unable to begin MS auth.", t));
         }
+    }
+
+    /**
+     * Exchanges a stored Microsoft refresh token for an Xbox Live token.
+     * Localts {@code M.C...} tokens use the official Minecraft OAuth client ({@code t=});
+     * IAS-copied refresh tokens use the IAS client ({@code d=}). If the first client
+     * rejects the token, the other client is tried.
+     *
+     * @param refreshToken Stored refresh token
+     * @param refresh      Holder updated with the rotated refresh token
+     * @param handler      Login handler
+     * @return Future that completes with the XBL token, or {@code null} if cancelled
+     */
+    @CheckReturnValue
+    @NotNull
+    private static CompletableFuture<XHashedToken> refreshToXbl(@NotNull String refreshToken, @NotNull Holder<String> refresh, @NotNull LoginHandler handler) {
+        boolean launcher = looksLikeMinecraftRefresh(refreshToken);
+        Holder<String> ticket = new Holder<>(launcher ? "t=" : "d=");
+        CompletableFuture<MSTokens> primary = launcher
+                ? MSAuth.minecraftRefreshToMsaMsr(refreshToken)
+                : MSAuth.msrToMsaMsr(refreshToken);
+        return primary.handleAsync((ms, error) -> {
+            if (error == null) {
+                return CompletableFuture.completedFuture(ms);
+            }
+            LOGGER.warn("IAS: Refresh via {} OAuth client failed, trying the other client...", launcher ? "launcher" : "IAS", error);
+            ticket.set(launcher ? "d=" : "t=");
+            return launcher ? MSAuth.msrToMsaMsr(refreshToken) : MSAuth.minecraftRefreshToMsaMsr(refreshToken);
+        }, IAS.executor()).thenCompose(future -> future).thenComposeAsync(ms -> {
+            if (ms == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
+            refresh.set(ms.refresh());
+            LOGGER.info("IAS: Converting MSA to XBL...");
+            handler.stage(MSA_TO_XBL);
+            return MSAuth.msaToXbl(ms.access(), ticket.get());
+        }, IAS.executor());
+    }
+
+    /**
+     * Whether the value looks like a Minecraft launcher / Localts refresh token.
+     *
+     * @param refresh Stored refresh token
+     * @return {@code true} if the token starts with {@code M.C}
+     */
+    @Contract(value = "null -> false", pure = true)
+    private static boolean looksLikeMinecraftRefresh(@Nullable String refresh) {
+        return refresh != null && refresh.startsWith("M.C");
     }
 
     @Contract(value = "null -> false", pure = true)

@@ -824,7 +824,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         IAS.executor().execute(() -> account.login(new LoginHandler() {
             @Override
             public boolean cancelled() {
-                return AccountList.this.minecraft.gui.screen() != AccountList.this.screen;
+                return AccountList.this.currentScreen() != AccountList.this.screen;
             }
 
             @Override
@@ -1009,6 +1009,19 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         this.setSelected(entry);
         *///?} else
         this.swap(idx, downIdx);
+    }
+
+    /**
+     * Gets the currently displayed Minecraft screen.
+     *
+     * @return Current screen
+     */
+    private Screen currentScreen() {
+        //? if >=26.2 {
+        return this.minecraft.gui.screen();
+        //?} else {
+        /*return this.minecraft.screen;
+        *///?}
     }
 
     /**
