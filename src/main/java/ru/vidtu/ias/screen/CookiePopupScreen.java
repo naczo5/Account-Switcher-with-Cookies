@@ -54,6 +54,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -93,6 +94,22 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Panel half-height in paste mode.
      */
     private static final int PANEL_HALF_PASTE = 100;
+
+    /**
+     * Delay between files during multi-cookie imports. Minecraft auth starts rate-limiting
+     * if several accounts are exchanged back-to-back.
+     */
+    private static final long MULTI_COOKIE_IMPORT_DELAY_MS = 6000L;
+
+    /**
+     * Delay before retrying the same cookie after a Minecraft auth rate limit.
+     */
+    private static final long MULTI_COOKIE_RATE_LIMIT_DELAY_MS = 30000L;
+
+    /**
+     * Maximum number of rate-limit retries for one cookie file before moving on.
+     */
+    private static final int MULTI_COOKIE_RATE_LIMIT_RETRIES = 2;
 
     /**
      * Parent screen.
@@ -402,10 +419,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         //?} else
         /*this.init(this.minecraft, this.width, this.height);*/
 
-        IAS.executor().execute(() -> this.importCookieFileAt(this.selectedCookieFiles, 0, 0, 0, 0));
+        IAS.executor().execute(() -> this.importCookieFileAt(this.selectedCookieFiles, 0, 0, 0, 0, 0));
     }
 
-    private void importCookieFileAt(List<String> sources, int index, int imported, int failed, int duplicate) {
+    private void importCookieFileAt(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries) {
         if (this.closed) {
             return;
         }
@@ -444,14 +461,30 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 return;
             }
             if (error != null || account == null) {
+                if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
+                    int attempt = rateLimitRetries + 1;
+                    this.stage(Component.literal("Rate limited. Retrying cookie file " + number + "/" + sources.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
+                    this.scheduleCookieFileImport(sources, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS);
+                    return;
+                }
                 LOGGER.warn("IAS: Cookie file {}/{} failed during batch import: {}", number, sources.size(), sources.get(index), error);
-                this.importCookieFileAt(sources, index + 1, imported, failed + 1, duplicate);
+                this.scheduleCookieFileImport(sources, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS);
                 return;
             }
 
             boolean wasDuplicate = this.storeImportedAccount(account);
-            this.importCookieFileAt(sources, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0));
+            this.scheduleCookieFileImport(sources, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS);
         }, IAS.executor());
+    }
+
+    private void scheduleCookieFileImport(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs) {
+        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
+                .execute(() -> this.importCookieFileAt(sources, index, imported, failed, duplicate, rateLimitRetries));
+    }
+
+    private boolean isRateLimited(Throwable error) {
+        FriendlyException friendly = FriendlyException.friendlyInChain(error);
+        return friendly != null && "ias.error.rateLimited".equals(friendly.key());
     }
 
     private boolean storeImportedAccount(MicrosoftAccount account) {

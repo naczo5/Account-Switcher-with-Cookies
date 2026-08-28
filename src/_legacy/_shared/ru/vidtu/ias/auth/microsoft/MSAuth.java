@@ -93,6 +93,14 @@ public final class MSAuth {
     private static final String SISU_AUTH_URL = "https://sisu.xboxlive.com/connect/XboxLive/?state=login&cobrandId=8058f65d-ce06-4c30-9559-473c9275a65d&tid=896928775&ru=https%3A%2F%2Fwww.minecraft.net%2Fen-us%2Flogin&aid=1142970254";
 
     /**
+     * Safety cap on how many redirects {@link #cookiesToMcaViaSisu} will follow while
+     * looking for the Xbox access token. The real chain length isn't a fixed contract of
+     * Microsoft's SSO flow and may vary (e.g. extra interstitial hops), so this is a generous
+     * upper bound to loop against rather than an assumption of the actual hop count.
+     */
+    private static final int MAX_SISU_REDIRECTS = 8;
+
+    /**
      * Browser-like user agent for cookie-based SISU authentication.
      */
     @NotNull
@@ -931,11 +939,26 @@ public final class MSAuth {
     public static CompletableFuture<String> cookiesToMcaViaSisu(@NotNull String cookieHeader) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String redirect1 = followSisuRedirect(SISU_AUTH_URL, null, 1);
-                String redirect2 = followSisuRedirect(redirect1, cookieHeader, 2);
-                String redirect3 = followSisuRedirect(redirect2, cookieHeader, 3);
+                // Follow the SISU login redirect chain until we either reach a URL carrying
+                // the Xbox access token, or run out of redirects to follow. The exact number
+                // of hops in this chain isn't a fixed contract of Microsoft's SSO flow, so
+                // this doesn't assume any particular count (unlike a fixed-count loop, which
+                // would silently stop one hop short if the chain ever grows).
+                String url = SISU_AUTH_URL;
+                String cookiesForHop = null;
+                String encoded = null;
+                for (int hop = 1; hop <= MAX_SISU_REDIRECTS; hop++) {
+                    url = followSisuRedirect(url, cookiesForHop, hop);
+                    // The first hop bootstraps the OAuth challenge without cookies;
+                    // every hop after that carries the session cookies.
+                    cookiesForHop = cookieHeader;
 
-                String encoded = extractSisuAccessToken(redirect3);
+                    encoded = extractSisuAccessToken(url);
+                    if (encoded != null && !encoded.isBlank()) {
+                        break;
+                    }
+                }
+
                 if (encoded == null || encoded.isBlank()) {
                     throw new FriendlyException("No Xbox access token in SISU cookie auth response.", "ias.error.cookie.expired");
                 }

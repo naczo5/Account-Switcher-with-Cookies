@@ -411,7 +411,11 @@ public final class CookieParser {
         }
 
         /**
-         * Builds a SISU {@code Cookie} header using only {@code login.live.com} cookies (RiseClient-style).
+         * Builds a SISU {@code Cookie} header using only cookies that a real browser would
+         * send to {@code login.live.com} (RiseClient-style): cookies scoped to that exact
+         * host, plus cookies scoped to any of its parent domains (e.g. {@code .live.com}),
+         * per standard cookie domain-matching rules. Cookies scoped to unrelated domains
+         * (e.g. {@code login.microsoftonline.com}, {@code microsoft.com}) are excluded.
          *
          * @return Cookie header value
          */
@@ -420,7 +424,7 @@ public final class CookieParser {
         public String toSisuCookieHeader() {
             Map<String, CookieEntry> byName = new LinkedHashMap<>();
             for (CookieEntry entry : this.cookies.values()) {
-                if (!entry.domain().toLowerCase().endsWith("login.live.com")) {
+                if (!appliesToSisuHost(entry.domain())) {
                     continue;
                 }
                 byName.putIfAbsent(entry.name(), entry);
@@ -437,6 +441,25 @@ public final class CookieParser {
                 header.append(entry.pair());
             }
             return header.toString();
+        }
+
+        /**
+         * Whether a cookie scoped to the given domain would be sent by a browser making a
+         * request to {@code login.live.com}. This is true if the domain is exactly
+         * {@code login.live.com}, or a parent domain of it (e.g. {@code live.com} or
+         * {@code .live.com}) - matching RFC 6265 domain-matching, not the reverse.
+         *
+         * @param cookieDomain Cookie's domain attribute, as stored in the parsed file
+         * @return Whether the cookie applies to the SISU host
+         */
+        @Contract(pure = true)
+        private static boolean appliesToSisuHost(@NotNull String cookieDomain) {
+            String domain = cookieDomain.toLowerCase();
+            if (domain.startsWith(".")) {
+                domain = domain.substring(1);
+            }
+            String host = "login.live.com";
+            return host.equals(domain) || host.endsWith("." + domain);
         }
     }
 }
