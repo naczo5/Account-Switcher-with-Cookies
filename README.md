@@ -1,1 +1,113 @@
-Account switcher mod with cookies and token login
+<img src="ias.png" alt="In-Game Account Switcher Icon" width=128 height=128/>
+
+# Account Switcher with Cookies (Forge / Fabric / Lunar / Localts)
+
+A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) with support for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
+
+Based on [naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies), plus token login, multi-file import, and account metadata refresh.
+
+## What this fork adds
+
+- **Localts import** — single-line `M.C…` Microsoft refresh tokens (Localts export format) are detected and exchanged for a full Minecraft session.
+- **Netscape cookie import** — tab-separated browser cookie exports with `__Host-MSAAUTH` / `__Host-MSAAUTHP` still work via Xbox SISU.
+- **Token login** — import Minecraft access tokens from files or paste.
+- **Multi-file cookie import** — the file picker can select several alt files at once.
+- **Lunar Client support** — keyboard shortcut (`O` by default) and Mod Menu entry work on Lunar's custom main menu where the vanilla title button does not appear.
+- **No encryption prompt on cookie import** — cookie imports skip the Crypt selection screen and are stored unencrypted.
+
+## Supported versions
+
+| Minecraft | Loader | Build (PowerShell) | Output jar |
+|-----------|--------|-------------------|------------|
+| **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\IAS-*+26.2-fabric.jar` |
+| **26.1** | Fabric / Lunar Fabric | `.\gradlew.bat :26.1.2-fabric:jar` | `build\libs\IAS-*+26.1.2-fabric.jar` |
+| **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\IAS-*+1.21.11-fabric.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` |
+
+**26.1** and **26.2** support both standard Fabric and Lunar Fabric profiles. **1.8.9 Forge** is a standard Forge build and can be opened from the title-screen button or the `O` keybind.
+
+## Dependencies
+
+**Fabric (Lunar):** [Fabric API](https://modrinth.com/mod/fabric-api) (required), [Mod Menu](https://modrinth.com/mod/modmenu) (recommended)
+
+## Install
+
+### 1.8.9 (Forge)
+
+1. Install Forge for **1.8.9**.
+2. Copy `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` into the instance's **mods** folder.
+3. Open the account switcher from its title-screen button or press **`O`**.
+
+### 26.2 / 26.1 / 1.21.11 (Fabric or Lunar Fabric)
+
+1. Use a **Fabric** or Lunar **Fabric** profile matching one of the supported versions above.
+2. Copy the matching jar from `build\libs\` into the profile **mods** folder, or install via the Lunar launcher mod browser.
+3. Ensure **Fabric API** is present for that Minecraft version.
+
+See [docs/LUNAR.md](docs/LUNAR.md) for Lunar Fabric setup and troubleshooting.
+
+## Import a Localts or cookie alt file
+
+1. Open the account switcher — press **`O`** (default keybind) on the main menu, or open **Mod Menu → In-Game Account Switcher**.
+2. **Add** → **Import Cookie**.
+3. Choose how to supply the file:
+   - **File Path** — path to your `.txt` alt file, e.g. `C:\alts\myaccount.txt`, or click **...** to open the OS file picker (multiple files are allowed)
+   - **Paste** — paste the full cookie file into the multi-line text box, or leave it empty and click **Import** to use the clipboard
+
+If import fails, check `latest.log` in your instance folder and search for `IAS/Cookie`.
+
+### Supported file formats
+
+| Format | What it looks like | Notes |
+|--------|-------------------|-------|
+| **Localts** | One line starting with `M.C`, often ending in `MsaArtifacts` | Primary format this fork targets |
+| **Netscape** | Tab-separated lines with `.login.live.com` domains | Full browser cookie jar |
+| **Cookie header** | Semicolon-separated `name=value` pairs on one or more lines | Pasted from devtools |
+
+Place personal alt files in a local `cookies/` folder (gitignored) — **never** commit them.
+
+## FAQ
+
+**Q:** The mod button doesn't show on the main menu.
+**A:** Press **`O`** or use Mod Menu (Fabric profiles). On 1.8.9, use the title-screen button or **`O`**.
+
+**Q:** Cookie import says expired or invalid.  
+**A:** Localts tokens and session cookies expire or get revoked. Export a fresh alt from Localts and import again.
+
+**Q:** Can I use normal Microsoft login instead of cookies?  
+**A:** Yes. **Add → Microsoft** still works and lets you choose password or hardware encryption.
+
+**Q:** Where is this fork hosted?  
+**A:** [GitHub — xCheezie/Account-Switcher](https://github.com/xCheezie/Account-Switcher). Cookie-import baseline: [naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies). Upstream IAS: [Modrinth](https://modrinth.com/mod/in-game-account-switcher), [CurseForge](https://www.curseforge.com/minecraft/mc-mods/in-game-account-switcher).
+
+**Q:** Is this mod open source?  
+**A:** Yes, under [GNU LGPLv3](LICENSE), same as upstream IAS.
+
+## Building
+
+```powershell
+# 26.1 Fabric / Lunar Fabric (uses the 26.1.2 version project)
+$env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.1.2-fabric"
+.\gradlew.bat :26.1.2-fabric:jar
+
+# 26.2 Fabric / Lunar Fabric
+$env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.2-fabric"
+.\gradlew.bat :26.2-fabric:jar
+
+# 1.21.11 Fabric
+$env:GRADLE_OPTS = "-Dru.vidtu.ias.only=1.21.11-fabric"
+.\gradlew.bat :1.21.11-fabric:remapJar
+
+# 1.8.9 Forge (standalone module — requires JDK 8)
+cd forge-1.8
+.\gradlew.bat build
+cd ..
+```
+
+Built jars appear in `build\libs\`.
+
+## Credits
+
+Based on [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) by VidTu and contributors, and [Account Switcher with Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies).
+
+Microsoft authentication flow references: [minecraft.wiki/Microsoft_authentication](https://minecraft.wiki/Microsoft_authentication).

@@ -26,11 +26,17 @@ public final class CookieAuth {
 
     public static MinecraftProfile authenticate(CookieParser.ParsedCookies cookies) throws Exception {
         if (cookies.refreshToken() != null && !cookies.refreshToken().trim().isEmpty()) {
-            String msa = localtsRefreshToMsa(cookies.refreshToken().trim());
-            return profileFromMsa(msa, "t=");
+            return profileFromRefreshToken(cookies.refreshToken().trim());
         }
         String mca = cookiesToMcaViaSisu(cookies.toSisuCookieHeader());
         return profileFromMca(mca);
+    }
+
+    /** Refreshes a Localts-backed account and preserves Microsoft's rotated refresh token. */
+    public static MinecraftProfile profileFromRefreshToken(String refresh) throws Exception {
+        MsaTokens tokens = localtsRefreshToMsa(refresh);
+        MinecraftProfile profile = profileFromMsa(tokens.access, "t=");
+        return new MinecraftProfile(profile.name, profile.uuid, profile.token, tokens.refresh);
     }
 
     /**
@@ -41,7 +47,7 @@ public final class CookieAuth {
         return profileFromMca(token);
     }
 
-    private static String localtsRefreshToMsa(String refresh) throws Exception {
+    private static MsaTokens localtsRefreshToMsa(String refresh) throws Exception {
         PostRequest pr = new PostRequest("https://login.live.com/oauth20_token.srf")
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .header("Accept", "application/json");
@@ -56,7 +62,8 @@ public final class CookieAuth {
             throw new CookieAuthException("Localts refresh token exchange failed.", "ias.error.cookie.expired");
         }
         JsonObject jo = AuthSys.gson().fromJson(pr.body(), JsonObject.class);
-        return jo.get("access_token").getAsString();
+        String rotated = jo.has("refresh_token") ? jo.get("refresh_token").getAsString() : refresh;
+        return new MsaTokens(jo.get("access_token").getAsString(), rotated);
     }
 
     private static String cookiesToMcaViaSisu(String cookieHeader) throws Exception {
@@ -200,11 +207,27 @@ public final class CookieAuth {
         public final String name;
         public final String uuid;
         public final String token;
+        public final String refreshToken;
 
         public MinecraftProfile(String name, String uuid, String token) {
+            this(name, uuid, token, "");
+        }
+
+        public MinecraftProfile(String name, String uuid, String token, String refreshToken) {
             this.name = name;
             this.uuid = uuid;
             this.token = token;
+            this.refreshToken = refreshToken == null ? "" : refreshToken;
+        }
+    }
+
+    private static final class MsaTokens {
+        private final String access;
+        private final String refresh;
+
+        private MsaTokens(String access, String refresh) {
+            this.access = access;
+            this.refresh = refresh;
         }
     }
 }

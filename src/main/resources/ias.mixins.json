@@ -7,6 +7,9 @@
   /*"refmap": "ias.mixins.refmap.json",
   *///?}
   "client": [
+    //? if fabric && >=1.21.10 {
+    "KeyboardHandlerMixin",
+    //?}
     //? if >=1.21.10 {
     "JoinMultiplayerScreenMixin",
     //?}

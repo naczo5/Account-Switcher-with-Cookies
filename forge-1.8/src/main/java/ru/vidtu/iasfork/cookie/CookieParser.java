@@ -50,11 +50,11 @@ public final class CookieParser {
         if (trimmed.contains("\t") && looksLikeNetscape(trimmed)) {
             return fromNetscape(trimmed);
         }
-        if (looksLikeCookieHeader(trimmed)) {
-            return fromCookieHeader(trimmed);
-        }
         if (looksLikeLocalts(trimmed)) {
             return fromLocalts(trimmed);
+        }
+        if (looksLikeCookieHeader(trimmed)) {
+            return fromCookieHeader(trimmed);
         }
         if (trimmed.contains("\t")) {
             return fromNetscape(trimmed);
@@ -187,12 +187,18 @@ public final class CookieParser {
             if (line.contains("Localts")) {
                 return true;
             }
-            if (line.contains("\t") || line.contains("=")) {
-                continue;
+            if (looksLikeLocaltsRefreshToken(line)) {
+                return true;
+            }
+            if (line.contains("\t")) {
+                return false;
             }
             int sep = line.indexOf(':');
             if (sep > 0 && looksLikeLocaltsRefreshToken(line.substring(sep + 1).trim())) {
                 return true;
+            }
+            if (line.contains("=")) {
+                continue;
             }
         }
         return false;
@@ -201,7 +207,7 @@ public final class CookieParser {
     private static ParsedCookies fromLocalts(String text) throws CookieAuthException {
         String token = extractLocaltsToken(text);
         if (token == null || token.trim().isEmpty()) {
-            throw new CookieAuthException("Localts file is missing a valid MSA session token (username:M.C...).", "ias.error.cookie.invalid");
+            throw new CookieAuthException("Localts input is missing a valid MSA session token (M.C... or username:M.C...).", "ias.error.cookie.invalid");
         }
         return new ParsedCookies(Collections.<String, CookieEntry>emptyMap(), token);
     }
