@@ -345,4 +345,13 @@ public final class IAS {
     public static void gameDisclaimerShownStorage() {
         IASStorage.gameDisclaimerShown(gameDirectory);
     }
+
+    /**
+     * Delegates to {@link IASStorage#accessHintShown(Path)} with {@link #gameDirectory}.
+     *
+     * @throws RuntimeException If unable to set or write access hint shown persistent state
+     */
+    public static void accessHintShownStorage() {
+        IASStorage.accessHintShown(gameDirectory);
+    }
 }

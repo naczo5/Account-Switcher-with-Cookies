@@ -42,6 +42,7 @@ import org.jspecify.annotations.NullMarked;
 import org.lwjgl.glfw.GLFW;
 import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.IASMinecraft;
+import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.utils.MainMenuScreens;
 
 /**
@@ -87,11 +88,6 @@ public final class IFabric implements ClientModInitializer {
      * Previous O-key state for the Lunar Client GLFW fallback.
      */
     private static boolean oWasDown;
-
-    /**
-     * Whether the Lunar access hint toast was shown this session.
-     */
-    private static boolean lunarHintShown;
 
     /**
      * Creates a new mod.
@@ -191,8 +187,8 @@ public final class IFabric implements ClientModInitializer {
      * Shows a one-time hint on the main menu (especially useful on Lunar Client).
      */
     private static void maybeShowAccessHint(net.minecraft.client.Minecraft client) {
-        if (lunarHintShown || client.player != null || client.level != null) return;
-        lunarHintShown = true;
+        if (IASStorage.accessHintShown || client.player != null || client.level != null) return;
+        IAS.accessHintShownStorage();
         //? if >=26.2 {
         var manager = client.gui.toastManager();
         manager.addToast(new SystemToast(

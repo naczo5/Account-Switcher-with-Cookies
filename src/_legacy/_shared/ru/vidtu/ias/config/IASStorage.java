@@ -113,6 +113,11 @@ public final class IASStorage {
     public static boolean gameDisclaimerShown = false;
 
     /**
+     * Whether the access hint toast was shown.
+     */
+    public static boolean accessHintShown = false;
+
+    /**
      * An instance of this class cannot be created.
      *
      * @throws AssertionError Always
@@ -179,6 +184,7 @@ public final class IASStorage {
             Path folder = path.resolve("_IAS_ACCOUNTS_DO_NOT_SEND_TO_ANYONE/.hidden");
             Path file = folder.resolve("accounts_v1.do_not_send_to_anyone");
             gameDisclaimerShown = Files.isRegularFile(folder.resolve("game_disclaimer_shown"), LinkOption.NOFOLLOW_LINKS);
+            accessHintShown = Files.isRegularFile(folder.resolve("access_hint_shown"), LinkOption.NOFOLLOW_LINKS);
 
             // Skip if it doesn't exist.
             if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
@@ -310,6 +316,33 @@ public final class IASStorage {
         } catch (Throwable t) {
             // Rethrow.
             throw new RuntimeException("Unable to mark game disclaimer as shown.", t);
+        }
+    }
+
+    /**
+     * Sets the {@link #accessHintShown} to {@code true} and writes the persistent state file.
+     *
+     * @param path Game directory
+     * @throws RuntimeException If unable to set or write access hint shown persistent state
+     */
+    public static void accessHintShown(@NotNull Path path) {
+        try {
+            // Log it.
+            LOGGER.debug("IAS: Marking access hint as shown into {}...", path);
+
+            // Set the parameter.
+            accessHintShown = true;
+
+            // Create the file.
+            Path file = path.resolve("_IAS_ACCOUNTS_DO_NOT_SEND_TO_ANYONE/.hidden/access_hint_shown");
+            Files.createDirectories(file.getParent());
+            Files.createFile(file);
+
+            // Log it.
+            LOGGER.debug("IAS: Marked access hint as shown to {}.", file);
+        } catch (Throwable t) {
+            // Rethrow.
+            throw new RuntimeException("Unable to mark access hint as shown.", t);
         }
     }
 }
