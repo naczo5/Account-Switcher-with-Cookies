@@ -438,12 +438,7 @@ public final class IASMinecraft {
             //?} else {
             /*UserApiService apiService = online ? accessor.ias$createUserApiService(service, config) : UserApiService.OFFLINE;
             *///?}
-            UserApiService.UserProperties properties;
-            try {
-                properties = apiService.fetchProperties();
-            } catch (Throwable ignored) {
-                properties = UserApiService.OFFLINE_PROPERTIES;
-            }
+            UserApiService.UserProperties properties = fetchUserProperties(apiService, online);
             CompletableFuture<UserApiService.UserProperties> propertiesFuture = CompletableFuture.completedFuture(properties);
             //? if >= 26.2 {
             FriendsService friends = service.createFriendsService(data.token());
@@ -488,6 +483,29 @@ public final class IASMinecraft {
             // Rethrow.
             throw new RuntimeException("Unable to change account to: " + data, t);
         });
+    }
+
+    private static UserApiService.UserProperties fetchUserProperties(UserApiService apiService, boolean online) {
+        if (!online) return UserApiService.OFFLINE_PROPERTIES;
+        Throwable last = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                return apiService.fetchProperties();
+            } catch (Throwable t) {
+                last = t;
+                LOGGER.warn("IAS: Unable to fetch online user properties (attempt {}/3).", attempt, t);
+                if (attempt < 3) {
+                    try {
+                        Thread.sleep(500L * attempt);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+        LOGGER.error("IAS: Unable to fetch online user properties after retries. Falling back to offline properties.", last);
+        return UserApiService.OFFLINE_PROPERTIES;
     }
 
     /**

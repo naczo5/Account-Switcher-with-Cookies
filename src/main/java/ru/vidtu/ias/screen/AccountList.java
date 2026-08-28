@@ -71,6 +71,16 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private static final Map<UUID, NameChangeState> NAME_CHANGES = new WeakHashMap<>(4);
 
     /**
+     * Last time a stored Microsoft account name was refreshed from Mojang by UUID.
+     */
+    private static final Map<UUID, Long> PROFILE_NAME_REFRESHES = new WeakHashMap<>(4);
+
+    /**
+     * Stored profile-name refreshes currently running.
+     */
+    private static final Set<UUID> PROFILE_NAME_REFRESHING = new LinkedHashSet<>();
+
+    /**
      * Name-change availability check queue.
      */
     private static final Map<UUID, MicrosoftAccount> NAME_CHANGE_QUEUE = new LinkedHashMap<>();
@@ -104,6 +114,11 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * Delay between token fallback checks, to avoid rate-limiting normal logins.
      */
     private static final long NAME_CHANGE_TOKEN_CHECK_DELAY_MS = 5000L;
+
+    /**
+     * Delay before checking the same stored profile name again.
+     */
+    private static final long PROFILE_NAME_REFRESH_DELAY_MS = TimeUnit.MINUTES.toMillis(10L);
 
     /**
      * Logger for this class.
@@ -188,6 +203,9 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             // Notify the root.
             this.screen.updateSelected();
 
+            // Refresh stale stored names in the background.
+            this.refreshStoredProfileNames();
+
             // Don't process search.
             return;
         }
@@ -210,6 +228,9 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Notify the root.
         this.screen.updateSelected();
+
+        // Refresh stale stored names in the background.
+        this.refreshStoredProfileNames();
     }
 
     @Nullable
@@ -599,6 +620,68 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             NAME_CHANGE_QUEUE.remove(uuid);
             NAME_CHANGE_TOKEN_QUEUE.remove(uuid);
         }
+    }
+
+    private void refreshStoredProfileNames() {
+        long now = System.currentTimeMillis();
+        for (Account account : IASStorage.ACCOUNTS) {
+            if (!(account instanceof MicrosoftAccount microsoft)) {
+                continue;
+            }
+            UUID uuid = microsoft.uuid();
+            if (uuid.version() != 4 || !this.queueProfileNameRefresh(uuid, now)) {
+                continue;
+            }
+            this.refreshStoredProfileName(microsoft, uuid);
+        }
+    }
+
+    private boolean queueProfileNameRefresh(UUID uuid, long now) {
+        synchronized (PROFILE_NAME_REFRESHES) {
+            if (PROFILE_NAME_REFRESHING.contains(uuid)) {
+                return false;
+            }
+            Long last = PROFILE_NAME_REFRESHES.get(uuid);
+            if (last != null && now - last < PROFILE_NAME_REFRESH_DELAY_MS) {
+                return false;
+            }
+            PROFILE_NAME_REFRESHING.add(uuid);
+            PROFILE_NAME_REFRESHES.put(uuid, now);
+            return true;
+        }
+    }
+
+    private void refreshStoredProfileName(MicrosoftAccount account, UUID uuid) {
+        CompletableFuture.supplyAsync(() -> {
+            //? if >=1.21.10 {
+            ProfileResult result = this.minecraft.services().sessionService().fetchProfile(uuid, false);
+            //?} else
+            /*ProfileResult result = this.minecraft.getMinecraftSessionService().fetchProfile(uuid, false);*/
+            return result != null ? result.profile() : null;
+        }, IAS.executor()).thenAcceptAsync(profile -> {
+            synchronized (PROFILE_NAME_REFRESHES) {
+                PROFILE_NAME_REFRESHING.remove(uuid);
+            }
+            if (profile == null || profile.name() == null || profile.name().isBlank()) {
+                return;
+            }
+            String currentName = profile.name();
+            if (currentName.equals(account.name())) {
+                return;
+            }
+            LOGGER.info("IAS: Updating stored profile name for {} from '{}' to '{}'.", uuid, account.name(), currentName);
+            account.updateProfile(uuid, currentName);
+            AccountList.clearSkin(uuid);
+            AccountList.clearNameChange(uuid);
+            this.saveStorage();
+            this.update(this.screen.search().getValue());
+        }, this.minecraft).exceptionally(t -> {
+            synchronized (PROFILE_NAME_REFRESHES) {
+                PROFILE_NAME_REFRESHING.remove(uuid);
+            }
+            LOGGER.debug("IAS: Unable to refresh stored profile name for {}.", account, t);
+            return null;
+        });
     }
 
     /**
