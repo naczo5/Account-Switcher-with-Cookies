@@ -82,17 +82,17 @@ final class ConfirmPopupScreen extends Screen {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        PopupButton confirmButton = new PopupButton(this.width / 2 - 75, this.height / 2 + 49 - 22, 74, 20,
+        PopupButton confirmButton = new PopupButton(this.width / 2 - 75, this.height / 2 + 58 - 22, 74, 20,
                 this.confirm, btn -> {
             this.handler.run();
         }, Supplier::get);
         confirmButton.color(0.5F, 1.0F, 0.5F, true);
         this.addRenderableWidget(confirmButton);
 
-        this.addRenderableWidget(new PopupButton(this.width / 2 + 1, this.height / 2 + 49 - 22, 74, 20,
+        this.addRenderableWidget(new PopupButton(this.width / 2 + 1, this.height / 2 + 58 - 22, 74, 20,
                 CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
 
-        this.label = MultiLineLabel.create(this.font, this.prompt, 150);
+        this.label = MultiLineLabel.create(this.font, this.prompt, 220);
     }
 
     @Override
@@ -111,9 +111,9 @@ final class ConfirmPopupScreen extends Screen {
         pose.pushMatrix();
         pose.scale(2.0F, 2.0F);
         //? if >=26.1 {
-        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 49 / 2, 0xFF_FF_FF_FF);
+        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 58 / 2, 0xFF_FF_FF_FF);
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 49 / 2, 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 58 / 2, 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
         IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - 4);
@@ -144,9 +144,9 @@ final class ConfirmPopupScreen extends Screen {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        graphics.fill(centerX - 80, centerY - 50, centerX + 80, centerY + 50, 0xF8_20_20_30);
-        graphics.fill(centerX - 79, centerY - 51, centerX + 79, centerY - 50, 0xF8_20_20_30);
-        graphics.fill(centerX - 79, centerY + 50, centerX + 79, centerY + 51, 0xF8_20_20_30);
+        graphics.fill(centerX - 125, centerY - 58, centerX + 125, centerY + 58, 0xF8_20_20_30);
+        graphics.fill(centerX - 124, centerY - 59, centerX + 124, centerY - 58, 0xF8_20_20_30);
+        graphics.fill(centerX - 124, centerY + 58, centerX + 124, centerY + 59, 0xF8_20_20_30);
     }
 
     @Override

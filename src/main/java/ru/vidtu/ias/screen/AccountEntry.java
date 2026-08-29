@@ -37,6 +37,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import org.jetbrains.annotations.NotNull;
 import ru.vidtu.ias.account.Account;
+import ru.vidtu.ias.auth.hypixel.HypixelBanResult;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.config.IASConfig;
 
@@ -188,9 +189,47 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
             }
         }
 
+        // Render Hypixel ban status when available.
+        boolean hypixelMarkerHovered = false;
+        AccountList.HypixelBanPhase hypixelPhase = this.list.hypixelBanPhase(this);
+        HypixelBanResult hypixelResult = this.list.hypixelBanResult(this);
+        if (hypixelPhase != AccountList.HypixelBanPhase.NOT_APPLICABLE
+                && (hypixelPhase != AccountList.HypixelBanPhase.UNKNOWN || hypixelResult != null)) {
+            Component hypixelMarker;
+            int hypixelColor;
+            if (hypixelPhase == AccountList.HypixelBanPhase.CHECKING) {
+                hypixelMarker = Component.literal("H?");
+                hypixelColor = 0xFF_FF_FF_00;
+            } else if (hypixelResult != null) {
+                hypixelMarker = switch (hypixelResult.status()) {
+                    case UNBANNED -> Component.literal("H\u2713");
+                    case BANNED -> Component.literal("H\u2715");
+                    case ERROR -> Component.literal("H!");
+                };
+                hypixelColor = switch (hypixelResult.status()) {
+                    case UNBANNED -> 0xFF_00_FF_00;
+                    case BANNED -> 0xFF_FF_40_40;
+                    case ERROR -> 0xFF_FF_A0_00;
+                };
+            } else {
+                hypixelMarker = Component.literal("H");
+                hypixelColor = 0xFF_80_80_80;
+            }
+            int hypixelMarkerX = Math.min(nameX + nameWidth + 18, x + width - 24);
+            //? if >=26.1 {
+            graphics.text(this.minecraft.font, hypixelMarker, hypixelMarkerX, y, hypixelColor);
+            //?} else
+            /*graphics.drawString(this.minecraft.font, hypixelMarker, hypixelMarkerX, y, hypixelColor);*/
+            hypixelMarkerHovered = mouseX >= hypixelMarkerX && mouseX <= hypixelMarkerX + 16 && mouseY >= y && mouseY <= y + height;
+            if (hypixelMarkerHovered) {
+                Component tooltip = this.hypixelTooltip(hypixelPhase, hypixelResult);
+                graphics.setTooltipForNextFrame(tooltip, mouseX, mouseY);
+            }
+        }
+
         // Render account tooltip only above the name, so it does not override marker tooltips.
         boolean nameHovered = mouseX >= nameX && mouseX <= nameX + nameWidth && mouseY >= y && mouseY <= y + height;
-        if (hovered && nameHovered && !markerHovered) {
+        if (hovered && nameHovered && !markerHovered && !hypixelMarkerHovered) {
             if ((System.nanoTime() - this.lastFree) >= 500_000_000L) {
                 graphics.setTooltipForNextFrame(this.tooltip, mouseX, mouseY);
             }
@@ -269,6 +308,32 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
      */
     Account account() {
         return this.account;
+    }
+
+    private Component hypixelTooltip(AccountList.HypixelBanPhase phase, HypixelBanResult result) {
+        if (phase == AccountList.HypixelBanPhase.CHECKING) {
+            return Component.translatable("ias.hypixel.checking");
+        }
+        if (result == null) {
+            return Component.translatable("ias.hypixel.unknown");
+        }
+        return switch (result.status()) {
+            case UNBANNED -> Component.translatable("ias.hypixel.unbanned");
+            case BANNED -> {
+                Component line = Component.translatable("ias.hypixel.banned");
+                if (result.banType() != null && !result.banType().isBlank()) {
+                    line = line.copy().append("\n").append(Component.translatable("ias.hypixel.type", result.banType()));
+                }
+                if (result.duration() != null && !result.duration().isBlank()) {
+                    line = line.copy().append("\n").append(Component.translatable("ias.hypixel.duration", result.duration()));
+                }
+                if (result.reason() != null && !result.reason().isBlank()) {
+                    line = line.copy().append("\n").append(Component.translatable("ias.hypixel.reason", result.reason()));
+                }
+                yield line;
+            }
+            case ERROR -> Component.translatable("ias.hypixel.error", result.errorMessage() != null ? result.errorMessage() : "");
+        };
     }
 
     @Override

@@ -283,6 +283,16 @@ public final class IAS {
     }
 
     /**
+     * Gets the game directory.
+     *
+     * @return Game directory
+     */
+    @Contract(pure = true)
+    public static Path gameDirectory() {
+        return gameDirectory;
+    }
+
+    /**
      * Gets the disabled state.
      *
      * @return Whether the mod is disabled remotely

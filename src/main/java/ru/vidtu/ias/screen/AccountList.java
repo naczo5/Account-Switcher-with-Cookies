@@ -34,7 +34,10 @@ import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.account.OfflineAccount;
 import ru.vidtu.ias.auth.LoginData;
 import ru.vidtu.ias.auth.handlers.LoginHandler;
+import ru.vidtu.ias.auth.hypixel.HypixelBanChecker;
+import ru.vidtu.ias.auth.hypixel.HypixelBanResult;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
+import ru.vidtu.ias.config.ChecksCache;
 import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
@@ -46,6 +49,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
@@ -68,17 +72,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     /**
      * Name-change availability cache.
      */
-    private static final Map<UUID, NameChangeState> NAME_CHANGES = new WeakHashMap<>(4);
-
-    /**
-     * Last time a stored Microsoft account name was refreshed from Mojang by UUID.
-     */
-    private static final Map<UUID, Long> PROFILE_NAME_REFRESHES = new WeakHashMap<>(4);
-
-    /**
-     * Stored profile-name refreshes currently running.
-     */
-    private static final Set<UUID> PROFILE_NAME_REFRESHING = new LinkedHashSet<>();
+    private static final Map<UUID, NameChangeState> NAME_CHANGES = new ConcurrentHashMap<>();
 
     /**
      * Name-change availability check queue.
@@ -91,7 +85,33 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private static final Object NAME_CHANGE_LOCK = new Object();
 
     /**
-     * Whether a name-change check worker is active.
+     * Whether a username/name-change check worker is active.
+     */
+    private static boolean usernameWorkerRunning;
+
+    /**
+     * Whether the current username check run was cancelled.
+     */
+    private static volatile boolean usernameCheckCancelled;
+
+    /**
+     * Active username check progress listener.
+     */
+    @Nullable
+    private static UsernameCheckProgress usernameProgress;
+
+    /**
+     * Total accounts in the current username check run.
+     */
+    private static int usernameCheckTotal;
+
+    /**
+     * Accounts finished in the current username check run.
+     */
+    private static int usernameCheckCompleted;
+
+    /**
+     * Current active public NameMC workers.
      */
     private static int nameChangePublicWorkers;
 
@@ -114,6 +134,80 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * Delay between token fallback checks, to avoid rate-limiting normal logins.
      */
     private static final long NAME_CHANGE_TOKEN_CHECK_DELAY_MS = 5000L;
+
+    /**
+     * Hypixel ban status cache.
+     */
+    private static final Map<UUID, HypixelBanResult> HYPIXEL_BANS = new ConcurrentHashMap<>();
+
+    /**
+     * Accounts currently being checked or queued for Hypixel ban checks.
+     */
+    private static final Map<UUID, HypixelBanPhase> HYPIXEL_PHASES = new ConcurrentHashMap<>();
+
+    /**
+     * Hypixel ban check queue.
+     */
+    private static final Map<UUID, MicrosoftAccount> HYPIXEL_QUEUE = new LinkedHashMap<>();
+
+    /**
+     * Synchronization lock for Hypixel ban checks.
+     */
+    private static final Object HYPIXEL_LOCK = new Object();
+
+    /**
+     * Whether a Hypixel ban check worker is active.
+     */
+    private static boolean hypixelWorkerRunning;
+
+    /**
+     * Delay between Hypixel ban checks.
+     */
+    private static final long HYPIXEL_CHECK_DELAY_MS = 400L;
+
+    /**
+     * Maximum time allowed per account (login + Hypixel connect).
+     */
+    private static final long HYPIXEL_ACCOUNT_TIMEOUT_MS = 75_000L;
+
+    /**
+     * Whether the current Hypixel check run was cancelled.
+     */
+    private static volatile boolean hypixelCheckCancelled;
+
+    /**
+     * Active Hypixel check progress listener.
+     */
+    @Nullable
+    private static HypixelCheckProgress hypixelProgress;
+
+    /**
+     * Total accounts in the current Hypixel check run.
+     */
+    private static int hypixelCheckTotal;
+
+    /**
+     * Accounts finished in the current Hypixel check run.
+     */
+    private static int hypixelCheckCompleted;
+
+    interface UsernameCheckProgress {
+        void onUsernameProgress(int completed, int total, String accountName, Component stage);
+
+        void onUsernameComplete();
+    }
+
+    interface HypixelCheckProgress {
+        void onHypixelProgress(int completed, int total, String accountName, Component stage);
+
+        void onHypixelComplete();
+    }
+
+    enum HypixelBanPhase {
+        UNKNOWN,
+        CHECKING,
+        NOT_APPLICABLE
+    }
 
     /**
      * Delay before checking the same stored profile name again.
@@ -170,7 +264,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
     @Override
     public int getRowWidth() {
-        return Math.min(super.getRowWidth(), this.screen.width - (85 + 10) * 2);
+        return Math.min(220, this.width - 20);
     }
 
     @Override
@@ -203,9 +297,6 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             // Notify the root.
             this.screen.updateSelected();
 
-            // Refresh stale stored names in the background.
-            this.refreshStoredProfileNames();
-
             // Don't process search.
             return;
         }
@@ -228,9 +319,6 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         // Notify the root.
         this.screen.updateSelected();
-
-        // Refresh stale stored names in the background.
-        this.refreshStoredProfileNames();
     }
 
     @Nullable
@@ -316,6 +404,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         // Keep the background name-change checker from independently logging into (and
         // potentially rotating the refresh token of) this account while we copy from it.
         suppressNameChangeCheck(account.uuid());
+        suppressBanCheck(account.uuid());
 
         // Initialize and set the (re)login screen, used in copy-only mode.
         LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.ACCESS_TOKEN);
@@ -365,6 +454,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private void doCopyRefreshToken(Account account) {
         // Same race-avoidance as doCopyToken() - see suppressNameChangeCheck() javadoc.
         suppressNameChangeCheck(account.uuid());
+        suppressBanCheck(account.uuid());
 
         // Initialize and set the (re)login screen, used in copy-only mode.
         LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.REFRESH_TOKEN);
@@ -464,6 +554,9 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         if (!confirm) {
             // Remove.
             IASStorage.ACCOUNTS.remove(account);
+            AccountList.clearSkin(account.uuid());
+            AccountList.clearNameChange(account.uuid());
+            AccountList.clearHypixelBan(account.uuid());
 
             // Save storage.
             try {
@@ -482,6 +575,9 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         final Screen delete = new DeletePopupScreen(this.screen, account, () -> {
             // Delete if confirmed.
             IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
+            AccountList.clearSkin(account.uuid());
+            AccountList.clearNameChange(account.uuid());
+            AccountList.clearHypixelBan(account.uuid());
 
             // Save storage.
             try {
@@ -505,6 +601,11 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         }
 
         Runnable remove = () -> {
+            for (Account account : accounts) {
+                AccountList.clearSkin(account.uuid());
+                AccountList.clearNameChange(account.uuid());
+                AccountList.clearHypixelBan(account.uuid());
+            }
             IASStorage.ACCOUNTS.removeIf(accounts::contains);
             this.selectedAccounts.clear();
             try {
@@ -619,82 +720,17 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             NAME_CHANGES.remove(uuid);
             NAME_CHANGE_QUEUE.remove(uuid);
             NAME_CHANGE_TOKEN_QUEUE.remove(uuid);
+            ChecksCache.removeNameChange(uuid);
+            try {
+                ChecksCache.save(IAS.gameDirectory());
+            } catch (Throwable ignored) {
+            }
         }
-    }
-
-    private void refreshStoredProfileNames() {
-        long now = System.currentTimeMillis();
-        for (Account account : IASStorage.ACCOUNTS) {
-            if (!(account instanceof MicrosoftAccount microsoft)) {
-                continue;
-            }
-            UUID uuid = microsoft.uuid();
-            if (uuid.version() != 4 || !this.queueProfileNameRefresh(uuid, now)) {
-                continue;
-            }
-            this.refreshStoredProfileName(microsoft, uuid);
-        }
-    }
-
-    private boolean queueProfileNameRefresh(UUID uuid, long now) {
-        synchronized (PROFILE_NAME_REFRESHES) {
-            if (PROFILE_NAME_REFRESHING.contains(uuid)) {
-                return false;
-            }
-            Long last = PROFILE_NAME_REFRESHES.get(uuid);
-            if (last != null && now - last < PROFILE_NAME_REFRESH_DELAY_MS) {
-                return false;
-            }
-            PROFILE_NAME_REFRESHING.add(uuid);
-            PROFILE_NAME_REFRESHES.put(uuid, now);
-            return true;
-        }
-    }
-
-    private void refreshStoredProfileName(MicrosoftAccount account, UUID uuid) {
-        CompletableFuture.supplyAsync(() -> {
-            //? if >=1.21.10 {
-            ProfileResult result = this.minecraft.services().sessionService().fetchProfile(uuid, false);
-            //?} else
-            /*ProfileResult result = this.minecraft.getMinecraftSessionService().fetchProfile(uuid, false);*/
-            return result != null ? result.profile() : null;
-        }, IAS.executor()).thenAcceptAsync(profile -> {
-            synchronized (PROFILE_NAME_REFRESHES) {
-                PROFILE_NAME_REFRESHING.remove(uuid);
-            }
-            if (profile == null || profile.name() == null || profile.name().isBlank()) {
-                return;
-            }
-            String currentName = profile.name();
-            if (currentName.equals(account.name())) {
-                return;
-            }
-            LOGGER.info("IAS: Updating stored profile name for {} from '{}' to '{}'.", uuid, account.name(), currentName);
-            account.updateProfile(uuid, currentName);
-            AccountList.clearSkin(uuid);
-            AccountList.clearNameChange(uuid);
-            this.saveStorage();
-            this.update(this.screen.search().getValue());
-        }, this.minecraft).exceptionally(t -> {
-            synchronized (PROFILE_NAME_REFRESHES) {
-                PROFILE_NAME_REFRESHING.remove(uuid);
-            }
-            LOGGER.debug("IAS: Unable to refresh stored profile name for {}.", account, t);
-            return null;
-        });
     }
 
     /**
      * Removes the given account from the background name-change availability queues and,
      * if it wasn't already resolved, marks it as unresolved rather than leaving it queued.
-     * <p>
-     * The background name-change checker calls {@link MicrosoftAccount#login} on its own,
-     * completely independently of anything the user does. Since Microsoft rotates an
-     * account's refresh token on every redemption, that unrelated background login can
-     * silently invalidate a refresh token the user just copied (or is about to copy) via
-     * "Copy Token"/"Copy Refresh Token". This doesn't eliminate every possible race (e.g.
-     * gameplay logins elsewhere still refresh independently), but it stops this specific,
-     * very common source of it for the account currently being copied.
      *
      * @param uuid Account UUID
      */
@@ -717,8 +753,15 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
                 if (error != null || info == null) {
                     LOGGER.debug("IAS: Unable to update logged-in name-change availability for {}.", uuid, error);
                     NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
+                    ChecksCache.putNameChange(uuid, NameChangeState.UNKNOWN.name());
                 } else {
-                    NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
+                    NameChangeState state = info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE;
+                    NAME_CHANGES.put(uuid, state);
+                    ChecksCache.putNameChange(uuid, state.name());
+                }
+                try {
+                    ChecksCache.save(IAS.gameDirectory());
+                } catch (Throwable ignored) {
                 }
             }
         }, IAS.executor());
@@ -736,18 +779,74 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             if (state != null) {
                 return state;
             }
-            NAME_CHANGES.put(uuid, NameChangeState.CHECKING);
-            NAME_CHANGE_QUEUE.putIfAbsent(uuid, microsoft);
+            String cached = ChecksCache.getNameChange(uuid);
+            if (cached != null) {
+                try {
+                    state = NameChangeState.valueOf(cached);
+                    NAME_CHANGES.put(uuid, state);
+                    return state;
+                } catch (Throwable ignored) {
+                }
+            }
+            return NameChangeState.UNKNOWN;
+        }
+    }
+
+    boolean usernameCheckInProgress() {
+        synchronized (NAME_CHANGE_LOCK) {
+            return usernameWorkerRunning || !NAME_CHANGE_QUEUE.isEmpty() || !NAME_CHANGE_TOKEN_QUEUE.isEmpty() || nameChangePublicWorkers > 0 || nameChangeTokenWorkerRunning;
+        }
+    }
+
+    void checkAllUsernames() {
+        this.checkAllUsernames(null);
+    }
+
+    void checkAllUsernames(@Nullable UsernameCheckProgress progress) {
+        synchronized (NAME_CHANGE_LOCK) {
+            usernameCheckCancelled = false;
+            usernameProgress = progress;
+            usernameCheckCompleted = 0;
+            NAME_CHANGE_QUEUE.clear();
+            NAME_CHANGE_TOKEN_QUEUE.clear();
+            for (Account account : IASStorage.ACCOUNTS) {
+                if (!(account instanceof MicrosoftAccount microsoft)) {
+                    continue;
+                }
+                UUID uuid = microsoft.uuid();
+                NAME_CHANGES.put(uuid, NameChangeState.CHECKING);
+                NAME_CHANGE_QUEUE.putIfAbsent(uuid, microsoft);
+            }
+            usernameCheckTotal = NAME_CHANGE_QUEUE.size();
+            usernameWorkerRunning = usernameCheckTotal > 0;
+            LOGGER.info("IAS: Starting username check for {} account(s).", usernameCheckTotal);
             this.startNameChangePublicWorkers();
         }
-        return NameChangeState.CHECKING;
+        this.reportUsernameProgress(usernameCheckCompleted, usernameCheckTotal, "", Component.translatable("ias.usernames.progress.preparing"));
+        this.refreshUsernameDisplay();
+    }
+
+    void cancelUsernameCheck() {
+        synchronized (NAME_CHANGE_LOCK) {
+            usernameCheckCancelled = true;
+            NAME_CHANGE_QUEUE.clear();
+            NAME_CHANGE_TOKEN_QUEUE.clear();
+            usernameProgress = null;
+            usernameWorkerRunning = false;
+        }
+        LOGGER.info("IAS: Username check cancelled.");
     }
 
     private void startNameChangePublicWorkers() {
+        if (usernameCheckCancelled) {
+            this.checkUsernameCheckFinished();
+            return;
+        }
         while (true) {
             MicrosoftAccount account;
             synchronized (NAME_CHANGE_LOCK) {
-                if (nameChangePublicWorkers >= NAME_CHANGE_PUBLIC_WORKERS || NAME_CHANGE_QUEUE.isEmpty()) {
+                if (usernameCheckCancelled || nameChangePublicWorkers >= NAME_CHANGE_PUBLIC_WORKERS || NAME_CHANGE_QUEUE.isEmpty()) {
+                    this.checkUsernameCheckFinished();
                     return;
                 }
                 UUID uuid = NAME_CHANGE_QUEUE.keySet().iterator().next();
@@ -756,24 +855,67 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             }
 
             MicrosoftAccount checkAccount = account;
-            MSAuth.nameChangeInfoFromNameMc(checkAccount.uuid()).whenCompleteAsync((info, error) -> {
+            this.reportUsernameProgress(usernameCheckCompleted, usernameCheckTotal, checkAccount.name(),
+                    Component.translatable("ias.usernames.progress.checking"));
+
+            CompletableFuture<String> profileFuture = (checkAccount.uuid().version() == 4)
+                    ? CompletableFuture.supplyAsync(() -> {
+                        //? if >=1.21.10 {
+                        ProfileResult result = this.minecraft.services().sessionService().fetchProfile(checkAccount.uuid(), false);
+                        //?} else
+                        /*ProfileResult result = this.minecraft.getMinecraftSessionService().fetchProfile(checkAccount.uuid(), false);*/
+                        return result != null && result.profile() != null ? result.profile().name() : null;
+                    }, IAS.executor())
+                    : CompletableFuture.completedFuture(null);
+
+            profileFuture.thenComposeAsync(currentName -> {
+                if (currentName != null && !currentName.isBlank() && !currentName.equals(checkAccount.name())) {
+                    LOGGER.info("IAS: Updating stored profile name for {} from '{}' to '{}'.", checkAccount.uuid(), checkAccount.name(), currentName);
+                    checkAccount.updateProfile(checkAccount.uuid(), currentName);
+                    AccountList.clearSkin(checkAccount.uuid());
+                    this.saveStorage();
+                }
+                return MSAuth.nameChangeInfoFromNameMc(checkAccount.uuid());
+            }, IAS.executor()).whenCompleteAsync((info, error) -> {
+                if (usernameCheckCancelled) {
+                    synchronized (NAME_CHANGE_LOCK) {
+                        nameChangePublicWorkers--;
+                    }
+                    this.checkUsernameCheckFinished();
+                    return;
+                }
                 UUID uuid = checkAccount.uuid();
                 boolean needsTokenFallback = false;
                 synchronized (NAME_CHANGE_LOCK) {
                     nameChangePublicWorkers--;
                     if (error != null || info == null) {
                         FriendlyException friendly = FriendlyException.friendlyInChain(error);
-                        if (friendly != null && "ias.profile.name.unknown".equals(friendly.key())) {
+                        if (friendly != null && "ias.profile.name.unknown".equals(friendly.key()) && checkAccount.canLogin()) {
                             needsTokenFallback = true;
                             NAME_CHANGE_TOKEN_QUEUE.putIfAbsent(uuid, checkAccount);
                         } else {
                             LOGGER.warn("IAS: Unable to check public name-change availability for {}.", checkAccount, error);
                             NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
+                            ChecksCache.putNameChange(uuid, NameChangeState.UNKNOWN.name());
+                            usernameCheckCompleted++;
                         }
                     } else {
-                        NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
+                        NameChangeState state = info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE;
+                        NAME_CHANGES.put(uuid, state);
+                        ChecksCache.putNameChange(uuid, state.name());
+                        usernameCheckCompleted++;
+                    }
+                    try {
+                        ChecksCache.save(IAS.gameDirectory());
+                    } catch (Throwable ignored) {
                     }
                 }
+                this.reportUsernameProgress(usernameCheckCompleted, usernameCheckTotal, checkAccount.name(),
+                        Component.translatable("ias.usernames.progress.accountDone", checkAccount.name()));
+                this.minecraft.execute(() -> {
+                    this.screen.updateUsernameCheckButton();
+                    this.update(this.screen.search().getValue());
+                });
                 if (needsTokenFallback) {
                     this.startNameChangeTokenWorker();
                 }
@@ -793,10 +935,19 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     }
 
     private void runNextNameChangeTokenCheck() {
+        if (usernameCheckCancelled) {
+            synchronized (NAME_CHANGE_LOCK) {
+                nameChangeTokenWorkerRunning = false;
+            }
+            this.checkUsernameCheckFinished();
+            return;
+        }
+
         MicrosoftAccount account;
         synchronized (NAME_CHANGE_LOCK) {
             if (NAME_CHANGE_TOKEN_QUEUE.isEmpty()) {
                 nameChangeTokenWorkerRunning = false;
+                this.checkUsernameCheckFinished();
                 return;
             }
             UUID uuid = NAME_CHANGE_TOKEN_QUEUE.keySet().iterator().next();
@@ -806,17 +957,74 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         this.loginForNameChange(account)
                 .thenComposeAsync(data -> MSAuth.nameChangeInfo(data.token()), IAS.executor())
                 .whenCompleteAsync((info, error) -> {
+                    if (usernameCheckCancelled) {
+                        synchronized (NAME_CHANGE_LOCK) {
+                            nameChangeTokenWorkerRunning = false;
+                        }
+                        this.checkUsernameCheckFinished();
+                        return;
+                    }
                     UUID uuid = account.uuid();
                     synchronized (NAME_CHANGE_LOCK) {
                         if (error != null || info == null) {
                             LOGGER.debug("IAS: Unable to check token name-change availability for {}.", account, error);
                             NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
+                            ChecksCache.putNameChange(uuid, NameChangeState.UNKNOWN.name());
                         } else {
-                            NAME_CHANGES.put(uuid, info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE);
+                            NameChangeState state = info.allowed() ? NameChangeState.AVAILABLE : NameChangeState.UNAVAILABLE;
+                            NAME_CHANGES.put(uuid, state);
+                            ChecksCache.putNameChange(uuid, state.name());
+                        }
+                        usernameCheckCompleted++;
+                        try {
+                            ChecksCache.save(IAS.gameDirectory());
+                        } catch (Throwable ignored) {
                         }
                     }
+                    this.reportUsernameProgress(usernameCheckCompleted, usernameCheckTotal, account.name(),
+                            Component.translatable("ias.usernames.progress.accountDone", account.name()));
+                    this.minecraft.execute(() -> {
+                        this.screen.updateUsernameCheckButton();
+                        this.update(this.screen.search().getValue());
+                    });
                     CompletableFuture.delayedExecutor(NAME_CHANGE_TOKEN_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor()).execute(this::runNextNameChangeTokenCheck);
                 }, IAS.executor());
+    }
+
+    private void checkUsernameCheckFinished() {
+        synchronized (NAME_CHANGE_LOCK) {
+            if (NAME_CHANGE_QUEUE.isEmpty() && NAME_CHANGE_TOKEN_QUEUE.isEmpty() && nameChangePublicWorkers == 0 && !nameChangeTokenWorkerRunning) {
+                usernameWorkerRunning = false;
+                this.finishUsernameCheckRun();
+            }
+        }
+    }
+
+    private void finishUsernameCheckRun() {
+        this.minecraft.execute(() -> {
+            this.screen.updateUsernameCheckButton();
+            this.update(this.screen.search().getValue());
+            UsernameCheckProgress progress = usernameProgress;
+            if (progress != null) {
+                progress.onUsernameComplete();
+            }
+            usernameProgress = null;
+        });
+    }
+
+    private void reportUsernameProgress(int completed, int total, String accountName, Component stage) {
+        UsernameCheckProgress progress = usernameProgress;
+        if (progress == null) {
+            return;
+        }
+        this.minecraft.execute(() -> progress.onUsernameProgress(completed, total, accountName, stage));
+    }
+
+    private void refreshUsernameDisplay() {
+        this.minecraft.execute(() -> {
+            this.screen.updateUsernameCheckButton();
+            this.update(this.screen.search().getValue());
+        });
     }
 
     private CompletableFuture<LoginData> loginForNameChange(MicrosoftAccount account) {
@@ -852,6 +1060,266 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             }
         }, null));
         return token;
+    }
+
+    boolean hypixelCheckInProgress() {
+        synchronized (HYPIXEL_LOCK) {
+            return hypixelWorkerRunning || !HYPIXEL_QUEUE.isEmpty();
+        }
+    }
+
+    void checkAllHypixelBans() {
+        this.checkAllHypixelBans(null);
+    }
+
+    void checkAllHypixelBans(@Nullable HypixelCheckProgress progress) {
+        synchronized (HYPIXEL_LOCK) {
+            hypixelCheckCancelled = false;
+            hypixelProgress = progress;
+            hypixelCheckCompleted = 0;
+            HYPIXEL_QUEUE.clear();
+            for (Account account : IASStorage.ACCOUNTS) {
+                if (!(account instanceof MicrosoftAccount microsoft) || !account.canLogin()) {
+                    if (account instanceof MicrosoftAccount ms) {
+                        HYPIXEL_PHASES.put(ms.uuid(), HypixelBanPhase.NOT_APPLICABLE);
+                    }
+                    continue;
+                }
+                UUID uuid = microsoft.uuid();
+                HYPIXEL_BANS.remove(uuid);
+                HYPIXEL_PHASES.put(uuid, HypixelBanPhase.CHECKING);
+                HYPIXEL_QUEUE.putIfAbsent(uuid, microsoft);
+            }
+            hypixelCheckTotal = HYPIXEL_QUEUE.size();
+            LOGGER.info("IAS: Starting Hypixel ban check for {} account(s).", hypixelCheckTotal);
+            this.startHypixelWorker();
+        }
+        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, "", Component.translatable("ias.hypixel.progress.preparing"));
+        this.refreshHypixelDisplay();
+    }
+
+    void cancelHypixelCheck() {
+        synchronized (HYPIXEL_LOCK) {
+            hypixelCheckCancelled = true;
+            HYPIXEL_QUEUE.clear();
+            hypixelProgress = null;
+        }
+        LOGGER.info("IAS: Hypixel ban check cancelled.");
+    }
+
+    @Nullable
+    HypixelBanResult hypixelBanResult(AccountEntry entry) {
+        Account account = entry.account();
+        if (!(account instanceof MicrosoftAccount microsoft)) {
+            return null;
+        }
+        UUID uuid = microsoft.uuid();
+        synchronized (HYPIXEL_LOCK) {
+            HypixelBanPhase phase = HYPIXEL_PHASES.get(uuid);
+            if (phase == HypixelBanPhase.NOT_APPLICABLE) {
+                return null;
+            }
+            if (phase == HypixelBanPhase.CHECKING) {
+                return null;
+            }
+            HypixelBanResult cached = HYPIXEL_BANS.get(uuid);
+            if (cached != null) {
+                return cached;
+            }
+            cached = ChecksCache.getHypixelBan(uuid);
+            if (cached != null) {
+                HYPIXEL_BANS.put(uuid, cached);
+                return cached;
+            }
+        }
+        return null;
+    }
+
+    HypixelBanPhase hypixelBanPhase(AccountEntry entry) {
+        Account account = entry.account();
+        if (!(account instanceof MicrosoftAccount microsoft)) {
+            return HypixelBanPhase.NOT_APPLICABLE;
+        }
+        synchronized (HYPIXEL_LOCK) {
+            return HYPIXEL_PHASES.getOrDefault(microsoft.uuid(), HypixelBanPhase.UNKNOWN);
+        }
+    }
+
+    static void clearHypixelBan(UUID uuid) {
+        synchronized (HYPIXEL_LOCK) {
+            HYPIXEL_BANS.remove(uuid);
+            HYPIXEL_PHASES.remove(uuid);
+            HYPIXEL_QUEUE.remove(uuid);
+            ChecksCache.removeHypixelBan(uuid);
+            try {
+                ChecksCache.save(IAS.gameDirectory());
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static void suppressBanCheck(UUID uuid) {
+        synchronized (HYPIXEL_LOCK) {
+            HYPIXEL_QUEUE.remove(uuid);
+            HYPIXEL_PHASES.putIfAbsent(uuid, HypixelBanPhase.UNKNOWN);
+        }
+    }
+
+    private void startHypixelWorker() {
+        synchronized (HYPIXEL_LOCK) {
+            if (hypixelWorkerRunning) {
+                return;
+            }
+            hypixelWorkerRunning = true;
+        }
+        this.runNextHypixelCheck();
+    }
+
+    private void runNextHypixelCheck() {
+        if (hypixelCheckCancelled) {
+            synchronized (HYPIXEL_LOCK) {
+                hypixelWorkerRunning = false;
+            }
+            this.finishHypixelCheckRun();
+            return;
+        }
+
+        MicrosoftAccount account;
+        synchronized (HYPIXEL_LOCK) {
+            if (HYPIXEL_QUEUE.isEmpty()) {
+                hypixelWorkerRunning = false;
+                this.finishHypixelCheckRun();
+                return;
+            }
+            UUID uuid = HYPIXEL_QUEUE.keySet().iterator().next();
+            account = HYPIXEL_QUEUE.remove(uuid);
+        }
+
+        LOGGER.info("IAS: Checking Hypixel ban for {} ({}/{}).", account.name(), hypixelCheckCompleted + 1, hypixelCheckTotal);
+        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                Component.translatable("ias.hypixel.progress.auth"));
+
+        CompletableFuture<HypixelBanResult> check = this.loginForBanCheck(account)
+                .thenApplyAsync(data -> {
+                    this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                            Component.translatable("ias.hypixel.progress.hypixel"));
+                    return HypixelBanChecker.checkBan(data.name(), data.uuid(), data.token());
+                }, IAS.executor());
+        check = check.orTimeout(HYPIXEL_ACCOUNT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+
+        check.whenCompleteAsync((result, error) -> {
+            if (hypixelCheckCancelled) {
+                return;
+            }
+            UUID uuid = account.uuid();
+            synchronized (HYPIXEL_LOCK) {
+                if (error != null || result == null) {
+                    Throwable cause = error != null ? unwrapError(error) : new IllegalStateException("No Hypixel result");
+                    LOGGER.warn("IAS: Unable to check Hypixel ban status for {}.", account.name(), cause);
+                    HypixelBanResult err = HypixelBanResult.error(describeError(cause));
+                    HYPIXEL_BANS.put(uuid, err);
+                    ChecksCache.putHypixelBan(uuid, err);
+                } else {
+                    LOGGER.info("IAS: Hypixel ban result for {}: {}.", account.name(), result.status());
+                    HYPIXEL_BANS.put(uuid, result);
+                    ChecksCache.putHypixelBan(uuid, result);
+                }
+                HYPIXEL_PHASES.put(uuid, HypixelBanPhase.UNKNOWN);
+                try {
+                    ChecksCache.save(IAS.gameDirectory());
+                } catch (Throwable ignored) {
+                }
+            }
+            hypixelCheckCompleted++;
+            this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                    Component.translatable("ias.hypixel.progress.accountDone", account.name()));
+            this.minecraft.execute(this.screen::updateHypixelCheckButton);
+            CompletableFuture.delayedExecutor(HYPIXEL_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor())
+                    .execute(this::runNextHypixelCheck);
+        }, IAS.executor());
+    }
+
+    private void finishHypixelCheckRun() {
+        this.minecraft.execute(() -> {
+            this.screen.updateHypixelCheckButton();
+            this.update(this.screen.search().getValue());
+            HypixelCheckProgress progress = hypixelProgress;
+            if (progress != null) {
+                progress.onHypixelComplete();
+            }
+            hypixelProgress = null;
+        });
+    }
+
+    private void reportHypixelProgress(int completed, int total, String accountName, Component stage) {
+        HypixelCheckProgress progress = hypixelProgress;
+        if (progress == null) {
+            return;
+        }
+        this.minecraft.execute(() -> progress.onHypixelProgress(completed, total, accountName, stage));
+    }
+
+    private static Throwable unwrapError(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current
+                && (current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private static String describeError(Throwable error) {
+        if (error instanceof java.util.concurrent.TimeoutException) {
+            return "Timed out waiting for Microsoft auth or Hypixel.";
+        }
+        String message = error.getMessage();
+        if (message != null && !message.trim().isEmpty()) {
+            return message;
+        }
+        return error.getClass().getSimpleName();
+    }
+
+    private CompletableFuture<LoginData> loginForBanCheck(MicrosoftAccount account) {
+        CompletableFuture<LoginData> token = new CompletableFuture<>();
+        IAS.executor().execute(() -> account.login(new LoginHandler() {
+            @Override
+            public boolean cancelled() {
+                return hypixelCheckCancelled;
+            }
+
+            @Override
+            public void stage(String stage, Object... args) {
+                // Hypixel checks do not show global login progress.
+            }
+
+            @Override
+            public CompletableFuture<String> password() {
+                token.completeExceptionally(new IllegalStateException("Password required for Hypixel ban check."));
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public void success(LoginData data, boolean changed) {
+                if (changed) {
+                    AccountList.this.saveStorage();
+                }
+                token.complete(data);
+            }
+
+            @Override
+            public void error(Throwable error) {
+                token.completeExceptionally(error);
+            }
+        }, null));
+        return token;
+    }
+
+    private void refreshHypixelDisplay() {
+        this.minecraft.execute(() -> {
+            this.screen.updateHypixelCheckButton();
+            this.update(this.screen.search().getValue());
+        });
     }
 
     private void saveStorage() {

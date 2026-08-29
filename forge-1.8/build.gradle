@@ -17,6 +17,16 @@ archivesBaseName = 'IAS'
 sourceCompatibility = targetCompatibility = '1.8'
 compileJava.options.encoding = 'UTF-8'
 
+task copyHypixelSources(type: Copy) {
+    from('../src/_legacy/_shared') {
+        include 'ru/vidtu/ias/auth/hypixel/**'
+    }
+    into 'build/generated-sources/ias-shared'
+}
+
+sourceSets.main.java.srcDir 'build/generated-sources/ias-shared'
+compileJava.dependsOn copyHypixelSources
+
 minecraft {
     version = '1.8.9-11.15.1.2318-1.8.9'
     runDir = 'run'

@@ -6,6 +6,11 @@ import com.github.mrebhan.ingameaccountswitcher.MR;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AccountData;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltManager;
+import com.mojang.authlib.Agent;
+import com.mojang.authlib.AuthenticationService;
+import com.mojang.authlib.UserAuthentication;
+import com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService;
+import com.mojang.util.UUIDTypeAdapter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
@@ -24,9 +29,14 @@ import the_fireplace.ias.tools.JavaTools;
 import the_fireplace.ias.tools.SkinTools;
 import the_fireplace.iasencrypt.EncryptionTools;
 import ru.vidtu.iasfork.cookie.CookieAuth;
+import ru.vidtu.ias.auth.hypixel.HypixelBanChecker;
+import ru.vidtu.ias.auth.hypixel.HypixelBanResult;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 /**
  * The GUI where you can log in to, add, and remove accounts
  * @author The_Fireplace
@@ -44,9 +54,19 @@ public class GuiAccountSelector extends GuiScreen {
 	private GuiButton edit;
 	private GuiButton reloadskins;
 	private GuiButton logout;
+	private GuiButton checkHypixel;
 	//Search
 	private String query;
 	private GuiTextField search;
+	private volatile boolean hypixelCheckRunning;
+	private final Map<String, HypixelBanResult> hypixelResults = new HashMap<String, HypixelBanResult>();
+	private final Map<String, HypixelBanPhase> hypixelPhases = new HashMap<String, HypixelBanPhase>();
+
+	private enum HypixelBanPhase {
+		UNKNOWN,
+		CHECKING,
+		NOT_APPLICABLE
+	}
 
 	@Override
 	public void initGui() {
@@ -58,6 +78,7 @@ public class GuiAccountSelector extends GuiScreen {
 		//Above Top Row
 		this.buttonList.add(reloadskins = new GuiButton(8, this.width / 2 - 154 - 10, this.height - 76 - 8, 120, 20, I18n.format("ias.reloadskins")));
 		this.buttonList.add(logout = new GuiButton(9, this.width / 2 - 60, this.height - 76 - 8, 120, 20, I18n.format("ias.logout")));
+		this.buttonList.add(checkHypixel = new GuiButton(10, this.width / 2 + 64, this.height - 76 - 8, 120, 20, I18n.format("ias.accounts.checkHypixel")));
 		//Top Row
 		this.buttonList.add(new GuiButton(0, this.width / 2 + 4 + 40, this.height - 52, 120, 20, I18n.format("ias.addaccount")));
 		this.buttonList.add(login = new GuiButton(1, this.width / 2 - 154 - 10, this.height - 52, 120, 20, I18n.format("ias.login")));
@@ -164,6 +185,8 @@ public class GuiAccountSelector extends GuiScreen {
 				reloadSkins();
 			}else if(button.id == 9){
 				logout();
+			}else if(button.id == 10){
+				checkAllHypixelBans();
 			}else{
 				accountsgui.actionPerformed(button);
 			}
@@ -408,6 +431,159 @@ public class GuiAccountSelector extends GuiScreen {
 		edit.enabled = !queriedaccounts.isEmpty();
 		reloadskins.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
 		logout.enabled = IAS.canRestoreLaunchSession();
+		if (checkHypixel != null) {
+			checkHypixel.enabled = !hypixelCheckRunning && !queriedaccounts.isEmpty();
+			checkHypixel.displayString = hypixelCheckRunning
+					? I18n.format("ias.accounts.checkHypixel.running")
+					: I18n.format("ias.accounts.checkHypixel");
+		}
+	}
+
+	private String hypixelKey(ExtendedAccountData data) {
+		if (data.isCookieSession() && data.cookieUuid != null && !data.cookieUuid.isEmpty()) {
+			return data.cookieUuid;
+		}
+		return EncryptionTools.decode(data.user);
+	}
+
+	private void checkAllHypixelBans() {
+		if (hypixelCheckRunning) {
+			return;
+		}
+		hypixelCheckRunning = true;
+		updateButtons();
+		final ArrayList<ExtendedAccountData> accounts = convertData();
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				for (ExtendedAccountData data : accounts) {
+					final String key = hypixelKey(data);
+					if (!canCheckHypixel(data)) {
+						hypixelPhases.put(key, HypixelBanPhase.NOT_APPLICABLE);
+						scheduleRefresh();
+						continue;
+					}
+					hypixelPhases.put(key, HypixelBanPhase.CHECKING);
+					hypixelResults.remove(key);
+					scheduleRefresh();
+					try {
+						HypixelBanResult result = resolveAndCheck(data);
+						hypixelResults.put(key, result);
+					} catch (Throwable t) {
+						hypixelResults.put(key, HypixelBanResult.error(t.getMessage() != null ? t.getMessage() : "Unknown error"));
+					}
+					hypixelPhases.put(key, HypixelBanPhase.UNKNOWN);
+					scheduleRefresh();
+					try {
+						Thread.sleep(2500L);
+					} catch (InterruptedException ignored) {
+						Thread.currentThread().interrupt();
+						break;
+					}
+				}
+				hypixelCheckRunning = false;
+				scheduleRefresh();
+			}
+		}, "IAS-HypixelCheck").start();
+	}
+
+	private void scheduleRefresh() {
+		Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+			@Override
+			public void run() {
+				updateButtons();
+			}
+		});
+	}
+
+	private boolean canCheckHypixel(ExtendedAccountData data) {
+		if (isCookieAccount(data)) {
+			return true;
+		}
+		try {
+			return !EncryptionTools.decode(data.pass).isEmpty();
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
+	private HypixelBanResult resolveAndCheck(ExtendedAccountData data) throws Exception {
+		if (isCookieAccount(data)) {
+			CookieAuth.MinecraftProfile profile = resolveCookieProfile(data);
+			return HypixelBanChecker.checkBan(profile.name, parseUuid(profile.uuid), profile.token);
+		}
+		AuthenticationService authService = new YggdrasilAuthenticationService(Minecraft.getMinecraft().getProxy(), UUID.randomUUID().toString());
+		UserAuthentication auth = authService.createUserAuthentication(Agent.MINECRAFT);
+		auth.setUsername(EncryptionTools.decode(data.user));
+		auth.setPassword(EncryptionTools.decode(data.pass));
+		auth.logIn();
+		UUID uuid = auth.getSelectedProfile().getId();
+		return HypixelBanChecker.checkBan(auth.getSelectedProfile().getName(), uuid, auth.getAuthenticatedToken());
+	}
+
+	private CookieAuth.MinecraftProfile resolveCookieProfile(ExtendedAccountData data) throws Exception {
+		String token = data.cookieAccessToken();
+		try {
+			return CookieAuth.profileFromAccessToken(token);
+		} catch (Throwable expired) {
+			String refresh = data.cookieRefreshToken();
+			if (refresh.isEmpty()) {
+				throw expired;
+			}
+			return CookieAuth.profileFromRefreshToken(refresh);
+		}
+	}
+
+	private UUID parseUuid(String uuid) {
+		if (uuid.contains("-")) {
+			return UUID.fromString(uuid);
+		}
+		return UUIDTypeAdapter.fromString(uuid);
+	}
+
+	private String hypixelSuffix(ExtendedAccountData data) {
+		String key = hypixelKey(data);
+		HypixelBanPhase phase = hypixelPhases.get(key);
+		if (phase == HypixelBanPhase.NOT_APPLICABLE) {
+			return "";
+		}
+		if (phase == HypixelBanPhase.CHECKING) {
+			return " H?";
+		}
+		HypixelBanResult result = hypixelResults.get(key);
+		if (result == null) {
+			return "";
+		}
+		switch (result.status()) {
+			case UNBANNED:
+				return " H\u2713";
+			case BANNED:
+				return " H\u2715";
+			case ERROR:
+			default:
+				return " H!";
+		}
+	}
+
+	private int hypixelColor(ExtendedAccountData data) {
+		String key = hypixelKey(data);
+		HypixelBanPhase phase = hypixelPhases.get(key);
+		if (phase == HypixelBanPhase.CHECKING) {
+			return 0xFFFF00;
+		}
+		HypixelBanResult result = hypixelResults.get(key);
+		if (result == null) {
+			return 0x808080;
+		}
+		switch (result.status()) {
+			case UNBANNED:
+				return 0x00FF00;
+			case BANNED:
+				return 0xFF4040;
+			case ERROR:
+			default:
+				return 0xFFA000;
+		}
 	}
 	class List extends GuiSlot
 	{
@@ -467,6 +643,11 @@ public class GuiAccountSelector extends GuiScreen {
 				color = 0x00FF00;
 			}
 			GuiAccountSelector.this.drawString(GuiAccountSelector.this.fontRendererObj, s, p_180791_2_ + 2, p_180791_3_ + 1, color);
+			String suffix = GuiAccountSelector.this.hypixelSuffix(data);
+			if (!suffix.isEmpty()) {
+				int suffixX = p_180791_2_ + 2 + GuiAccountSelector.this.fontRendererObj.getStringWidth(s);
+				GuiAccountSelector.this.drawString(GuiAccountSelector.this.fontRendererObj, suffix, suffixX, p_180791_3_ + 1, GuiAccountSelector.this.hypixelColor(data));
+			}
 		}
 	}
 }

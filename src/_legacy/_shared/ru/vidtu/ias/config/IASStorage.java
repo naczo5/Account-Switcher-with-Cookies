@@ -219,6 +219,9 @@ public final class IASStorage {
                 // Log.
                 LOGGER.debug("IAS: Loaded {} (currently: {}) accounts from {}.", list.size(), ACCOUNTS.size(), file);
             }
+
+            // Load checks cache.
+            ChecksCache.load(path);
         } catch (Throwable t) {
             // Rethrow.
             throw new RuntimeException("Unable to load IAS storage.", t);
@@ -286,6 +289,9 @@ public final class IASStorage {
 
             // Log it.
             LOGGER.debug("IAS: Saved {} accounts to {}.", list.length, file);
+
+            // Save checks cache.
+            ChecksCache.save(path);
         } catch (Throwable t) {
             // Rethrow.
             throw new RuntimeException("Unable to save IAS storage.", t);

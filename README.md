@@ -110,4 +110,6 @@ Built jars appear in `build\libs\`.
 
 Based on [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) by VidTu and contributors, and [Account Switcher with Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies).
 
+Hypixel ban-check logic adapted from [mcchecker](https://github.com/cooldood-dev/mcchecker) by cooldood-dev.
+
 Microsoft authentication flow references: [minecraft.wiki/Microsoft_authentication](https://minecraft.wiki/Microsoft_authentication).

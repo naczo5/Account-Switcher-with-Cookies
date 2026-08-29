@@ -164,6 +164,16 @@ public final class AccountScreen extends Screen {
     private Button copyRefreshToken;
 
     /**
+     * Hypixel ban check button.
+     */
+    private Button checkHypixel;
+
+    /**
+     * Username and name-change check button.
+     */
+    private Button checkUsernames;
+
+    /**
      * Creates a new screen.
      *
      * @param parent Parent screen, {@code null} if none
@@ -328,6 +338,21 @@ public final class AccountScreen extends Screen {
         this.copyRefreshToken.setTooltipDelay(Duration.ofMillis(250L));
         this.addRenderableWidget(this.copyRefreshToken);
 
+        // Add Check Usernames and Check Hypixel buttons.
+        this.checkUsernames = Button.builder(Component.translatable("ias.accounts.checkUsernames"), btn -> this.confirmUsernameCheck())
+                .bounds(this.width / 2 - 154, this.height - 24 - 24 - 24 - 24, 150, 20)
+                .build();
+        this.checkUsernames.setTooltip(Tooltip.create(Component.translatable("ias.accounts.checkUsernames.tip")));
+        this.checkUsernames.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.checkUsernames);
+
+        this.checkHypixel = Button.builder(Component.translatable("ias.accounts.checkHypixel"), btn -> this.confirmHypixelCheck())
+                .bounds(this.width / 2 + 4, this.height - 24 - 24 - 24 - 24, 150, 20)
+                .build();
+        this.checkHypixel.setTooltip(Tooltip.create(Component.translatable("ias.accounts.checkHypixel.tip")));
+        this.checkHypixel.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(this.checkHypixel);
+
         // Add edit button.
         this.addRenderableWidget(Button.builder(Component.translatable("ias.accounts.add"), btn -> this.list.add())
                 .bounds(this.width / 2 + 50 + 4, this.height - 24 - 24, 100, 20)
@@ -342,10 +367,15 @@ public final class AccountScreen extends Screen {
                 .build());
 
         // Add account list.
+        int listWidth = Math.min(this.width, 260);
+        int listHeight = this.height - 24 - 24 - 24 - 24 - 4 - 34;
+        int listX = this.width / 2 - listWidth / 2;
+        int listY = 34;
         if (this.list != null) {
-            this.list.setRectangle(this.width, this.height - 24 - 24 - 24 - 4 - 34, 0, 34);
+            this.list.setRectangle(listWidth, listHeight, listX, listY);
         } else {
-            this.list = new AccountList(this, this.minecraft, this.width, this.height - 24 - 24 - 24 - 4 - 34, 34, 12);
+            this.list = new AccountList(this, this.minecraft, listWidth, listHeight, listY, 12);
+            this.list.setX(listX);
         }
         this.addRenderableWidget(this.list);
 
@@ -353,6 +383,63 @@ public final class AccountScreen extends Screen {
         this.search.setResponder(this.list::update);
         this.list.update(this.search.getValue());
         this.updateSelected();
+        this.updateUsernameCheckButton();
+        this.updateHypixelCheckButton();
+    }
+
+    private void confirmUsernameCheck() {
+        if (this.list == null || this.list.usernameCheckInProgress()) {
+            return;
+        }
+        final Screen confirm = new ConfirmPopupScreen(this,
+                Component.translatable("ias.accounts.checkUsernames.confirm.title"),
+                Component.translatable("ias.accounts.checkUsernames.confirm"),
+                Component.translatable("ias.accounts.checkUsernames.confirm.button"),
+                () -> {
+                    //$ set_screen 'this.minecraft' 'this'
+                    this.minecraft.gui.setScreen(this);
+                    this.list.checkAllUsernames();
+                });
+        //$ set_screen 'this.minecraft' confirm
+        this.minecraft.gui.setScreen(confirm);
+    }
+
+    void updateUsernameCheckButton() {
+        if (this.checkUsernames == null || this.list == null) {
+            return;
+        }
+        boolean running = this.list.usernameCheckInProgress();
+        this.checkUsernames.active = !running;
+        this.checkUsernames.setMessage(running
+                ? Component.translatable("ias.accounts.checkUsernames.running")
+                : Component.translatable("ias.accounts.checkUsernames"));
+    }
+
+    private void confirmHypixelCheck() {
+        if (this.list == null || this.list.hypixelCheckInProgress()) {
+            return;
+        }
+        final Screen confirm = new ConfirmPopupScreen(this,
+                Component.translatable("ias.accounts.checkHypixel.confirm.title"),
+                Component.translatable("ias.accounts.checkHypixel.confirm"),
+                Component.translatable("ias.accounts.checkHypixel.confirm.button"),
+                () -> {
+                    //$ set_screen 'this.minecraft' 'new HypixelCheckPopupScreen(this, this.list)'
+                    this.minecraft.gui.setScreen(new HypixelCheckPopupScreen(this, this.list));
+                });
+        //$ set_screen 'this.minecraft' confirm
+        this.minecraft.gui.setScreen(confirm);
+    }
+
+    void updateHypixelCheckButton() {
+        if (this.checkHypixel == null || this.list == null) {
+            return;
+        }
+        boolean running = this.list.hypixelCheckInProgress();
+        this.checkHypixel.active = !running;
+        this.checkHypixel.setMessage(running
+                ? Component.translatable("ias.accounts.checkHypixel.running")
+                : Component.translatable("ias.accounts.checkHypixel"));
     }
 
     @Override
@@ -397,6 +484,22 @@ public final class AccountScreen extends Screen {
      */
     EditBox search() {
         return this.search;
+    }
+
+    /**
+     * Bounds for dimming overlays that should cover the account list without obscuring the skin panel.
+     *
+     * @return {@code [x, y, width, height]}
+     */
+    int[] listOverlayBounds() {
+        if (this.list != null) {
+            return new int[]{this.list.getX(), this.list.getY(), this.list.getWidth(), this.list.getHeight()};
+        }
+        int listWidth = Math.min(this.width, 260);
+        int left = this.width / 2 - listWidth / 2;
+        int top = 34;
+        int height = this.height - 24 - 24 - 24 - 24 - 4 - 34;
+        return new int[]{left, top, listWidth, Math.max(0, height)};
     }
 
     /**
