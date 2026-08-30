@@ -42,6 +42,10 @@ import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import org.jetbrains.annotations.Nullable;
+import ru.vidtu.ias.account.Account;
+import ru.vidtu.ias.auth.microsoft.MSAuth;
+
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -67,6 +71,17 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
      * instead of switching the active account.
      */
     private final CopyMode copyMode;
+
+    /**
+     * Associated account, if known.
+     */
+    @Nullable
+    private final Account account;
+
+    /**
+     * Whether browser authorization prompt buttons should be displayed.
+     */
+    private boolean canAuthorizeInBrowser;
 
     /**
      * Synchronization lock.
@@ -135,7 +150,7 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
      * @param parent Parent screen
      */
     LoginPopupScreen(Screen parent) {
-        this(parent, CopyMode.NONE);
+        this(parent, CopyMode.NONE, null);
     }
 
     /**
@@ -145,10 +160,22 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
      * @param copyMode What (if anything) to copy to the clipboard instead of switching the active account
      */
     LoginPopupScreen(Screen parent, CopyMode copyMode) {
+        this(parent, copyMode, null);
+    }
+
+    /**
+     * Creates a new login screen.
+     *
+     * @param parent   Parent screen
+     * @param copyMode What (if anything) to copy to the clipboard instead of switching the active account
+     * @param account  Target account being logged into, if known
+     */
+    LoginPopupScreen(Screen parent, CopyMode copyMode, @Nullable Account account) {
         super(Component.translatable(copyMode == CopyMode.REFRESH_TOKEN ? "ias.copyRefreshToken.title"
                 : copyMode == CopyMode.ACCESS_TOKEN ? "ias.copyToken.title" : "ias.login"));
         this.parent = parent;
         this.copyMode = copyMode;
+        this.account = account;
     }
 
     @Override
@@ -179,9 +206,44 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        // Add cancel button.
-        this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 22, 150, 20,
-                CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
+        if (this.canAuthorizeInBrowser && this.copyMode == CopyMode.REFRESH_TOKEN && this.account != null) {
+            // Add Authorize in Browser button.
+            PopupButton authBtn = new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 44, 150, 20,
+                    Component.translatable("ias.copyRefreshToken.authorize"), btn -> {
+                IStonecutter.openUrl(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                if (this.minecraft != null) {
+                    this.minecraft.keyboardHandler.setClipboard(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                }
+                this.stage("ias.copyRefreshToken.authorizedHint");
+            }, Supplier::get);
+            authBtn.color(0.4F, 0.8F, 1.0F, true);
+            this.addRenderableWidget(authBtn);
+
+            // Add Retry button.
+            PopupButton retryBtn = new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 22, 73, 20,
+                    Component.translatable("ias.copyRefreshToken.retry"), btn -> {
+                this.canAuthorizeInBrowser = false;
+                this.error = Float.NaN;
+                this.errorNote = null;
+                this.stage = Component.translatable(MicrosoftAccount.INITIALIZING).withStyle(ChatFormatting.YELLOW);
+                this.label = null;
+                //? if >=1.21.11 {
+                this.init(this.width, this.height);
+                //?} else
+                /*this.init(this.minecraft, this.width, this.height);*/
+                IAS.executor().execute(() -> this.account.login(this, null));
+            }, Supplier::get);
+            retryBtn.color(0.5F, 1.0F, 0.5F, true);
+            this.addRenderableWidget(retryBtn);
+
+            // Add Cancel button.
+            this.addRenderableWidget(new PopupButton(this.width / 2 + 2, this.height / 2 + 74 - 22, 73, 20,
+                    CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
+        } else {
+            // Add cancel button.
+            this.addRenderableWidget(new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 22, 150, 20,
+                    CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
+        }
 
         // Add password box, if future exists.
         if (this.passFuture != null) {
@@ -514,7 +576,6 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
         // Skip if not current screen.
         if (this != this.currentScreen()) return;
 
-        // Flush the stage.
         FriendlyException probable = FriendlyException.friendlyInChain(error);
         String key = probable != null ? probable.key() : "ias.error";
         Component component = Component.translatable(key).withStyle(ChatFormatting.RED);
@@ -522,6 +583,16 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             this.stage = component;
             this.label = null;
             this.error = 0.0F;
+            if (this.copyMode == CopyMode.REFRESH_TOKEN && this.account != null && "ias.error.noRefreshToken".equals(key)) {
+                this.canAuthorizeInBrowser = true;
+                this.minecraft.execute(() -> {
+                    if (this != this.currentScreen()) return;
+                    //? if >=1.21.11 {
+                    this.init(this.width, this.height);
+                    //?} else
+                    /*this.init(this.minecraft, this.width, this.height);*/
+                });
+            }
         }
     }
 

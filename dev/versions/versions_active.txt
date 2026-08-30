@@ -19,6 +19,5 @@
 #
 # List of "Active" versions. See README.md for more information.
 # Empty lines and lines starting with "#" are ignored.
-26.1.2
 1.21.11
 1.20.1

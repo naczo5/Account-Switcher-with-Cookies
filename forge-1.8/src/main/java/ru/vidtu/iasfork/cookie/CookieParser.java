@@ -294,10 +294,36 @@ public final class CookieParser {
             return refreshToken;
         }
 
+        public String toCookieHeader() {
+            List<CookieEntry> ordered = new ArrayList<>(this.cookies.values());
+            Collections.sort(ordered, new Comparator<CookieEntry>() {
+                @Override
+                public int compare(CookieEntry c1, CookieEntry c2) {
+                    return Integer.compare(priority(c1.domain()), priority(c2.domain()));
+                }
+
+                private int priority(String domain) {
+                    String lower = domain.toLowerCase();
+                    if (lower.contains("login.live.com")) return 0;
+                    if (lower.contains("live.com")) return 1;
+                    return 2;
+                }
+            });
+
+            StringBuilder header = new StringBuilder();
+            for (CookieEntry entry : ordered) {
+                if (header.length() > 0) {
+                    header.append("; ");
+                }
+                header.append(entry.pair());
+            }
+            return header.toString();
+        }
+
         public String toSisuCookieHeader() throws CookieAuthException {
             Map<String, CookieEntry> byName = new LinkedHashMap<>();
             for (CookieEntry entry : cookies.values()) {
-                if (!entry.domain().toLowerCase().endsWith("login.live.com")) {
+                if (!appliesToSisuHost(entry.domain())) {
                     continue;
                 }
                 if (!byName.containsKey(entry.name())) {
@@ -315,6 +341,15 @@ public final class CookieParser {
                 header.append(entry.pair());
             }
             return header.toString();
+        }
+
+        private static boolean appliesToSisuHost(String cookieDomain) {
+            String domain = cookieDomain.toLowerCase();
+            if (domain.startsWith(".")) {
+                domain = domain.substring(1);
+            }
+            String host = "login.live.com";
+            return host.equals(domain) || host.endsWith("." + domain);
         }
     }
 }

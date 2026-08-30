@@ -115,10 +115,20 @@ public final class MSAuth {
     private static final String COOKIE_AUTH_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0";
 
     @NotNull
-    private static final String MINECRAFT_OAUTH_CLIENT_ID = "00000000402b5328";
+    public static final String MINECRAFT_OAUTH_CLIENT_ID = "00000000402b5328";
 
     @NotNull
-    private static final String MINECRAFT_OAUTH_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
+    public static final String MINECRAFT_OAUTH_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
+
+    /**
+     * Microsoft Launcher OAuth authorization URL for manual browser consent.
+     */
+    @NotNull
+    public static final String MINECRAFT_LAUNCHER_AUTH_URL = "https://login.live.com/oauth20_authorize.srf" +
+            "?client_id=00000000402b5328" +
+            "&redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf" +
+            "&response_type=code" +
+            "&scope=service%3A%3Auser.auth.xboxlive.com%3A%3AMBI_SSL";
 
     /**
      * ISO-8601 timestamps exposed on NameMC profile history pages.
