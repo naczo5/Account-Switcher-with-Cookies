@@ -45,6 +45,7 @@ import ru.vidtu.ias.utils.exceptions.FriendlyException;
 import org.jetbrains.annotations.Nullable;
 import ru.vidtu.ias.account.Account;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
+import ru.vidtu.ias.auth.microsoft.MSBrowserAuth;
 
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -210,11 +211,32 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
             // Add Authorize in Browser button.
             PopupButton authBtn = new PopupButton(this.width / 2 - 75, this.height / 2 + 74 - 44, 150, 20,
                     Component.translatable("ias.copyRefreshToken.authorize"), btn -> {
-                IStonecutter.openUrl(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
-                if (this.minecraft != null) {
-                    this.minecraft.keyboardHandler.setClipboard(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                if (MSBrowserAuth.isBrowserSupported() && this.account != null) {
+                    this.stage("ias.copyRefreshToken.authorizing");
+                    MSBrowserAuth.authorizeAccountWithCookies(this.account).thenAcceptAsync(tokens -> {
+                        LOGGER.info("IAS: Automated browser authorization succeeded! Refresh token obtained.");
+                        if (this.minecraft != null) {
+                            this.minecraft.keyboardHandler.setClipboard(tokens.refresh());
+                        }
+                        if (this.account != null) {
+                            this.account.login(this, null);
+                        }
+                    }, IAS.executor()).exceptionally(t -> {
+                        LOGGER.warn("IAS: Automated browser auth failed, opening URL as fallback: {}", t.getMessage());
+                        IStonecutter.openUrl(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                        if (this.minecraft != null) {
+                            this.minecraft.keyboardHandler.setClipboard(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                        }
+                        this.stage("ias.copyRefreshToken.authorizedHint");
+                        return null;
+                    });
+                } else {
+                    IStonecutter.openUrl(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                    if (this.minecraft != null) {
+                        this.minecraft.keyboardHandler.setClipboard(MSAuth.MINECRAFT_LAUNCHER_AUTH_URL);
+                    }
+                    this.stage("ias.copyRefreshToken.authorizedHint");
                 }
-                this.stage("ias.copyRefreshToken.authorizedHint");
             }, Supplier::get);
             authBtn.color(0.4F, 0.8F, 1.0F, true);
             this.addRenderableWidget(authBtn);

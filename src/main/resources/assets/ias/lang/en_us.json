@@ -20,6 +20,7 @@
   "ias.accounts.copyRefreshToken.tip": "Copy the stored refresh token after a confirmation warning.",
   "ias.accounts.copyRefreshToken.offline": "Selected account does not have a refresh token.",
   "ias.copyRefreshToken.authorize": "Authorize in Browser",
+  "ias.copyRefreshToken.authorizing": "Opening browser with account session...",
   "ias.copyRefreshToken.retry": "Retry",
   "ias.copyRefreshToken.authorizedHint": "Accept permissions in your browser, then click Retry.",
   "ias.error.noRefreshToken": "No refresh token available yet. OAuth authorization is required in browser.",
