@@ -19,6 +19,11 @@
 
 package ru.vidtu.ias.auth.hypixel;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+
 import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
@@ -60,11 +65,17 @@ public final class HypixelBanChecker {
     private static final int CONNECT_TIMEOUT_MS = 15_000;
     private static final int READ_TIMEOUT_MS = 8_000;
     private static final String USER_AGENT = "IAS-HypixelBanChecker/1.0";
+    private static final Gson GSON = new Gson();
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
-    private static final Pattern DURATION = Pattern.compile(
-            "(?i)(?:for|banned for)\\s+(\\d+)\\s*(day|days|hour|hours|minute|minutes|month|months|year|years)"
+    private static final Pattern DURATION_PATTERN = Pattern.compile(
+            "(?i)(?:for|banned for|duration:?)\\s*([0-9]+\\s*(?:d(?:ays?)?|h(?:ours?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?|months?|years?)(?:\\s*[0-9]+\\s*(?:d(?:ays?)?|h(?:ours?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?|months?|years?))*)"
     );
-    private static final Pattern REASON = Pattern.compile("(?i)reason:\\s*(.+?)(?:\\.|\\||$)");
+    private static final Pattern REASON_PATTERN = Pattern.compile(
+            "(?i)reason:\\s*(.+?)(?:\\s*(?:Find out more|Block ID|Ban ID|Sharing your|https?://|\\||$))"
+    );
+    private static final Pattern ID_PATTERN = Pattern.compile(
+            "(?i)(?:ban|block)\\s*id:\\s*(#[0-9a-zA-Z]+|[0-9a-zA-Z]+)"
+    );
 
     private HypixelBanChecker() {
     }
@@ -166,77 +177,42 @@ public final class HypixelBanChecker {
     }
 
     private static String parseChatJson(String json) {
-        StringBuilder text = new StringBuilder();
-        appendChatText(json, text);
-        return text.toString().trim();
+        if (json == null || json.trim().isEmpty()) {
+            return "";
+        }
+        try {
+            JsonElement element = GSON.fromJson(json, JsonElement.class);
+            StringBuilder sb = new StringBuilder();
+            extractTextFromJson(element, sb);
+            return sb.toString().trim();
+        } catch (Throwable t) {
+            return json.trim();
+        }
     }
 
-    private static void appendChatText(String json, StringBuilder out) {
-        if (json == null || json.isEmpty()) {
+    private static void extractTextFromJson(JsonElement element, StringBuilder sb) {
+        if (element == null || element.isJsonNull()) {
             return;
         }
-        int textIdx = json.indexOf("\"text\":\"");
-        while (textIdx >= 0) {
-            int start = textIdx + "\"text\":\"".length();
-            int end = start;
-            while (end < json.length()) {
-                char c = json.charAt(end);
-                if (c == '\\') {
-                    end += 2;
-                    continue;
-                }
-                if (c == '"') {
-                    break;
-                }
-                end++;
-            }
-            out.append(unescapeJson(json.substring(start, end)));
-            textIdx = json.indexOf("\"text\":\"", end);
+        if (element.isJsonPrimitive()) {
+            sb.append(element.getAsString());
+            return;
         }
-        int extraIdx = json.indexOf("\"extra\":");
-        if (extraIdx >= 0) {
-            int arrayStart = json.indexOf('[', extraIdx);
-            if (arrayStart >= 0) {
-                int depth = 0;
-                for (int i = arrayStart; i < json.length(); i++) {
-                    char c = json.charAt(i);
-                    if (c == '{') {
-                        if (depth == 0) {
-                            int objEnd = findMatchingBrace(json, i);
-                            if (objEnd > i) {
-                                appendChatText(json.substring(i, objEnd + 1), out);
-                            }
-                        }
-                        depth++;
-                    } else if (c == '}') {
-                        depth--;
-                    }
+        if (element.isJsonObject()) {
+            JsonObject obj = element.getAsJsonObject();
+            if (obj.has("text") && obj.get("text").isJsonPrimitive()) {
+                sb.append(obj.get("text").getAsString());
+            }
+            if (obj.has("extra") && obj.get("extra").isJsonArray()) {
+                for (JsonElement child : obj.getAsJsonArray("extra")) {
+                    extractTextFromJson(child, sb);
                 }
             }
-        }
-    }
-
-    private static int findMatchingBrace(String json, int start) {
-        int depth = 0;
-        for (int i = start; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '{') {
-                depth++;
-            } else if (c == '}') {
-                depth--;
-                if (depth == 0) {
-                    return i;
-                }
+        } else if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) {
+                extractTextFromJson(child, sb);
             }
         }
-        return -1;
-    }
-
-    private static String unescapeJson(String value) {
-        return value
-                .replace("\\n", "\n")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\");
     }
 
     private static EncryptionRequest readEncryptionRequest(McProtocolIO.Packet packet) throws IOException {
@@ -345,43 +321,75 @@ public final class HypixelBanChecker {
     }
 
     private static HypixelBanResult parseBanReason(String text) {
-        text = WHITESPACE.matcher(text.replace('\n', ' ')).replaceAll(" ").trim();
-        if (text.isEmpty()) {
-            return HypixelBanResult.unbanned();
+        String normalized = WHITESPACE.matcher(text.replace('\n', ' ')).replaceAll(" ").trim();
+        if (normalized.isEmpty()) {
+            return HypixelBanResult.error("Empty disconnect reason");
         }
-        String lower = text.toLowerCase(Locale.ROOT);
-        if (!lower.contains("ban")) {
-            return HypixelBanResult.unbanned();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+
+        boolean isSecurityBan = lower.contains("security")
+                || lower.contains("blocked")
+                || lower.contains("block id")
+                || lower.contains("suspicious activity")
+                || lower.contains("compromised");
+
+        boolean isStandardBan = lower.contains("banned")
+                || lower.contains("ban ")
+                || lower.contains("ban#")
+                || lower.contains("ban id")
+                || lower.contains("permanently banned")
+                || lower.contains("temporarily banned");
+
+        boolean isPunishment = isSecurityBan || isStandardBan;
+
+        if (!isPunishment) {
+            if (lower.contains("session") || lower.contains("verify") || lower.contains("authentication") || lower.contains("invalid")) {
+                return HypixelBanResult.error("Auth error: " + normalized);
+            } else if (lower.contains("maintenance")) {
+                return HypixelBanResult.error("Server in maintenance");
+            } else if (lower.contains("already connected")) {
+                return HypixelBanResult.error("Already connected");
+            } else {
+                return HypixelBanResult.error(normalized);
+            }
         }
 
-        String banType = null;
+        String banType;
         String banDur = null;
         String banReason = null;
 
-        if (lower.contains("permanently banned") || lower.contains("permanent ban")) {
-            banType = "permanent";
-        } else if (lower.contains("temporarily banned") || lower.contains("temporary ban")) {
-            banType = "temporary";
-        } else if (lower.contains("security ban")) {
+        if (isSecurityBan) {
             banType = "security";
-        } else if (lower.contains("suspicious")) {
+            banDur = "Permanent (Appealable)";
+        } else if (lower.contains("permanently") || lower.contains("permanent")) {
             banType = "permanent";
-            banReason = "Suspicious activity";
-        } else {
-            banType = "temporary";
-        }
-
-        Matcher durationMatcher = DURATION.matcher(text);
-        if (durationMatcher.find()) {
-            banDur = durationMatcher.group(1) + " " + durationMatcher.group(2);
-        } else if ("permanent".equals(banType)) {
             banDur = "permanent";
+        } else if (lower.contains("temporarily") || lower.contains("temporary")) {
+            banType = "temporary";
+        } else {
+            banType = "banned";
         }
 
-        if (banReason == null) {
-            Matcher reasonMatcher = REASON.matcher(text);
-            if (reasonMatcher.find()) {
-                banReason = reasonMatcher.group(1).trim();
+        Matcher durationMatcher = DURATION_PATTERN.matcher(normalized);
+        if (durationMatcher.find()) {
+            banDur = durationMatcher.group(1).trim();
+            if (!isSecurityBan) {
+                banType = "temporary";
+            }
+        }
+
+        Matcher reasonMatcher = REASON_PATTERN.matcher(normalized);
+        if (reasonMatcher.find()) {
+            banReason = reasonMatcher.group(1).trim();
+        } else if (isSecurityBan) {
+            banReason = "Suspicious activity has been detected on your account.";
+        }
+
+        Matcher idMatcher = ID_PATTERN.matcher(normalized);
+        if (idMatcher.find()) {
+            String punishmentId = idMatcher.group(1).trim();
+            if (banReason != null && !banReason.contains(punishmentId)) {
+                banReason = banReason + " (" + punishmentId + ")";
             }
         }
 

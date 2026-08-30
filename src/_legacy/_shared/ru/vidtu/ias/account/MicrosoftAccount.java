@@ -358,6 +358,49 @@ public final class MicrosoftAccount implements Account {
                 // Skip if cancelled.
                 if (!value || handler.cancelled()) return CompletableFuture.completedFuture(null);
 
+                // If the account has stored session cookies, exchange them for a persistent refresh token.
+                String cookie = cookieHeader.get();
+                if (cookie != null && !cookie.isBlank()) {
+                    LOGGER.info("IAS: Stored cookie session found. Converting cookies to MCA/refresh token...");
+                    handler.stage(COOKIES_TO_MSA_MSR);
+                    recrypt.set(true);
+
+                    return MSAuth.cookiesToMcaFromCookies(cookie).thenComposeAsync(result -> {
+                        if (result == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
+
+                        access.set(result.mca());
+                        String nextRefresh = result.refresh();
+                        refresh.set(nextRefresh == null || nextRefresh.isBlank() ? cookieRefresh(cookie) : nextRefresh);
+
+                        LOGGER.info("IAS: Converting MCA to MCP... (cookie refreshed)");
+                        handler.stage(MCA_TO_MCP);
+
+                        return MSAuth.mcaToMcp(result.mca());
+                    }, IAS.executor()).exceptionallyComposeAsync(cookieErr -> {
+                        String storedAccess = access.get();
+                        if (storedAccess != null && !storedAccess.isBlank()) {
+                            return MSAuth.mcaToMcp(storedAccess).exceptionallyAsync(orig -> {
+                                if (IUtils.anyInCausalChain(cookieErr, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
+                                    throw new FriendlyException("Unable to connect to cookie auth servers.", cookieErr, "ias.error.connect");
+                                }
+                                FriendlyException friendly = FriendlyException.friendlyInChain(cookieErr);
+                                if (friendly != null) {
+                                    throw friendly;
+                                }
+                                throw new RuntimeException("Unable to authenticate cookie session.", cookieErr);
+                            }, IAS.executor());
+                        }
+                        if (IUtils.anyInCausalChain(cookieErr, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
+                            throw new FriendlyException("Unable to connect to cookie auth servers.", cookieErr, "ias.error.connect");
+                        }
+                        FriendlyException friendly = FriendlyException.friendlyInChain(cookieErr);
+                        if (friendly != null) {
+                            throw friendly;
+                        }
+                        throw new RuntimeException("Unable to authenticate cookie session.", cookieErr);
+                    }, IAS.executor());
+                }
+
                 // Log it and display progress.
                 LOGGER.info("IAS: Converting MCA to MCP... (stored)");
                 handler.stage(MCA_TO_MCP);
@@ -367,44 +410,9 @@ public final class MicrosoftAccount implements Account {
                     // Skip if cancelled.
                     if (handler.cancelled()) return CompletableFuture.completedFuture(null);
 
-                    String cookie = cookieHeader.get();
-                    if (cookie != null && !cookie.isBlank()) {
-                        LOGGER.warn("IAS: MCA is (probably) expired. Refreshing from stored cookies...");
-                        LOGGER.info("IAS: Converting cookies to MCA...");
-                        handler.stage(COOKIES_TO_MSA_MSR);
-
-                        recrypt.set(true);
-
-                        return MSAuth.cookiesToMcaFromCookies(cookie).thenComposeAsync(result -> {
-                            if (result == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
-
-                            access.set(result.mca());
-                            String nextRefresh = result.refresh();
-                            refresh.set(nextRefresh == null || nextRefresh.isBlank() ? cookieRefresh(cookie) : nextRefresh);
-
-                            LOGGER.info("IAS: Converting MCA TO MCP... (cookie refreshed)");
-                            handler.stage(MCA_TO_MCP);
-
-                            return MSAuth.mcaToMcp(result.mca());
-                        }, IAS.executor()).exceptionallyAsync(t -> {
-                            t.addSuppressed(original);
-
-                            if (IUtils.anyInCausalChain(t, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
-                                throw new FriendlyException("Unable to connect to cookie auth servers.", t, "ias.error.connect");
-                            }
-
-                            FriendlyException friendly = FriendlyException.friendlyInChain(t);
-                            if (friendly != null) {
-                                throw friendly;
-                            }
-
-                            throw new RuntimeException("Unable to refresh cookie session.", t);
-                        }, IAS.executor());
-                    }
-
                     String refreshToken = refresh.get();
                     if (refreshToken == null || refreshToken.isBlank()) {
-                        throw new FriendlyException("Cookie session expired. Re-import your cookie file to log in again.", original, "ias.error.cookie.expired");
+                        throw new FriendlyException("Session expired. Re-import your account to log in again.", original, "ias.error.cookie.expired");
                     }
 
                     // Log it and display progress.

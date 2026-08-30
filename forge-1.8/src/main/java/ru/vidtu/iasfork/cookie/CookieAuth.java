@@ -28,8 +28,14 @@ public final class CookieAuth {
         if (cookies.refreshToken() != null && !cookies.refreshToken().trim().isEmpty()) {
             return profileFromRefreshToken(cookies.refreshToken().trim());
         }
-        String mca = cookiesToMcaViaSisu(cookies.toSisuCookieHeader());
-        return profileFromMca(mca);
+        try {
+            MsaTokens tokens = cookiesToMsa(cookies.toCookieHeader());
+            MinecraftProfile profile = profileFromMsa(tokens.access, "t=");
+            return new MinecraftProfile(profile.name, profile.uuid, profile.token, tokens.refresh);
+        } catch (Throwable oauthFailed) {
+            String mca = cookiesToMcaViaSisu(cookies.toSisuCookieHeader());
+            return profileFromMca(mca);
+        }
     }
 
     /** Refreshes a Localts-backed account and preserves Microsoft's rotated refresh token. */
@@ -45,6 +51,96 @@ public final class CookieAuth {
      */
     public static MinecraftProfile profileFromAccessToken(String token) throws Exception {
         return profileFromMca(token);
+    }
+
+    private static MsaTokens cookiesToMsa(String cookieHeader) throws Exception {
+        String redirect1 = followSisuRedirect(SISU_AUTH_URL, null);
+        String redirect2 = followSisuRedirect(redirect1, cookieHeader);
+        String code = extractQueryParam(redirect2, "code");
+        if (code == null || code.trim().isEmpty()) {
+            throw new CookieAuthException("No authorization code in cookie auth response.", "ias.error.cookie.expired");
+        }
+
+        PostRequest pr = new PostRequest("https://login.live.com/oauth20_token.srf")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("Accept", "application/json");
+        Map<Object, Object> data = new HashMap<>();
+        data.put("client_id", "000000004415db7f");
+        data.put("code", code);
+        data.put("grant_type", "authorization_code");
+        data.put("redirect_uri", "https://sisu.xboxlive.com/connect/XboxLive/");
+        data.put("scope", MINECRAFT_OAUTH_SCOPE);
+        pr.post(data);
+        if (pr.response() != 200) {
+            throw new CookieAuthException("Cookie authorization code exchange failed.", "ias.error.cookie.expired");
+        }
+        JsonObject jo = AuthSys.gson().fromJson(pr.body(), JsonObject.class);
+        String rotated = jo.has("refresh_token") ? jo.get("refresh_token").getAsString() : "";
+        return new MsaTokens(jo.get("access_token").getAsString(), rotated);
+    }
+
+    private static String followOAuthRedirects(String url, String cookieHeader, int depth) throws Exception {
+        if (depth > 10) {
+            throw new CookieAuthException("Too many OAuth redirects.", "ias.error.cookie.expired");
+        }
+        GetRequest gr = new GetRequest(url.replace(" ", "%20"))
+                .header("User-Agent", COOKIE_USER_AGENT)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.8");
+        if (cookieHeader != null && !cookieHeader.trim().isEmpty()) {
+            gr.header("Cookie", cookieHeader);
+        }
+        gr.get();
+
+        String location = gr.location();
+        if (location != null && !location.trim().isEmpty()) {
+            String code = extractQueryParam(location, "code");
+            if (code != null && !code.trim().isEmpty()) {
+                return code;
+            }
+            if (extractQueryParam(location, "error") != null) {
+                throw new CookieAuthException("OAuth error: " + extractQueryParam(location, "error"), "ias.error.cookie.expired");
+            }
+            return followOAuthRedirects(location, cookieHeader, depth + 1);
+        }
+
+        String body = gr.body();
+        if (body != null) {
+            int codeIdx = body.indexOf("code=");
+            if (codeIdx >= 0) {
+                String sub = body.substring(codeIdx + 5);
+                int end = sub.indexOf('&');
+                if (end < 0) end = sub.indexOf('"');
+                if (end < 0) end = sub.indexOf('\'');
+                if (end < 0) end = sub.indexOf(' ');
+                if (end >= 0) sub = sub.substring(0, end);
+                if (!sub.trim().isEmpty()) {
+                    return URLDecoder.decode(sub, "UTF-8");
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String extractQueryParam(String url, String param) {
+        int idx = url.indexOf(param + "=");
+        if (idx < 0) {
+            return null;
+        }
+        String raw = url.substring(idx + param.length() + 1);
+        int amp = raw.indexOf('&');
+        if (amp >= 0) {
+            raw = raw.substring(0, amp);
+        }
+        int hash = raw.indexOf('#');
+        if (hash >= 0) {
+            raw = raw.substring(0, hash);
+        }
+        try {
+            return URLDecoder.decode(raw, "UTF-8");
+        } catch (Exception e) {
+            return raw;
+        }
     }
 
     private static MsaTokens localtsRefreshToMsa(String refresh) throws Exception {

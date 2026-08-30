@@ -565,7 +565,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     return;
                 }
 
-                MSAccountFactory.createFromCookies(this.crypt, cookies.toSisuCookieHeader(), createHandler).exceptionallyAsync(t -> {
+                MSAccountFactory.createFromCookies(this.crypt, cookies.toCookieHeader(), createHandler).exceptionallyAsync(t -> {
                     createHandler.error(t);
                     return null;
                 }, IAS.executor());

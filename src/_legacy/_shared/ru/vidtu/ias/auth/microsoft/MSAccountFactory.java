@@ -156,7 +156,12 @@ public final class MSAccountFactory {
             if (result == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
 
             access.set(result.mca());
-            refresh.set(result.refresh());
+            String resRefresh = result.refresh();
+            if (resRefresh != null && !resRefresh.isBlank()) {
+                refresh.set(resRefresh);
+            } else {
+                refresh.set(MicrosoftAccount.cookieRefresh(cookieHeader));
+            }
 
             LOGGER.info("IAS: Converting MCA to MCP (cookie import)...");
             handler.stage(MicrosoftAccount.MCA_TO_MCP);

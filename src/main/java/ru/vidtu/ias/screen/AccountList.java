@@ -161,9 +161,9 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private static boolean hypixelWorkerRunning;
 
     /**
-     * Delay between Hypixel ban checks.
+     * Delay between Hypixel ban checks (2.5 seconds to avoid Mojang auth / Hypixel rate limits).
      */
-    private static final long HYPIXEL_CHECK_DELAY_MS = 400L;
+    private static final long HYPIXEL_CHECK_DELAY_MS = 2500L;
 
     /**
      * Maximum time allowed per account (login + Hypixel connect).
