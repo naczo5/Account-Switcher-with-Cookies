@@ -349,7 +349,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         // Check if we should log in online.
         if (online && account.canLogin()) {
             // Initialize and set the login screen.
-            LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.NONE, account);
+            LoginPopupScreen login = new LoginPopupScreen(this.screen);
             //$ set_screen 'this.minecraft' 'login'
             this.minecraft.gui.setScreen(login);
 
@@ -362,7 +362,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         }
 
         // Initialize and set the login screen.
-        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.NONE, account);
+        LoginPopupScreen login = new LoginPopupScreen(this.screen);
         //$ set_screen 'this.minecraft' 'login'
         this.minecraft.gui.setScreen(login);
 
@@ -407,7 +407,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         suppressBanCheck(account.uuid());
 
         // Initialize and set the (re)login screen, used in copy-only mode.
-        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.ACCESS_TOKEN, account);
+        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.ACCESS_TOKEN);
         //$ set_screen 'this.minecraft' 'login'
         this.minecraft.gui.setScreen(login);
 
@@ -457,7 +457,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         suppressBanCheck(account.uuid());
 
         // Initialize and set the (re)login screen, used in copy-only mode.
-        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.REFRESH_TOKEN, account);
+        LoginPopupScreen login = new LoginPopupScreen(this.screen, LoginPopupScreen.CopyMode.REFRESH_TOKEN);
         //$ set_screen 'this.minecraft' 'login'
         this.minecraft.gui.setScreen(login);
 

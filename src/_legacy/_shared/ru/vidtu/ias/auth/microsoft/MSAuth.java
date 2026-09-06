@@ -120,15 +120,6 @@ public final class MSAuth {
     @NotNull
     public static final String MINECRAFT_OAUTH_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
 
-    /**
-     * Microsoft Launcher OAuth authorization URL for manual browser consent.
-     */
-    @NotNull
-    public static final String MINECRAFT_LAUNCHER_AUTH_URL = "https://login.live.com/oauth20_authorize.srf" +
-            "?client_id=00000000402b5328" +
-            "&redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf" +
-            "&response_type=code" +
-            "&scope=service%3A%3Auser.auth.xboxlive.com%3A%3AMBI_SSL";
 
     /**
      * ISO-8601 timestamps exposed on NameMC profile history pages.
