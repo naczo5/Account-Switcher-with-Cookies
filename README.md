@@ -4,8 +4,6 @@
 
 A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) with support for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
 
-Based on [naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies), plus token login, multi-file import, and account metadata refresh.
-
 ## What this fork adds
 
 - **Localts import** — single-line `M.C…` Microsoft refresh tokens (Localts export format) are detected and exchanged for a full Minecraft session.
@@ -77,7 +75,7 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 **A:** Yes. **Add → Microsoft** still works and lets you choose password or hardware encryption.
 
 **Q:** Where is this fork hosted?  
-**A:** [GitHub — xCheezie/Account-Switcher](https://github.com/xCheezie/Account-Switcher). Cookie-import baseline: [naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies). Upstream IAS: [Modrinth](https://modrinth.com/mod/in-game-account-switcher), [CurseForge](https://www.curseforge.com/minecraft/mc-mods/in-game-account-switcher).
+**A:** [GitHub — naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies). Upstream IAS: [Modrinth](https://modrinth.com/mod/in-game-account-switcher), [CurseForge](https://www.curseforge.com/minecraft/mc-mods/in-game-account-switcher).
 
 **Q:** Is this mod open source?  
 **A:** Yes, under [GNU LGPLv3](LICENSE), same as upstream IAS.
@@ -103,8 +101,9 @@ Built jars appear in `build\libs\`.
 
 ## Credits
 
-Based on [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) by VidTu and contributors, and [Account Switcher with Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies).
-
-Hypixel ban-check logic adapted from [mcchecker](https://github.com/cooldood-dev/mcchecker) by cooldood-dev.
+- Originally by **VidTu**, **The_Fireplace**, and IAS contributors.
+- Cookie authentication fork, Localts integration, Hypixel checks, and 1.8.9 Forge backports by **naczo5**.
+- Profile management, skin updating, and multi-file selection features by [**Articuling / xCheezie**](https://github.com/xCheezie).
+- Hypixel ban-check logic adapted from [mcchecker](https://github.com/cooldood-dev/mcchecker) by cooldood-dev.
 
 Microsoft authentication flow references: [minecraft.wiki/Microsoft_authentication](https://minecraft.wiki/Microsoft_authentication).

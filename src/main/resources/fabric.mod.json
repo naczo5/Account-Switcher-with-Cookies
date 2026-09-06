@@ -5,10 +5,11 @@
   "name": "In-Game Account Switcher",
   "description": "Allows you to change which account you are signed in to in-game without restarting Minecraft.",
   "authors": [
-    "Articuling"
+    "VidTu",
+    "naczo5"
   ],
   "contributors": [
-    "VidTu",
+    "Articuling",
     "The_Fireplace",
     "The_BrainStone",
     "2xsaiko",
