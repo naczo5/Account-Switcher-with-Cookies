@@ -36,6 +36,8 @@ public class GuiCookieImport extends GuiScreen {
     private GuiTextField pasteInput;
     private String savedPath = "";
     private String savedPaste = "";
+    /** Files picked via Browse (multi-select). Empty = parse pathInput text. */
+    private final List<String> selectedFiles = new ArrayList<String>();
     private final List<String> statusLines = new ArrayList<String>();
 
     public GuiCookieImport(GuiScreen parent) {
@@ -66,7 +68,7 @@ public class GuiCookieImport extends GuiScreen {
             }
         } else {
             pathInput = new GuiTextField(0, fontRendererObj, centerX - 99, centerY - 12, 178, 20);
-            pathInput.setMaxStringLength(512);
+            pathInput.setMaxStringLength(4096);
             pathInput.setFocused(true);
             if (!savedPath.isEmpty()) {
                 pathInput.setText(savedPath);
@@ -124,8 +126,8 @@ public class GuiCookieImport extends GuiScreen {
             @Override
             public void run() {
                 try {
-                    String path = CookieFileDialogs.pickFile(I18n.format("ias.cookie.browse"), start);
-                    if (path == null || closed) {
+                    List<String> paths = CookieFileDialogs.pickFiles(I18n.format("ias.cookie.browse"), start);
+                    if (paths.isEmpty() || closed) {
                         return;
                     }
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
@@ -134,9 +136,16 @@ public class GuiCookieImport extends GuiScreen {
                             if (closed) {
                                 return;
                             }
-                            savedPath = path;
+                            selectedFiles.clear();
+                            selectedFiles.addAll(paths);
+                            String joined = joinPaths(paths);
+                            savedPath = joined;
                             if (pathInput != null) {
-                                pathInput.setText(path);
+                                pathInput.setText(joined);
+                            }
+                            statusLines.clear();
+                            if (paths.size() > 1) {
+                                statusLines.add(I18n.format("ias.cookie.selected", paths.size()));
                             }
                         }
                     });
@@ -145,6 +154,32 @@ public class GuiCookieImport extends GuiScreen {
                 }
             }
         }, "IAS/CookieBrowse").start();
+    }
+
+    private static String joinPaths(List<String> paths) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : paths) {
+            if (sb.length() > 0) {
+                sb.append("; ");
+            }
+            sb.append(p);
+        }
+        return sb.toString();
+    }
+
+    /** Splits manual `;`/newline-separated input into individual file paths. */
+    private static List<String> splitPaths(String raw) {
+        List<String> out = new ArrayList<String>();
+        if (raw == null) {
+            return out;
+        }
+        for (String part : raw.split("[;\n]+")) {
+            String t = part == null ? "" : part.trim();
+            if (!t.isEmpty()) {
+                out.add(t);
+            }
+        }
+        return out;
     }
 
     private void importCookies() {
@@ -171,18 +206,71 @@ public class GuiCookieImport extends GuiScreen {
         statusLines.add(I18n.format("ias.login.cookiesToMsaMsr"));
         final String source = raw;
         final boolean fromPath = !pasteMode;
+        // Snapshot the multi-file selection; manual edits fall back to parsing the field.
+        final List<String> files;
+        if (fromPath) {
+            List<String> typed = splitPaths(source);
+            if (!selectedFiles.isEmpty() && typed.size() == selectedFiles.size()
+                    && selectedFiles.containsAll(typed)) {
+                files = new ArrayList<String>(selectedFiles);
+            } else {
+                files = typed;
+                selectedFiles.clear();
+                selectedFiles.addAll(typed);
+            }
+        } else {
+            files = new ArrayList<String>();
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    CookieParser.ParsedCookies cookies = fromPath
-                            ? CookieParser.fromPath(source)
-                            : CookieParser.fromText(source);
-                    if (closed) {
+                    if (fromPath && files.size() > 1) {
+                        importMultipleFiles(files);
                         return;
                     }
-                    CookieAuth.MinecraftProfile profile = CookieAuth.authenticate(cookies);
-                    if (closed) {
+                    final List<CookieAuth.MinecraftProfile> profiles = new ArrayList<CookieAuth.MinecraftProfile>();
+                    if (fromPath) {
+                        try {
+                            CookieParser.ParsedCookies cookies = CookieParser.fromPath(source);
+                            if (closed) {
+                                return;
+                            }
+                            profiles.add(CookieAuth.authenticate(cookies));
+                        } catch (Throwable cookieFailed) {
+                            // Fall back to bare-token file (modern TokenImporter parity).
+                            List<String> tokens = readTokenFileFallback(source);
+                            if (tokens.isEmpty()) {
+                                throw cookieFailed;
+                            }
+                            importTokensWithDelay(tokens, profiles);
+                        }
+                    } else {
+                        boolean cookieOk = false;
+                        try {
+                            CookieParser.ParsedCookies cookies = CookieParser.fromText(source);
+                            if (closed) {
+                                return;
+                            }
+                            profiles.add(CookieAuth.authenticate(cookies));
+                            cookieOk = true;
+                        } catch (Throwable ignored) {
+                            cookieOk = false;
+                        }
+                        if (!cookieOk) {
+                            if (closed) {
+                                return;
+                            }
+                            List<String> tokens = ru.vidtu.iasfork.cookie.TokenImporter.extractValues(source);
+                            if (tokens.isEmpty()) {
+                                throw new CookieAuthException(
+                                        "Unrecognized cookie format. Use a Netscape cookie file, semicolon-separated cookie header, Localts token, or pasted session/refresh token.",
+                                        "ias.error.cookie.invalid");
+                            }
+                            importTokensWithDelay(tokens, profiles);
+                        }
+                    }
+                    if (closed || profiles.isEmpty()) {
                         return;
                     }
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
@@ -192,8 +280,22 @@ public class GuiCookieImport extends GuiScreen {
                                 return;
                             }
                             try {
-                                saveAndLogin(profile);
-                                mc.displayGuiScreen(returnToAccountListOnSuccess ? new GuiAccountSelector() : parent);
+                                int dup = 0;
+                                for (CookieAuth.MinecraftProfile p : profiles) {
+                                    if (saveAccount(p)) {
+                                        dup++;
+                                    }
+                                }
+                                CookieAuth.MinecraftProfile last = profiles.get(profiles.size() - 1);
+                                MR.setSession(new Session(last.name, last.uuid, last.token, "mojang"));
+                                Config.save();
+                                if (profiles.size() > 1) {
+                                    statusLines.clear();
+                                    statusLines.add(I18n.format("ias.cookie.multi.done", profiles.size(), profiles.size(), 0, dup));
+                                    importing = false;
+                                } else {
+                                    mc.displayGuiScreen(returnToAccountListOnSuccess ? new GuiAccountSelector() : parent);
+                                }
                             } catch (Throwable t) {
                                 showError(formatError(t));
                                 importing = false;
@@ -202,37 +304,260 @@ public class GuiCookieImport extends GuiScreen {
                     });
                 } catch (Throwable t) {
                     if (!closed) {
+                        final Throwable err = t;
                         Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                             @Override
                             public void run() {
-                                showError(formatError(t));
+                                showError(formatError(err));
                                 importing = false;
                             }
                         });
                     }
                 }
             }
+
+            private void importTokensWithDelay(List<String> tokens, List<CookieAuth.MinecraftProfile> out) throws Exception {
+                Throwable lastError = null;
+                int rateLimitRetries = 0;
+                for (int i = 0; i < tokens.size(); i++) {
+                    if (closed) {
+                        return;
+                    }
+                    try {
+                        out.add(ru.vidtu.iasfork.cookie.TokenImporter.importSingleToken(tokens.get(i)));
+                        rateLimitRetries = 0;
+                    } catch (Throwable t) {
+                        if (isRateLimited(t) && rateLimitRetries < 2) {
+                            rateLimitRetries++;
+                            try {
+                                Thread.sleep(30000L);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                throw ie;
+                            }
+                            i--;
+                            continue;
+                        }
+                        lastError = t;
+                        // Continue with remaining tokens; single-token case rethrows below.
+                        if (tokens.size() == 1) {
+                            throw t instanceof Exception ? (Exception) t : new Exception(t);
+                        }
+                    }
+                    if (i + 1 < tokens.size()) {
+                        try {
+                            Thread.sleep(6000L);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+                if (out.isEmpty() && lastError != null) {
+                    throw lastError instanceof Exception ? (Exception) lastError : new Exception(lastError);
+                }
+            }
+
+            private List<String> readTokenFileFallback(String path) {
+                try {
+                    byte[] bytes = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path.trim()));
+                    String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                    return ru.vidtu.iasfork.cookie.TokenImporter.extractValues(text);
+                } catch (Throwable ignored) {
+                    return new ArrayList<String>();
+                }
+            }
+
+            /**
+             * Imports one cookie/token file per list entry with rate-limit
+             * spacing (modern multi-cookie parity): 6s between files, 30s
+             * retry (x2) on 429, per-file progress, imported/failed/dup counts.
+             */
+            private void importMultipleFiles(List<String> paths) {
+                final List<CookieAuth.MinecraftProfile> ok = new ArrayList<CookieAuth.MinecraftProfile>();
+                int failed = 0;
+                int duplicates = 0;
+                final int total = paths.size();
+                for (int i = 0; i < total; i++) {
+                    if (closed) {
+                        return;
+                    }
+                    final int idx = i;
+                    postStatus(I18n.format("ias.cookie.multi.progress", idx + 1, total));
+                    String path = paths.get(idx);
+                    CookieAuth.MinecraftProfile profile = null;
+                    Throwable lastError = null;
+                    int rateLimitRetries = 0;
+                    while (profile == null) {
+                        if (closed) {
+                            return;
+                        }
+                        try {
+                            profile = importOneFile(path);
+                        } catch (Throwable t) {
+                            if (isRateLimited(t) && rateLimitRetries < 2) {
+                                rateLimitRetries++;
+                                postStatus(I18n.format("ias.error.rateLimited"));
+                                try {
+                                    Thread.sleep(30000L);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                    return;
+                                }
+                                continue;
+                            }
+                            lastError = t;
+                            break;
+                        }
+                    }
+                    if (profile != null) {
+                        ok.add(profile);
+                    } else {
+                        failed++;
+                        if (lastError != null) {
+                            lastError.printStackTrace();
+                        }
+                    }
+                    if (idx + 1 < total) {
+                        try {
+                            Thread.sleep(6000L);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+                if (closed) {
+                    return;
+                }
+                final List<CookieAuth.MinecraftProfile> done = ok;
+                final int failedCount = failed;
+                Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (closed) {
+                            return;
+                        }
+                        int dup = 0;
+                        try {
+                            for (CookieAuth.MinecraftProfile p : done) {
+                                if (saveAccount(p)) {
+                                    dup++;
+                                }
+                            }
+                            CookieAuth.MinecraftProfile last = done.isEmpty() ? null : done.get(done.size() - 1);
+                            Config.save();
+                            if (last != null && failedCount == 0 && done.size() == 1) {
+                                MR.setSession(new Session(last.name, last.uuid, last.token, "mojang"));
+                                mc.displayGuiScreen(returnToAccountListOnSuccess ? new GuiAccountSelector() : parent);
+                                return;
+                            }
+                            if (last != null) {
+                                MR.setSession(new Session(last.name, last.uuid, last.token, "mojang"));
+                            }
+                            statusLines.clear();
+                            statusLines.add(I18n.format("ias.cookie.multi.done", done.size(), total, failedCount, dup));
+                            importing = false;
+                        } catch (Throwable t) {
+                            showError(formatError(t));
+                            importing = false;
+                        }
+                    }
+                });
+            }
+
+            private CookieAuth.MinecraftProfile importOneFile(String path) throws Exception {
+                try {
+                    return CookieAuth.authenticate(CookieParser.fromPath(path));
+                } catch (Throwable cookieFailed) {
+                    List<String> tokens = readTokenFileFallback(path);
+                    if (tokens.isEmpty()) {
+                        if (cookieFailed instanceof Exception) {
+                            throw (Exception) cookieFailed;
+                        }
+                        throw new Exception(cookieFailed);
+                    }
+                    if (tokens.size() == 1) {
+                        return ru.vidtu.iasfork.cookie.TokenImporter.importSingleToken(tokens.get(0));
+                    }
+                    List<CookieAuth.MinecraftProfile> out = new ArrayList<CookieAuth.MinecraftProfile>();
+                    importTokensWithDelay(tokens, out);
+                    if (out.isEmpty()) {
+                        if (cookieFailed instanceof Exception) {
+                            throw (Exception) cookieFailed;
+                        }
+                        throw new Exception(cookieFailed);
+                    }
+                    // First profile counts for this file; extras are saved too.
+                    for (int i = 1; i < out.size(); i++) {
+                        final CookieAuth.MinecraftProfile extra = out.get(i);
+                        Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+                            @Override
+                            public void run() {
+                                saveAccount(extra);
+                                Config.save();
+                            }
+                        });
+                    }
+                    return out.get(0);
+                }
+            }
+
+            private void postStatus(final String line) {
+                try {
+                    Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!closed) {
+                                statusLines.clear();
+                                statusLines.add(line);
+                            }
+                        }
+                    });
+                } catch (Throwable ignored) {
+                }
+            }
         }, "IAS/Cookie").start();
+    }
+
+    /**
+     * @return true when an existing entry was replaced (duplicate).
+     */
+    private boolean saveAccount(CookieAuth.MinecraftProfile profile) {
+        ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
+        data.premium = EnumBool.TRUE;
+        return ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
+    }
+
+    private static boolean isRateLimited(Throwable t) {
+        while (t != null) {
+            String m = t.getMessage();
+            if (m != null && (m.contains("429") || m.toLowerCase().contains("rate-limit")
+                    || m.toLowerCase().contains("rate limit") || m.toLowerCase().contains("rate_limit"))) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     private void saveAndLogin(CookieAuth.MinecraftProfile profile) throws Exception {
         ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
         data.premium = EnumBool.TRUE;
-        AltDatabase.getInstance().getAlts().add(data);
+        ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
         Config.save();
         MR.setSession(new Session(profile.name, profile.uuid, profile.token, "mojang"));
     }
 
     private String resolvePasteSource() {
         String box = pasteInput != null ? pasteInput.getText() : "";
+        if (box == null) {
+            box = "";
+        }
         String clip = clipboardContents();
-        if (!box.isEmpty() && box.contains("\t")) {
-            return box;
-        }
-        if (!clip.isEmpty() && clip.contains("\t")) {
-            return clip;
-        }
-        if (!box.isEmpty()) {
+        // Box content always wins when non-empty; clipboard is only a fallback.
+        // The old tab-preference returned stale clipboard data for Localts/JWT pastes.
+        if (!box.trim().isEmpty()) {
             return box;
         }
         return clip;
@@ -255,6 +580,12 @@ public class GuiCookieImport extends GuiScreen {
     }
 
     private static String formatError(Throwable t) {
+        if (isRateLimited(t)) {
+            try {
+                return I18n.format("ias.error.rateLimited");
+            } catch (Throwable ignored) {
+            }
+        }
         if (t instanceof CookieAuthException) {
             CookieAuthException e = (CookieAuthException) t;
             if (e.langKey() != null) {

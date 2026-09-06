@@ -6,10 +6,6 @@ import com.github.mrebhan.ingameaccountswitcher.MR;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AccountData;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase;
 import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltManager;
-import com.mojang.authlib.Agent;
-import com.mojang.authlib.AuthenticationService;
-import com.mojang.authlib.UserAuthentication;
-import com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService;
 import com.mojang.util.UUIDTypeAdapter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
@@ -29,12 +25,15 @@ import the_fireplace.ias.tools.JavaTools;
 import the_fireplace.ias.tools.SkinTools;
 import the_fireplace.iasencrypt.EncryptionTools;
 import ru.vidtu.iasfork.cookie.CookieAuth;
+import ru.vidtu.iasfork.cookie.CookieAuthException;
 import ru.vidtu.ias.auth.hypixel.HypixelBanChecker;
 import ru.vidtu.ias.auth.hypixel.HypixelBanResult;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 /**
@@ -47,6 +46,7 @@ public class GuiAccountSelector extends GuiScreen {
 	private Throwable loginfailed;
 	private ArrayList<ExtendedAccountData> queriedaccounts = convertData();
 	private GuiAccountSelector.List accountsgui;
+	private java.util.List<String> hoveredTooltip;
 	//Buttons that can be disabled need to be here
 	private GuiButton login;
 	private GuiButton loginoffline;
@@ -55,12 +55,14 @@ public class GuiAccountSelector extends GuiScreen {
 	private GuiButton reloadskins;
 	private GuiButton logout;
 	private GuiButton checkHypixel;
+	private GuiButton manageProfile;
 	//Search
 	private String query;
 	private GuiTextField search;
 	private volatile boolean hypixelCheckRunning;
 	private final Map<String, HypixelBanResult> hypixelResults = new HashMap<String, HypixelBanResult>();
 	private final Map<String, HypixelBanPhase> hypixelPhases = new HashMap<String, HypixelBanPhase>();
+	private boolean hypixelCacheLoaded;
 
 	private enum HypixelBanPhase {
 		UNKNOWN,
@@ -71,14 +73,22 @@ public class GuiAccountSelector extends GuiScreen {
 	@Override
 	public void initGui() {
 		Keyboard.enableRepeatEvents(true);
+		if (!hypixelCacheLoaded) {
+			try {
+				hypixelResults.putAll(ru.vidtu.iasfork.checks.ChecksCache.load());
+			} catch (Throwable ignored) {
+			}
+			hypixelCacheLoaded = true;
+		}
 		accountsgui = new GuiAccountSelector.List(this.mc);
 		accountsgui.registerScrollButtons(5, 6);
 		query = I18n.format("ias.search");
 		this.buttonList.clear();
 		//Above Top Row
-		this.buttonList.add(reloadskins = new GuiButton(8, this.width / 2 - 154 - 10, this.height - 76 - 8, 120, 20, I18n.format("ias.reloadskins")));
-		this.buttonList.add(logout = new GuiButton(9, this.width / 2 - 60, this.height - 76 - 8, 120, 20, I18n.format("ias.logout")));
-		this.buttonList.add(checkHypixel = new GuiButton(10, this.width / 2 + 64, this.height - 76 - 8, 120, 20, I18n.format("ias.accounts.checkHypixel")));
+		this.buttonList.add(reloadskins = new GuiButton(8, this.width / 2 - 154 - 10, this.height - 76 - 8, 80, 20, I18n.format("ias.reloadskins")));
+		this.buttonList.add(manageProfile = new GuiButton(11, this.width / 2 - 80, this.height - 76 - 8, 80, 20, "Skin / Name"));
+		this.buttonList.add(logout = new GuiButton(9, this.width / 2 + 4, this.height - 76 - 8, 76, 20, I18n.format("ias.logout")));
+		this.buttonList.add(checkHypixel = new GuiButton(10, this.width / 2 + 84, this.height - 76 - 8, 80, 20, I18n.format("ias.accounts.checkHypixel")));
 		//Top Row
 		this.buttonList.add(new GuiButton(0, this.width / 2 + 4 + 40, this.height - 52, 120, 20, I18n.format("ias.addaccount")));
 		this.buttonList.add(login = new GuiButton(1, this.width / 2 - 154 - 10, this.height - 52, 120, 20, I18n.format("ias.login")));
@@ -136,12 +146,15 @@ public class GuiAccountSelector extends GuiScreen {
 	@Override
 	public void onGuiClosed()
 	{
+		hypixelCheckId++;
+		hypixelCheckRunning = false;
 		Keyboard.enableRepeatEvents(false);
 		Config.save();
 	}
 
 	@Override
 	public void drawScreen(int par1, int par2, float par3) {
+		hoveredTooltip = null;
 		accountsgui.drawScreen(par1, par2, par3);
 		this.drawCenteredString(fontRendererObj, I18n.format("ias.selectaccount"), this.width / 2, 4, -1);
 		if (loginfailed != null) {
@@ -162,6 +175,9 @@ public class GuiAccountSelector extends GuiScreen {
 				this.drawString(fontRendererObj, I18n.format("ias.lastused"), width-8-61, height/2-64-15+30, -1);
 				this.drawString(fontRendererObj, JavaTools.getJavaCompat().getFormattedDate(), width-8-61, height/2-64-15+39, -1);
 			}
+		}
+		if (hoveredTooltip != null && !hoveredTooltip.isEmpty()) {
+			this.drawHoveringText(hoveredTooltip, par1, par2);
 		}
 	}
 
@@ -187,6 +203,8 @@ public class GuiAccountSelector extends GuiScreen {
 				logout();
 			}else if(button.id == 10){
 				checkAllHypixelBans();
+			}else if(button.id == 11){
+				mc.displayGuiScreen(new GuiManageProfile(this, queriedaccounts.get(selectedAccountIndex)));
 			}else{
 				accountsgui.actionPerformed(button);
 			}
@@ -228,6 +246,85 @@ public class GuiAccountSelector extends GuiScreen {
 		updateQueried();
 		updateButtons();
 	}
+
+	/**
+	 * Copies the active access token of the selected account to the clipboard.
+	 * Requires a second press within 8s as confirmation (modern parity).
+	 */
+	private String copyTokenPendingAlias = "";
+	private long copyTokenConfirmUntil;
+	private String copyRefreshPendingAlias = "";
+	private long copyRefreshConfirmUntil;
+
+	private boolean confirmCopy(String alias, boolean isRefresh) {
+		long now = System.currentTimeMillis();
+		if (isRefresh) {
+			if (copyRefreshPendingAlias.equals(alias) && now < copyRefreshConfirmUntil) {
+				copyRefreshPendingAlias = "";
+				copyRefreshConfirmUntil = 0L;
+				return true;
+			}
+			copyRefreshPendingAlias = alias;
+			copyRefreshConfirmUntil = now + 8000L;
+			return false;
+		}
+		if (copyTokenPendingAlias.equals(alias) && now < copyTokenConfirmUntil) {
+			copyTokenPendingAlias = "";
+			copyTokenConfirmUntil = 0L;
+			return true;
+		}
+		copyTokenPendingAlias = alias;
+		copyTokenConfirmUntil = now + 8000L;
+		return false;
+	}
+
+	private void copyToken(){
+		if (queriedaccounts.isEmpty()) return;
+		ExtendedAccountData data = queriedaccounts.get(selectedAccountIndex);
+		String token = "";
+		try {
+			if (isCookieAccount(data)) {
+				token = data.cookieAccessToken();
+			} else if (Minecraft.getMinecraft().getSession() != null && data.alias.equals(Minecraft.getMinecraft().getSession().getUsername())) {
+				token = Minecraft.getMinecraft().getSession().getToken();
+			}
+		} catch (Throwable ignored) {
+			token = "";
+		}
+		if (token != null && !token.isEmpty()) {
+			if (!confirmCopy(data.alias, false)) {
+				loginfailed = new Throwable(I18n.format("ias.copyToken.confirm", data.alias));
+				return;
+			}
+			setClipboardString(token);
+			loginfailed = new Throwable("Copied session token for " + data.alias + " to clipboard.");
+		}
+	}
+
+	/**
+	 * Copies the refresh token of the selected account to the clipboard.
+	 */
+	private void copyRefreshToken(){
+		if (queriedaccounts.isEmpty()) return;
+		ExtendedAccountData data = queriedaccounts.get(selectedAccountIndex);
+		String ref = "";
+		try {
+			ref = data.cookieRefreshToken();
+		} catch (Throwable ignored) {
+			ref = "";
+		}
+		if (ref != null && !ref.isEmpty()) {
+			if (!confirmCopy(data.alias, true)) {
+				loginfailed = new Throwable(I18n.format("ias.copyRefreshToken.confirm", data.alias));
+				return;
+			}
+			setClipboardString(ref);
+			loginfailed = new Throwable("Copied refresh token for " + data.alias + " to clipboard.");
+		} else {
+			loginfailed = new Throwable(I18n.format("ias.accounts.copyRefreshToken.offline"));
+		}
+	}
+
 	/**
 	 * Add an account
 	 */
@@ -276,21 +373,42 @@ public class GuiAccountSelector extends GuiScreen {
 	 */
 	private Throwable setCookieSession(ExtendedAccountData data) {
 		try {
-			String username = EncryptionTools.decode(data.user);
-			String token = data.cookieAccessToken();
+			String username = "";
+			try {
+				username = EncryptionTools.decode(data.user);
+			} catch (Throwable ignored) {
+				username = data.alias == null ? "" : data.alias;
+			}
+			String token = "";
+			try {
+				token = data.cookieAccessToken();
+			} catch (Throwable ignored) {
+				token = "";
+			}
 			String uuid = data.cookieUuid;
-			if (Minecraft.getMinecraft().getSession().getUsername().equals(username)
-					&& Minecraft.getMinecraft().getSession().getToken().equals(token)
-					&& !ConfigValues.ENABLERELOG) {
-				return new AlreadyLoggedInException();
+			try {
+				net.minecraft.util.Session session = Minecraft.getMinecraft().getSession();
+				if (session != null && session.getUsername() != null && session.getUsername().equals(username)
+						&& session.getToken() != null && session.getToken().equals(token)
+						&& !ConfigValues.ENABLERELOG) {
+					return new AlreadyLoggedInException();
+				}
+			} catch (Throwable ignored) {
 			}
 
 			CookieAuth.MinecraftProfile profile;
 			try {
+				if (token == null || token.isEmpty()) {
+					throw new CookieAuthException("Empty session token.", "ias.error.cookie.expired");
+				}
 				profile = CookieAuth.profileFromAccessToken(token);
 			} catch (Throwable expired) {
-				String refresh = data.cookieRefreshToken();
-				if (refresh.isEmpty()) {
+				String refresh = "";
+				try {
+					refresh = data.cookieRefreshToken();
+				} catch (Throwable ignored) {
+				}
+				if (refresh == null || refresh.isEmpty()) {
 					throw expired;
 				}
 				profile = CookieAuth.profileFromRefreshToken(refresh);
@@ -365,6 +483,10 @@ public class GuiAccountSelector extends GuiScreen {
 			add();
 		} else if(character == '/' && edit.enabled){
 			edit();
+		} else if(!search.isFocused() && isCtrlKeyDown() && keyIndex == Keyboard.KEY_C) {
+			copyToken();
+		} else if(!search.isFocused() && isCtrlKeyDown() && (keyIndex == Keyboard.KEY_R || keyIndex == Keyboard.KEY_X)) {
+			copyRefreshToken();
 		} else if(!search.isFocused() && keyIndex == Keyboard.KEY_R) {
 			reloadSkins();
 		} else if(keyIndex == Keyboard.KEY_RETURN && !search.isFocused() && (login.enabled || loginoffline.enabled)){
@@ -425,12 +547,37 @@ public class GuiAccountSelector extends GuiScreen {
 		return null;
 	}
 	private void updateButtons(){
-		login.enabled = !queriedaccounts.isEmpty() && !EncryptionTools.decode(queriedaccounts.get(selectedAccountIndex).pass).equals("");
-		loginoffline.enabled = !queriedaccounts.isEmpty();
-		delete.enabled = !queriedaccounts.isEmpty();
-		edit.enabled = !queriedaccounts.isEmpty();
+		boolean hasAccounts = !queriedaccounts.isEmpty();
+		boolean loginOk = false;
+		if (hasAccounts) {
+			try {
+				String pass = EncryptionTools.decode(queriedaccounts.get(selectedAccountIndex).pass);
+				loginOk = pass != null && !pass.equals("");
+			} catch (Throwable ignored) {
+				loginOk = false;
+			}
+		}
+		login.enabled = hasAccounts && loginOk;
+		loginoffline.enabled = hasAccounts;
+		delete.enabled = hasAccounts;
+		edit.enabled = hasAccounts;
 		reloadskins.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
-		logout.enabled = IAS.canRestoreLaunchSession();
+		try {
+			logout.enabled = IAS.canRestoreLaunchSession();
+		} catch (Throwable ignored) {
+			logout.enabled = false;
+		}
+		if (manageProfile != null) {
+			boolean cookieOnly = false;
+			if (hasAccounts) {
+				try {
+					cookieOnly = isCookieAccount(queriedaccounts.get(selectedAccountIndex));
+				} catch (Throwable ignored) {
+					cookieOnly = false;
+				}
+			}
+			manageProfile.enabled = cookieOnly;
+		}
 		if (checkHypixel != null) {
 			checkHypixel.enabled = !hypixelCheckRunning && !queriedaccounts.isEmpty();
 			checkHypixel.displayString = hypixelCheckRunning
@@ -441,25 +588,39 @@ public class GuiAccountSelector extends GuiScreen {
 
 	private String hypixelKey(ExtendedAccountData data) {
 		if (data.isCookieSession() && data.cookieUuid != null && !data.cookieUuid.isEmpty()) {
-			return data.cookieUuid;
+			return "uuid:" + data.cookieUuid;
 		}
-		return EncryptionTools.decode(data.user);
+		try {
+			String user = EncryptionTools.decode(data.user);
+			if (user != null && !user.isEmpty()) {
+				return "user:" + user;
+			}
+		} catch (Throwable ignored) {
+		}
+		return "alias:" + (data.alias == null ? "" : data.alias);
 	}
+
+	private volatile int hypixelCheckId;
 
 	private void checkAllHypixelBans() {
 		if (hypixelCheckRunning) {
 			return;
 		}
 		hypixelCheckRunning = true;
+		final int myId = ++hypixelCheckId;
 		updateButtons();
 		final ArrayList<ExtendedAccountData> accounts = convertData();
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
 				for (ExtendedAccountData data : accounts) {
+					if (myId != hypixelCheckId) {
+						break;
+					}
 					final String key = hypixelKey(data);
 					if (!canCheckHypixel(data)) {
 						hypixelPhases.put(key, HypixelBanPhase.NOT_APPLICABLE);
+						hypixelResults.remove(key);
 						scheduleRefresh();
 						continue;
 					}
@@ -475,70 +636,111 @@ public class GuiAccountSelector extends GuiScreen {
 					hypixelPhases.put(key, HypixelBanPhase.UNKNOWN);
 					scheduleRefresh();
 					try {
-						Thread.sleep(2500L);
+						Thread.sleep(6000L);
 					} catch (InterruptedException ignored) {
 						Thread.currentThread().interrupt();
 						break;
 					}
 				}
-				hypixelCheckRunning = false;
-				scheduleRefresh();
+				if (myId == hypixelCheckId) {
+					hypixelCheckRunning = false;
+					try {
+						ru.vidtu.iasfork.checks.ChecksCache.save(hypixelResults);
+					} catch (Throwable ignored) {
+					}
+					scheduleRefresh();
+				}
 			}
 		}, "IAS-HypixelCheck").start();
 	}
 
 	private void scheduleRefresh() {
-		Minecraft.getMinecraft().addScheduledTask(new Runnable() {
-			@Override
-			public void run() {
-				updateButtons();
+		try {
+			Minecraft mc = Minecraft.getMinecraft();
+			if (mc == null) {
+				hypixelCheckRunning = false;
+				return;
 			}
-		});
+			mc.addScheduledTask(new Runnable() {
+				@Override
+				public void run() {
+					try {
+						updateButtons();
+					} catch (Throwable ignored) {
+					}
+				}
+			});
+		} catch (Throwable ignored) {
+		}
 	}
 
+	/**
+	 * Yggdrasil password auth was shut down by Mojang; only cookie/Microsoft
+	 * sessions can be checked. Password accounts are marked NOT_APPLICABLE.
+	 */
 	private boolean canCheckHypixel(ExtendedAccountData data) {
-		if (isCookieAccount(data)) {
-			return true;
-		}
 		try {
-			return !EncryptionTools.decode(data.pass).isEmpty();
+			return isCookieAccount(data);
 		} catch (Throwable ignored) {
 			return false;
 		}
 	}
 
 	private HypixelBanResult resolveAndCheck(ExtendedAccountData data) throws Exception {
-		if (isCookieAccount(data)) {
-			CookieAuth.MinecraftProfile profile = resolveCookieProfile(data);
-			return HypixelBanChecker.checkBan(profile.name, parseUuid(profile.uuid), profile.token);
+		if (!isCookieAccount(data)) {
+			throw new IllegalStateException(I18n.format("ias.accounts.copyRefreshToken.offline"));
 		}
-		AuthenticationService authService = new YggdrasilAuthenticationService(Minecraft.getMinecraft().getProxy(), UUID.randomUUID().toString());
-		UserAuthentication auth = authService.createUserAuthentication(Agent.MINECRAFT);
-		auth.setUsername(EncryptionTools.decode(data.user));
-		auth.setPassword(EncryptionTools.decode(data.pass));
-		auth.logIn();
-		UUID uuid = auth.getSelectedProfile().getId();
-		return HypixelBanChecker.checkBan(auth.getSelectedProfile().getName(), uuid, auth.getAuthenticatedToken());
+		CookieAuth.MinecraftProfile profile = resolveCookieProfile(data);
+		return HypixelBanChecker.checkBan(profile.name, parseUuid(profile.uuid), profile.token);
 	}
 
 	private CookieAuth.MinecraftProfile resolveCookieProfile(ExtendedAccountData data) throws Exception {
-		String token = data.cookieAccessToken();
+		String token = "";
 		try {
-			return CookieAuth.profileFromAccessToken(token);
-		} catch (Throwable expired) {
-			String refresh = data.cookieRefreshToken();
-			if (refresh.isEmpty()) {
-				throw expired;
+			token = data.cookieAccessToken();
+		} catch (Throwable ignored) {
+			token = "";
+		}
+		try {
+			if (token != null && !token.isEmpty()) {
+				return CookieAuth.profileFromAccessToken(token);
 			}
-			return CookieAuth.profileFromRefreshToken(refresh);
+			throw new CookieAuthException("Empty session token.", "ias.error.cookie.expired");
+		} catch (Throwable expired) {
+			String refresh = "";
+			try {
+				refresh = data.cookieRefreshToken();
+			} catch (Throwable ignored) {
+				refresh = "";
+			}
+			if (refresh == null || refresh.isEmpty()) {
+				if (expired instanceof Exception) {
+					throw (Exception) expired;
+				}
+				throw new Exception(expired);
+			}
+			CookieAuth.MinecraftProfile refreshed = CookieAuth.profileFromRefreshToken(refresh);
+			try {
+				data.updateCookieTokens(refreshed.token, refreshed.refreshToken, refreshed.uuid, refreshed.name);
+				Config.save();
+			} catch (Throwable ignored) {
+			}
+			return refreshed;
 		}
 	}
 
 	private UUID parseUuid(String uuid) {
-		if (uuid.contains("-")) {
-			return UUID.fromString(uuid);
+		if (uuid == null || uuid.trim().isEmpty()) {
+			return new UUID(0L, 0L);
 		}
-		return UUIDTypeAdapter.fromString(uuid);
+		try {
+			if (uuid.contains("-")) {
+				return UUID.fromString(uuid.trim());
+			}
+			return UUIDTypeAdapter.fromString(uuid.trim());
+		} catch (Throwable ignored) {
+			return new UUID(0L, 0L);
+		}
 	}
 
 	private String hypixelSuffix(ExtendedAccountData data) {
@@ -585,6 +787,42 @@ public class GuiAccountSelector extends GuiScreen {
 				return 0xFFA000;
 		}
 	}
+
+	private java.util.List<String> hypixelTooltip(ExtendedAccountData data) {
+		String key = hypixelKey(data);
+		HypixelBanPhase phase = hypixelPhases.get(key);
+		if (phase == HypixelBanPhase.CHECKING) {
+			return Collections.singletonList(I18n.format("ias.hypixel.checking"));
+		}
+		HypixelBanResult result = hypixelResults.get(key);
+		if (result == null) {
+			return Collections.singletonList(I18n.format("ias.hypixel.unknown"));
+		}
+		java.util.List<String> lines = new ArrayList<String>();
+		switch (result.status()) {
+			case UNBANNED:
+				lines.add(I18n.format("ias.hypixel.unbanned"));
+				break;
+			case BANNED:
+				lines.add(I18n.format("ias.hypixel.banned"));
+				if (result.banType() != null && !result.banType().trim().isEmpty()) {
+					lines.add(I18n.format("ias.hypixel.type", result.banType()));
+				}
+				if (result.duration() != null && !result.duration().trim().isEmpty()) {
+					lines.add(I18n.format("ias.hypixel.duration", result.duration()));
+				}
+				if (result.reason() != null && !result.reason().trim().isEmpty()) {
+					lines.add(I18n.format("ias.hypixel.reason", result.reason()));
+				}
+				break;
+			case ERROR:
+			default:
+				lines.add(I18n.format("ias.hypixel.error", result.errorMessage() != null ? result.errorMessage() : "Unknown error"));
+				break;
+		}
+		return lines;
+	}
+
 	class List extends GuiSlot
 	{
 		public List(Minecraft mcIn)
@@ -629,7 +867,7 @@ public class GuiAccountSelector extends GuiScreen {
 		}
 
 		@Override
-		protected void drawSlot(int entryID, int p_180791_2_, int p_180791_3_, int p_180791_4_, int p_180791_5_, int p_180791_6_)
+		protected void drawSlot(int entryID, int slotX, int slotY, int slotH, int mouseX, int mouseY)
 		{
 			ExtendedAccountData data = queriedaccounts.get(entryID);
 			String s = data.alias;
@@ -638,15 +876,40 @@ public class GuiAccountSelector extends GuiScreen {
 				s = I18n.format("ias.alt") + " " + (entryID + 1);
 			}
 			int color = 16777215;
-			if (Minecraft.getMinecraft().getSession().getUsername().equals(data.alias))
-			{
-				color = 0x00FF00;
+			try {
+				if (Minecraft.getMinecraft().getSession() != null
+						&& Minecraft.getMinecraft().getSession().getUsername() != null
+						&& Minecraft.getMinecraft().getSession().getUsername().equals(data.alias))
+				{
+					color = 0x00FF00;
+				}
+			} catch (Throwable ignored) {
 			}
-			GuiAccountSelector.this.drawString(GuiAccountSelector.this.fontRendererObj, s, p_180791_2_ + 2, p_180791_3_ + 1, color);
-			String suffix = GuiAccountSelector.this.hypixelSuffix(data);
+			GuiAccountSelector.this.drawString(GuiAccountSelector.this.fontRendererObj, s, slotX + 2, slotY + 1, color);
+			String suffix = "";
+			try {
+				suffix = GuiAccountSelector.this.hypixelSuffix(data);
+			} catch (Throwable ignored) {
+				suffix = "";
+			}
 			if (!suffix.isEmpty()) {
-				int suffixX = p_180791_2_ + 2 + GuiAccountSelector.this.fontRendererObj.getStringWidth(s);
-				GuiAccountSelector.this.drawString(GuiAccountSelector.this.fontRendererObj, suffix, suffixX, p_180791_3_ + 1, GuiAccountSelector.this.hypixelColor(data));
+				int suffixX = slotX + 2 + GuiAccountSelector.this.fontRendererObj.getStringWidth(s);
+				int suffixWidth = GuiAccountSelector.this.fontRendererObj.getStringWidth(suffix);
+				int suffixColor = 0x808080;
+				try {
+					suffixColor = GuiAccountSelector.this.hypixelColor(data);
+				} catch (Throwable ignored) {
+				}
+				GuiAccountSelector.this.drawString(GuiAccountSelector.this.fontRendererObj, suffix, suffixX, slotY + 1, suffixColor);
+				// mouseX/mouseY are screen coords; slotY is the entry's Y, so the
+				// hover test is scroll-safe (old code mixed list bounds with slot Y).
+				if (mouseX >= suffixX && mouseX <= suffixX + suffixWidth + 4
+						&& mouseY >= slotY && mouseY <= slotY + 14) {
+					try {
+						GuiAccountSelector.this.hoveredTooltip = GuiAccountSelector.this.hypixelTooltip(data);
+					} catch (Throwable ignored) {
+					}
+				}
 			}
 		}
 	}

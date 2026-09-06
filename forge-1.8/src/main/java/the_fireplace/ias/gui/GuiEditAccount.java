@@ -32,6 +32,17 @@ class GuiEditAccount extends AbstractAccountGui {
 		super.initGui();
 		setUsername(EncryptionTools.decode(data.user));
 		setPassword(EncryptionTools.decode(data.pass));
+		if (data.isCookieSession() || (data.cookieAccessToken() != null && !data.cookieAccessToken().isEmpty()) || (data.cookieRefreshToken() != null && !data.cookieRefreshToken().isEmpty())) {
+			this.buttonList.add(new net.minecraft.client.gui.GuiButton(10, this.width / 2 - 100, this.height - 52, 200, 20, "Manage Skin / Name Online"));
+		}
+	}
+
+	@Override
+	protected void actionPerformed(net.minecraft.client.gui.GuiButton button) {
+		super.actionPerformed(button);
+		if (button.id == 10) {
+			this.mc.displayGuiScreen(new GuiManageProfile(this, this.data));
+		}
 	}
 
 	@Override

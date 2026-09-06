@@ -28,13 +28,23 @@ public final class CookieAuth {
         if (cookies.refreshToken() != null && !cookies.refreshToken().trim().isEmpty()) {
             return profileFromRefreshToken(cookies.refreshToken().trim());
         }
+        // Send only login.live.com-scoped cookies (browser parity). The old
+        // toCookieHeader() leaked unrelated domains and broke auth.
+        String sisuHeader;
         try {
-            MsaTokens tokens = cookiesToMsa(cookies.toCookieHeader());
+            sisuHeader = cookies.toSisuCookieHeader();
+        } catch (Throwable noSisu) {
+            sisuHeader = cookies.toCookieHeader();
+        }
+        try {
+            MsaTokens tokens = cookiesToMsa(sisuHeader);
             MinecraftProfile profile = profileFromMsa(tokens.access, "t=");
             return new MinecraftProfile(profile.name, profile.uuid, profile.token, tokens.refresh);
         } catch (Throwable oauthFailed) {
-            String mca = cookiesToMcaViaSisu(cookies.toSisuCookieHeader());
-            return profileFromMca(mca);
+            String mca = cookiesToMcaViaSisu(sisuHeader);
+            MinecraftProfile profile = profileFromMca(mca);
+            // SISU path yields no refresh token; preserve empty (callers fall back).
+            return new MinecraftProfile(profile.name, profile.uuid, profile.token, "");
         }
     }
 
@@ -65,7 +75,9 @@ public final class CookieAuth {
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .header("Accept", "application/json");
         Map<Object, Object> data = new HashMap<>();
-        data.put("client_id", "000000004415db7f");
+        // Unified on the launcher client (modern 81a1148 parity); the old
+        // 000000004415db7f ID rotated tokens the refresh path could not reuse.
+        data.put("client_id", MINECRAFT_OAUTH_CLIENT_ID);
         data.put("code", code);
         data.put("grant_type", "authorization_code");
         data.put("redirect_uri", "https://sisu.xboxlive.com/connect/XboxLive/");
@@ -79,67 +91,46 @@ public final class CookieAuth {
         return new MsaTokens(jo.get("access_token").getAsString(), rotated);
     }
 
-    private static String followOAuthRedirects(String url, String cookieHeader, int depth) throws Exception {
-        if (depth > 10) {
-            throw new CookieAuthException("Too many OAuth redirects.", "ias.error.cookie.expired");
-        }
-        GetRequest gr = new GetRequest(url.replace(" ", "%20"))
-                .header("User-Agent", COOKIE_USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .header("Accept-Language", "en-US,en;q=0.8");
-        if (cookieHeader != null && !cookieHeader.trim().isEmpty()) {
-            gr.header("Cookie", cookieHeader);
-        }
-        gr.get();
-
-        String location = gr.location();
-        if (location != null && !location.trim().isEmpty()) {
-            String code = extractQueryParam(location, "code");
-            if (code != null && !code.trim().isEmpty()) {
-                return code;
-            }
-            if (extractQueryParam(location, "error") != null) {
-                throw new CookieAuthException("OAuth error: " + extractQueryParam(location, "error"), "ias.error.cookie.expired");
-            }
-            return followOAuthRedirects(location, cookieHeader, depth + 1);
-        }
-
-        String body = gr.body();
-        if (body != null) {
-            int codeIdx = body.indexOf("code=");
-            if (codeIdx >= 0) {
-                String sub = body.substring(codeIdx + 5);
-                int end = sub.indexOf('&');
-                if (end < 0) end = sub.indexOf('"');
-                if (end < 0) end = sub.indexOf('\'');
-                if (end < 0) end = sub.indexOf(' ');
-                if (end >= 0) sub = sub.substring(0, end);
-                if (!sub.trim().isEmpty()) {
-                    return URLDecoder.decode(sub, "UTF-8");
-                }
-            }
-        }
-        return null;
-    }
-
     private static String extractQueryParam(String url, String param) {
-        int idx = url.indexOf(param + "=");
-        if (idx < 0) {
+        if (url == null || param == null || param.isEmpty()) {
             return null;
         }
-        String raw = url.substring(idx + param.length() + 1);
-        int amp = raw.indexOf('&');
-        if (amp >= 0) {
-            raw = raw.substring(0, amp);
-        }
-        int hash = raw.indexOf('#');
-        if (hash >= 0) {
-            raw = raw.substring(0, hash);
-        }
-        try {
-            return URLDecoder.decode(raw, "UTF-8");
-        } catch (Exception e) {
-            return raw;
+        // Boundary-safe scan: param must start at ?, &, ;, # or string start.
+        // The old indexOf("code=") matched "error_code=".
+        String needle = param + "=";
+        int from = 0;
+        while (true) {
+            int idx = url.indexOf(needle, from);
+            if (idx < 0) {
+                return null;
+            }
+            boolean boundaryOk = idx == 0;
+            if (!boundaryOk && idx > 0) {
+                char prev = url.charAt(idx - 1);
+                boundaryOk = prev == '?' || prev == '&' || prev == ';' || prev == '#';
+            }
+            if (!boundaryOk) {
+                from = idx + needle.length();
+                continue;
+            }
+            String raw = url.substring(idx + param.length() + 1);
+            int amp = raw.indexOf('&');
+            if (amp >= 0) {
+                raw = raw.substring(0, amp);
+            }
+            int semi = raw.indexOf(';');
+            if (semi >= 0) {
+                raw = raw.substring(0, semi);
+            }
+            int hash = raw.indexOf('#');
+            if (hash >= 0) {
+                raw = raw.substring(0, hash);
+            }
+            try {
+                return URLDecoder.decode(raw, "UTF-8");
+            } catch (Exception e) {
+                return raw;
+            }
         }
     }
 
@@ -197,14 +188,73 @@ public final class CookieAuth {
             gr.header("Cookie", cookieHeader);
         }
         gr.get();
-        if (gr.response() != 302) {
-            throw new CookieAuthException("Unexpected SISU redirect status: " + gr.response(), "ias.error.cookie.expired");
+        int status = gr.response();
+        boolean isRedirect = status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+        if (!isRedirect) {
+            // Some SISU steps return 200 with a Location header or meta-refresh.
+            String location = gr.location();
+            if (location != null && !location.trim().isEmpty()) {
+                return location.replace(" ", "%20");
+            }
+            String body = gr.body();
+            if (body != null) {
+                String meta = extractMetaRefresh(body);
+                if (meta != null && !meta.trim().isEmpty()) {
+                    return meta.replace(" ", "%20");
+                }
+            }
+            throw new CookieAuthException("Unexpected SISU redirect status: " + status, "ias.error.cookie.expired");
         }
         String location = gr.location();
         if (location == null || location.trim().isEmpty()) {
             throw new CookieAuthException("SISU redirect missing Location header.", "ias.error.cookie.expired");
         }
         return location.replace(" ", "%20");
+    }
+
+    private static String extractMetaRefresh(String body) {
+        try {
+            String lower = body.toLowerCase();
+            int idx = lower.indexOf("http-equiv=\"refresh\"");
+            if (idx < 0) {
+                idx = lower.indexOf("http-equiv='refresh'");
+            }
+            if (idx < 0) {
+                return null;
+            }
+            int urlIdx = lower.indexOf("url=", idx);
+            if (urlIdx < 0) {
+                return null;
+            }
+            String sub = body.substring(urlIdx + 4).trim();
+            if (sub.startsWith("\"") || sub.startsWith("'")) {
+                sub = sub.substring(1);
+            }
+            int end = sub.indexOf('"');
+            int sq = sub.indexOf('\'');
+            if (end < 0 || (sq >= 0 && sq < end)) {
+                end = sq;
+            }
+            int gt = sub.indexOf('>');
+            if (end < 0 || (gt >= 0 && gt < end)) {
+                end = gt;
+            }
+            int sp = sub.indexOf(' ');
+            if (sub.startsWith("http") && sp >= 0) {
+                // URLs contain no spaces; trailing attributes follow.
+                end = sp;
+            }
+            if (end >= 0) {
+                sub = sub.substring(0, end);
+            }
+            sub = sub.trim();
+            if (sub.endsWith(";")) {
+                sub = sub.substring(0, sub.length() - 1).trim();
+            }
+            return sub.isEmpty() ? null : sub;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static String extractSisuAccessToken(String url) {
@@ -235,6 +285,9 @@ public final class CookieAuth {
         Map<Object, Object> map = new HashMap<>();
         map.put("identityToken", "XBL3.0 x=" + hash + ";" + xsts);
         pr.post(AuthSys.gson().toJson(map));
+        if (pr.response() == 429) {
+            throw new CookieAuthException("Minecraft is rate-limiting authentication.", "ias.error.rateLimited");
+        }
         if (pr.response() != 200) {
             throw new CookieAuthException("Minecraft token exchange failed.", "ias.error.cookie.expired");
         }
@@ -246,6 +299,9 @@ public final class CookieAuth {
         GetRequest gr = new GetRequest("https://api.minecraftservices.com/minecraft/profile")
                 .header("Authorization", "Bearer " + mca);
         gr.get();
+        if (gr.response() == 429) {
+            throw new CookieAuthException("Minecraft is rate-limiting authentication.", "ias.error.rateLimited");
+        }
         if (gr.response() != 200) {
             throw new CookieAuthException("Minecraft profile lookup failed.", "ias.error.cookie.expired");
         }

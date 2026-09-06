@@ -25,6 +25,7 @@ import the_fireplace.ias.tools.HttpTools;
 public class AuthSys {
 	private static final Gson gson = new Gson();
 	private static volatile HttpServer srv;
+	private static final Object START_LOCK = new Object();
 
 	public static Gson gson() {
 		return gson;
@@ -32,11 +33,16 @@ public class AuthSys {
     public static void start(MSAuthScreen gui) {
     	String done = "<html><body><h1>" + I18n.format("ias.msauth.canclosenow") + "</h1></body></html>";
     	new Thread(() -> {
-    		try {
-    			if (srv != null) return;
-    			gui.setState("ias.msauth.waiting");
-    			if (!HttpTools.ping("http://minecraft.net")) throw new MicrosoftAuthException("No intenet connection");
-        		srv = HttpServer.create(new InetSocketAddress(59125), 0);
+    		synchronized (START_LOCK) {
+     		try {
+     			if (srv != null) return;
+     			gui.setState("ias.msauth.waiting");
+     			if (!HttpTools.ping("http://minecraft.net")) throw new MicrosoftAuthException("No intenet connection");
+         		try {
+         			srv = HttpServer.create(new InetSocketAddress(59125), 0);
+         		} catch (java.net.BindException busy) {
+         			throw new MicrosoftAuthException(I18n.format("ias.msauth.error.portBusy"));
+         		}
             	srv.createContext("/", new HttpHandler() {
     				public void handle(HttpExchange exchange) throws IOException {
     					try {
@@ -85,16 +91,19 @@ public class AuthSys {
 				}
         		stop();
         	}
+    		}
     	}, "Auth Thread").start();
     }
     
     public static void stop() {
-    	try {
-    		if (srv != null) {
-    			srv.stop(0);
-    			srv = null;
-    		}
-    	} catch (Throwable t) {}
+    	synchronized (START_LOCK) {
+     	try {
+     		if (srv != null) {
+     			srv.stop(0);
+     			srv = null;
+     		}
+     	} catch (Throwable t) {}
+    	}
     }
 
     private static void accessTokenStep(String code, MSAuthScreen gui) throws Throwable {
@@ -107,10 +116,13 @@ public class AuthSys {
         data.put("scope", "XboxLive.signin XboxLive.offline_access");
         pr.post(data);
         if (pr.response() != 200) throw new MicrosoftAuthException("accessToken response: " + pr.response());
-        xblStep(gson.fromJson(pr.body(), JsonObject.class).get("access_token").getAsString(), gui);
+        JsonObject tokenJson = gson.fromJson(pr.body(), JsonObject.class);
+        String accessToken = tokenJson.get("access_token").getAsString();
+        String refreshToken = tokenJson.has("refresh_token") ? tokenJson.get("refresh_token").getAsString() : "";
+        xblStep(accessToken, refreshToken, gui);
     }
 
-    private static void xblStep(String token, MSAuthScreen gui) throws Throwable {
+    private static void xblStep(String token, String refreshToken, MSAuthScreen gui) throws Throwable {
     	gui.setState("ias.msauth.auth");
     	PostRequest pr = new PostRequest("https://user.auth.xboxlive.com/user/authenticate").header("Content-Type", "application/json").header("Accept", "application/json");
         HashMap<Object, Object> map = new HashMap<>();
@@ -123,10 +135,10 @@ public class AuthSys {
         map.put("TokenType", "JWT");
         pr.post(gson.toJson(map));
         if (pr.response() != 200) throw new MicrosoftAuthException("xbl response: " + pr.response());
-        xstsStep(gson.fromJson(pr.body(), JsonObject.class).get("Token").getAsString(), gui);
+        xstsStep(gson.fromJson(pr.body(), JsonObject.class).get("Token").getAsString(), refreshToken, gui);
     }
 
-    private static void xstsStep(String xbl, MSAuthScreen gui) throws Throwable {
+    private static void xstsStep(String xbl, String refreshToken, MSAuthScreen gui) throws Throwable {
     	PostRequest pr = new PostRequest("https://xsts.auth.xboxlive.com/xsts/authorize").header("Content-Type", "application/json").header("Accept", "application/json");
         HashMap<Object, Object> map = new HashMap<>();
         HashMap<Object, Object> sub = new HashMap<>();
@@ -140,28 +152,28 @@ public class AuthSys {
         if (pr.response() != 200) throw new MicrosoftAuthException("xsts response: " + pr.response());
         JsonObject jo = gson.fromJson(pr.body(), JsonObject.class);
         minecraftTokenStep(jo.getAsJsonObject("DisplayClaims").getAsJsonArray("xui").get(0)
-        		.getAsJsonObject().get("uhs").getAsString(), jo.get("Token").getAsString(), gui);
+        		.getAsJsonObject().get("uhs").getAsString(), jo.get("Token").getAsString(), refreshToken, gui);
     }
 
-    private static void minecraftTokenStep(String xbl, String xsts, MSAuthScreen gui) throws Throwable {
+    private static void minecraftTokenStep(String xbl, String xsts, String refreshToken, MSAuthScreen gui) throws Throwable {
     	PostRequest pr = new PostRequest("https://api.minecraftservices.com/authentication/login_with_xbox").header("Content-Type", "application/json").header("Accept", "application/json");
         Map<Object, Object> map = new HashMap<Object, Object>();
         map.put("identityToken", "XBL3.0 x=" + xbl + ";" + xsts);
         pr.post(gson.toJson(map));
         if (pr.response() != 200) throw new MicrosoftAuthException("minecraftToken response: " + pr.response());
-        minecraftStoreVerify(gson.fromJson(pr.body(), JsonObject.class).get("access_token").getAsString(), gui);
+        minecraftStoreVerify(gson.fromJson(pr.body(), JsonObject.class).get("access_token").getAsString(), refreshToken, gui);
     }
 
-    private static void minecraftStoreVerify(String token, MSAuthScreen gui) throws Throwable {
+    private static void minecraftStoreVerify(String token, String refreshToken, MSAuthScreen gui) throws Throwable {
     	gui.setState("ias.msauth.verify");
     	GetRequest gr = new GetRequest("https://api.minecraftservices.com/entitlements/mcstore").header("Authorization", "Bearer " + token);
         gr.get();
         if (gr.response() != 200) throw new MicrosoftAuthException("minecraftStore response: " + gr.response());
         if (gson.fromJson(gr.body(), JsonObject.class).getAsJsonArray("items").size() == 0) throw new MicrosoftAuthException(I18n.format("ias.msauth.error.gamenotowned"));
-        minecraftProfileVerify(token, gui);
+        minecraftProfileVerify(token, refreshToken, gui);
     }
 
-    private static void minecraftProfileVerify(String token, MSAuthScreen gui) throws Throwable {
+    private static void minecraftProfileVerify(String token, String refreshToken, MSAuthScreen gui) throws Throwable {
     	GetRequest gr = new GetRequest("https://api.minecraftservices.com/minecraft/profile").header("Authorization", "Bearer " + token);
         gr.get();
         if (gr.response() != 200) throw new MicrosoftAuthException("minecraftProfile response: " + gr.response());
@@ -171,8 +183,13 @@ public class AuthSys {
         Minecraft mc = Minecraft.getMinecraft();
         mc.addScheduledTask(() -> {
         	if (mc.currentScreen != gui) return;
-        	try {
+			try {
 				MR.setSession(new Session(name, uuid, token, "mojang"));
+				the_fireplace.ias.account.ExtendedAccountData data = the_fireplace.ias.account.ExtendedAccountData.cookieSession(name, token, uuid, refreshToken);
+				data.premium = the_fireplace.ias.enums.EnumBool.TRUE;
+				the_fireplace.ias.account.ExtendedAccountData.replaceOrAddCookieAccount(
+						com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase.getInstance(), data);
+				com.github.mrebhan.ingameaccountswitcher.tools.Config.save();
 			} catch (Exception e) {
 				e.printStackTrace();
 			}

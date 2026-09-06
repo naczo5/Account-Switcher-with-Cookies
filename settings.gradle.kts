@@ -48,7 +48,7 @@ plugins {
 rootProject.name = "In-Game Account Switcher"
 
 // Prepare the list of versions and types.
-val types = listOf("fabric", "forge", "neoforge")
+val types = listOf("fabric")
 val versions = (file("dev/versions/versions_beta.txt").readLines()
         + file("dev/versions/versions_active.txt").readLines()
         + file("dev/versions/versions_legacy.txt").readLines())

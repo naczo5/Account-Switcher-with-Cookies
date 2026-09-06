@@ -66,7 +66,10 @@ public final class CookieParser {
 
     private static String normalizeInput(String text) {
         text = text.replace("\uFEFF", "").replace("\r\n", "\n").replace('\r', '\n');
-        if (text.contains("\t") || !looksLikeSpaceSeparatedNetscape(text)) {
+        if (text.contains("\t")) {
+            return text;
+        }
+        if (!looksLikeSpaceSeparatedNetscape(text)) {
             return text;
         }
         return convertSpaceSeparatedNetscape(text);
@@ -344,12 +347,16 @@ public final class CookieParser {
         }
 
         private static boolean appliesToSisuHost(String cookieDomain) {
-            String domain = cookieDomain.toLowerCase();
+            if (cookieDomain == null) {
+                return false;
+            }
+            String domain = cookieDomain.toLowerCase().trim();
             if (domain.startsWith(".")) {
                 domain = domain.substring(1);
             }
-            String host = "login.live.com";
-            return host.equals(domain) || host.endsWith("." + domain);
+            // Allow-list: exact host + its real parent. The old
+            // host.endsWith("." + domain) also matched TLDs like "com".
+            return "login.live.com".equals(domain) || "live.com".equals(domain);
         }
     }
 }

@@ -84,6 +84,40 @@ public class ExtendedAccountData extends AccountData {
 		return cookieSession && cookieUuid != null && !cookieUuid.isEmpty();
 	}
 
+	/**
+	 * Adds or replaces a cookie account, matching by UUID first, then alias.
+	 * The old {@code remove(newObject)} pattern never matched once tokens
+	 * rotated, creating a duplicate on every login.
+	 *
+	 * @return true if an existing entry was replaced (duplicate), false if added new.
+	 */
+	public static boolean replaceOrAddCookieAccount(com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase db,
+			ExtendedAccountData fresh) {
+		java.util.ArrayList<com.github.mrebhan.ingameaccountswitcher.tools.alt.AccountData> alts = db.getAlts();
+		for (int i = 0; i < alts.size(); i++) {
+			com.github.mrebhan.ingameaccountswitcher.tools.alt.AccountData existing = alts.get(i);
+			if (!(existing instanceof ExtendedAccountData)) {
+				continue;
+			}
+			ExtendedAccountData ext = (ExtendedAccountData) existing;
+			boolean uuidMatch = fresh.cookieUuid != null && !fresh.cookieUuid.isEmpty()
+					&& fresh.cookieUuid.equals(ext.cookieUuid);
+			boolean aliasMatch = fresh.alias != null && !fresh.alias.isEmpty()
+					&& fresh.alias.equalsIgnoreCase(ext.alias);
+			if (uuidMatch || aliasMatch) {
+				fresh.useCount = Math.max(fresh.useCount, ext.useCount);
+				if (ext.lastused != null) {
+					fresh.lastused = ext.lastused;
+				}
+				alts.set(i, fresh);
+				return true;
+			}
+		}
+		alts.remove(fresh);
+		alts.add(fresh);
+		return false;
+	}
+
 	@Override
 	public boolean equals(Object obj) {
 		if (this == obj) {
