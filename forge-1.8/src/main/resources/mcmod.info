@@ -1,12 +1,12 @@
 [
 {
   "modid": "ias",
-  "name": "In-Game Account Switcher",
+  "name": "In-Game Account Switcher with Cookies",
   "description": "Allows you to change which account you are signed in to in-game without restarting Minecraft. Supports Localts/cookie alt import.",
   "version": "${version}",
   "mcversion": "${mcversion}",
   "url": "https://github.com/naczo5/Account-Switcher-with-Cookies",
-  "authorList": ["The_Fireplace", "The_BrainStone", "VidTu"],
+  "authorList": ["naczo5", "The_Fireplace", "The_BrainStone", "VidTu"],
   "credits": "deFENCE_(aka MRebhan), Elvm",
   "logoFile": "iaslogo.png",
   "screenshots": [],

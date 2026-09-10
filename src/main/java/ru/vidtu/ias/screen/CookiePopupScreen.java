@@ -202,6 +202,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private float error = Float.NaN;
 
     /**
+     * Whether an unrecoverable import error occurred.
+     */
+    private boolean errored;
+
+    /**
      * Error note.
      */
     private MultiLineLabel errorNote;
@@ -281,6 +286,24 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             return;
         }
 
+        if (this.errored) {
+            this.pathInput = null;
+            this.pasteInput = null;
+            PopupButton retryBtn = new PopupButton(centerX - 75, centerY + 48, 150, 20,
+                    Component.translatable("ias.cookie.retry"), btn -> {
+                this.errored = false;
+                this.error = Float.NaN;
+                this.errorNote = null;
+                //? if >=1.21.11 {
+                this.init(this.width, this.height);
+                //?} else
+                /*this.init(this.minecraft, this.width, this.height);*/
+            }, Supplier::get);
+            retryBtn.color(0.5F, 1.0F, 0.75F, true);
+            this.addRenderableWidget(retryBtn);
+            return;
+        }
+
         this.pathInput = null;
         this.pasteInput = null;
 
@@ -352,6 +375,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.savedPaste = this.clipboardContents();
         }
         this.pasteMode = pasteMode;
+        this.errored = false;
         this.error = Float.NaN;
         this.errorNote = null;
         this.selectedCookieFiles = List.of();
@@ -384,6 +408,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             if (raw.isBlank()) {
                 return;
             }
+            this.savedPaste = raw;
         } else {
             if (this.pathInput == null) return;
             if (!this.selectedCookieFiles.isEmpty()) {
@@ -392,9 +417,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
             raw = this.pathInput.getValue().strip();
             if (raw.isBlank()) return;
+            this.savedPath = raw;
         }
 
         this.importing = true;
+        this.errored = false;
         this.error = Float.NaN;
         this.errorNote = null;
         this.stage(MicrosoftAccount.INITIALIZING);
@@ -415,6 +442,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         if (this.crypt == null || this.importing || sources.isEmpty()) return;
 
         this.importing = true;
+        this.errored = false;
         this.error = Float.NaN;
         this.errorNote = null;
         this.selectedCookieFiles = List.copyOf(sources);
@@ -715,6 +743,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         assert this.minecraft != null;
         this.closed = true;
         this.importing = false;
+        this.errored = false;
         //$set_screen 'this.minecraft' 'this.parent'
         this.minecraft.gui.setScreen(this.parent);
     }
@@ -749,14 +778,18 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             pose.scale(0.5F, 0.5F);
             IStonecutter.renderMultilineLabelCentered(this.cryptPasswordTip, graphics, this.width, this.height + 40);
             pose.popMatrix();
-        } else if (this.importing) {
+        } else if (this.importing || this.errored) {
             synchronized (this.lock) {
                 if (this.label == null) {
                     Component component = Objects.requireNonNullElse(this.stage, Component.empty());
-                    this.label = MultiLineLabel.create(this.font, component, 240);
+                    this.label = MultiLineLabel.create(this.font, component, 230);
                     this.minecraft.getNarrator().saySystemQueued(component);
                 }
-                IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - 4);
+                int centerY = this.height / 2;
+                int labelY = this.errored
+                        ? (centerY - 6) - (this.label.getLineCount() * 9) / 2
+                        : (this.height - this.label.getLineCount() * 9) / 2 - 4;
+                IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, labelY);
             }
 
             if (Float.isFinite(this.error)) {
@@ -777,18 +810,20 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 int w = this.errorNote.getWidth() / 4 + 2;
                 int h = (this.errorNote.getLineCount() * 9) / 2 + 1;
                 int cx = this.width / 2;
-                int sy = this.height / 2 + 87;
+                int sy = this.height / 2 + 96;
                 graphics.fill(cx - w, sy, cx + w, sy + h, 0x101010 | opacityMask);
+                graphics.fill(cx - w + 1, sy - 1, cx + w - 1, sy, 0x101010 | opacityMask);
+                graphics.fill(cx - w + 1, sy + h, cx + w - 1, sy + h + 1, 0x101010 | opacityMask);
                 pose.pushMatrix();
                 pose.scale(0.5F, 0.5F);
                 //? if >= 1.21.11 {
                 var renderer = graphics.textRenderer();
                 renderer.defaultParameters(renderer.defaultParameters().withOpacity(opacityFloat));
-                this.errorNote.visitLines(net.minecraft.client.gui.TextAlignment.CENTER, this.width, this.height + 174, 9, renderer);
+                this.errorNote.visitLines(net.minecraft.client.gui.TextAlignment.CENTER, this.width, this.height + 192, 9, renderer);
                 //?} elif >= 1.21.10 {
-                /*this.errorNote.render(graphics, MultiLineLabel.Align.CENTER, this.width, this.height + 174, 9, false, 0xFF_FF_FF | opacityMask);
+                /*this.errorNote.render(graphics, MultiLineLabel.Align.CENTER, this.width, this.height + 192, 9, false, 0xFF_FF_FF | opacityMask);
                 *///?} else
-                /*this.errorNote.renderCentered(graphics, this.width, this.height + 174, 9, 0xFF_FF_FF | opacityMask);*/
+                /*this.errorNote.renderCentered(graphics, this.width, this.height + 192, 9, 0xFF_FF_FF | opacityMask);*/
                 pose.popMatrix();
             }
         } else if (this.pathInput != null || this.pasteInput != null) {
@@ -838,12 +873,12 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        int panelHalfHeight = this.pasteMode && this.crypt != null && !this.importing ? PANEL_HALF_PASTE : PANEL_HALF_PATH;
+        int panelHalfHeight = this.pasteMode && this.crypt != null && !this.importing && !this.errored ? PANEL_HALF_PASTE : PANEL_HALF_PATH;
         graphics.fill(centerX - 125, centerY - panelHalfHeight, centerX + 125, centerY + panelHalfHeight, 0xF8_20_20_30);
         graphics.fill(centerX - 124, centerY - panelHalfHeight - 1, centerX + 124, centerY - panelHalfHeight, 0xF8_20_20_30);
         graphics.fill(centerX - 124, centerY + panelHalfHeight, centerX + 124, centerY + panelHalfHeight + 1, 0xF8_20_20_30);
 
-        if (this.pasteMode && this.pasteInput != null && !this.importing) {
+        if (this.pasteMode && this.pasteInput != null && !this.importing && !this.errored) {
             int x = this.pasteBoxX;
             int y = this.pasteBoxY;
             int width = INPUT_WIDTH;
@@ -891,11 +926,21 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     @Override
     public void error(Throwable error) {
         LOGGER.error("IAS: Cookie import error.", error);
+        System.err.println("IAS: Cookie import error: " + error);
+        error.printStackTrace(System.err);
         assert this.minecraft != null;
+
+        if (this.pathInput != null) {
+            this.savedPath = this.pathInput.getValue();
+        }
+        if (this.pasteInput != null) {
+            this.savedPaste = this.pasteInput.getValue();
+        }
 
         FriendlyException probable = FriendlyException.friendlyInChain(error);
         String key = probable != null ? probable.key() : "ias.error";
-        Component component = Component.translatable(key).withStyle(ChatFormatting.RED);
+        Object[] args = probable != null ? probable.args() : new Object[0];
+        Component component = (args.length > 0 ? Component.translatable(key, args) : Component.translatable(key)).withStyle(ChatFormatting.RED);
         this.minecraft.execute(() -> {
             if (this.closed) {
                 return;
@@ -906,6 +951,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 this.error = 0.0F;
             }
             this.importing = false;
+            this.errored = true;
             //? if >=1.21.11 {
             this.init(this.width, this.height);
             //?} else

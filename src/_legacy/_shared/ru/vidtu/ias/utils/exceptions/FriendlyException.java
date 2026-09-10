@@ -40,6 +40,12 @@ public final class FriendlyException extends RuntimeException {
     private final String key;
 
     /**
+     * Message translation arguments.
+     */
+    @NotNull
+    private final Object[] args;
+
+    /**
      * Creates a new exception.
      *
      * @param message Target message
@@ -47,8 +53,7 @@ public final class FriendlyException extends RuntimeException {
      */
     @Contract(pure = true)
     public FriendlyException(@NotNull String message, @NotNull String key) {
-        super(message + " (friendly key: " + key + ")");
-        this.key = key;
+        this(message, null, key, new Object[0]);
     }
 
     /**
@@ -60,8 +65,34 @@ public final class FriendlyException extends RuntimeException {
      */
     @Contract(pure = true)
     public FriendlyException(@NotNull String message, @Nullable Throwable cause, @NotNull String key) {
+        this(message, cause, key, new Object[0]);
+    }
+
+    /**
+     * Creates a new exception with translation arguments.
+     *
+     * @param message Target message
+     * @param key     Message translation key
+     * @param args    Message translation arguments
+     */
+    @Contract(pure = true)
+    public FriendlyException(@NotNull String message, @NotNull String key, Object... args) {
+        this(message, null, key, args);
+    }
+
+    /**
+     * Creates a new exception with translation arguments.
+     *
+     * @param message Target message
+     * @param cause   Suppressed exception cause
+     * @param key     Message translation key
+     * @param args    Message translation arguments
+     */
+    @Contract(pure = true)
+    public FriendlyException(@NotNull String message, @Nullable Throwable cause, @NotNull String key, Object... args) {
         super(message + " (friendly key: " + key + ")", cause);
         this.key = key;
+        this.args = args != null ? args : new Object[0];
     }
 
     /**
@@ -73,6 +104,17 @@ public final class FriendlyException extends RuntimeException {
     @NotNull
     public String key() {
         return this.key;
+    }
+
+    /**
+     * Gets the translation arguments.
+     *
+     * @return Message translation arguments
+     */
+    @Contract(pure = true)
+    @NotNull
+    public Object[] args() {
+        return this.args;
     }
 
     /**

@@ -283,6 +283,10 @@ public final class MSAccountFactory {
             if (IUtils.anyInCausalChain(t, err -> err instanceof UnresolvedAddressException || err instanceof NoRouteToHostException || err instanceof HttpTimeoutException || err instanceof ConnectException)) {
                 throw new FriendlyException("Unable to connect to MS servers.", t, "ias.error.connect");
             }
+            FriendlyException friendly = FriendlyException.friendlyInChain(t);
+            if (friendly != null) {
+                throw friendly;
+            }
             throw new RuntimeException("Unable to perform MS auth.", t);
         }, IAS.executor()).thenApplyAsync(profile -> {
             if (profile == null || handler.cancelled()) return null;
@@ -323,7 +327,7 @@ public final class MSAccountFactory {
             MicrosoftAccount account = new MicrosoftAccount(crypt.insecure(), uuid, name, data.get());
             handler.success(account);
         }, IAS.executor()).exceptionallyAsync(t -> {
-            handler.error(new RuntimeException("Unable to create an MS account.", t));
+            handler.error(t instanceof RuntimeException re ? re : new RuntimeException("Unable to create an MS account.", t));
             return null;
         }, IAS.executor());
     }

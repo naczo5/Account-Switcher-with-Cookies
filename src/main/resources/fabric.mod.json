@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "ias",
   "version": "${version}",
-  "name": "In-Game Account Switcher",
+  "name": "In-Game Account Switcher with Cookies",
   "description": "Allows you to change which account you are signed in to in-game without restarting Minecraft.",
   "authors": [
-    "VidTu",
-    "naczo5"
+    "naczo5",
+    "VidTu"
   ],
   "contributors": [
     "Articuling",
@@ -18,11 +18,9 @@
     "WyattMarks"
   ],
   "contact": {
-    "homepage": "https://modrinth.com/mod/in-game-account-switcher",
-    "sources": "https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher",
-    "issues": "https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher/issues",
-    "email": "pig@vidtu.ru",
-    "discord": "https://discord.gg/TpU2nEkSPk"
+    "homepage": "https://github.com/naczo5/Account-Switcher-with-Cookies",
+    "sources": "https://github.com/naczo5/Account-Switcher-with-Cookies",
+    "issues": "https://github.com/naczo5/Account-Switcher-with-Cookies/issues"
   },
   "license": "LGPL-3.0-or-later",
   "icon": "ias.png",
@@ -62,13 +60,9 @@
   "custom": {
     "modmenu": {
       "links": {
-        "modmenu.modrinth": "https://modrinth.com/mod/in-game-account-switcher",
-        "modmenu.curseforge": "https://curseforge.com/minecraft/mc-mods/in-game-account-switcher",
-        "modmenu.github_releases": "https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher/releases",
-        "modmenu.discord": "https://discord.gg/TpU2nEkSPk",
-        "ias.help.crypt": "https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher/blob/main/docs/CRYPT.md",
-        "ias.help.errors": "https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher/blob/main/docs/ERRORS.md",
-        "ias.help.stolen": "https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher/blob/main/docs/STOLEN.md"
+        "modmenu.github_releases": "https://github.com/naczo5/Account-Switcher-with-Cookies/releases",
+        "modmenu.sources": "https://github.com/naczo5/Account-Switcher-with-Cookies",
+        "modmenu.issues": "https://github.com/naczo5/Account-Switcher-with-Cookies/issues"
       }
     },
     "catalogue": {

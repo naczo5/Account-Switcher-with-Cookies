@@ -23,9 +23,9 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 
 | Minecraft | Loader | Build (PowerShell) | Output jar |
 |-----------|--------|-------------------|------------|
-| **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\IAS-*+26.2-fabric.jar` |
-| **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\IAS-*+1.21.11-fabric.jar` |
-| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` |
+| **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\CookieIAS-*+26.2-fabric.jar` |
+| **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\CookieIAS-3.1+1.8.9-forge.jar` |
 
 **26.2** supports both standard Fabric and Lunar Fabric profiles. **1.8.9 Forge** is a standard Forge build and can be opened from the title-screen button or the `O` keybind.
 
@@ -38,7 +38,7 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 ### 1.8.9 (Forge)
 
 1. Install Forge for **1.8.9**.
-2. Copy `forge-1.8\build\libs\IAS-9.0.7+1.8.9-forge.jar` into the instance's **mods** folder.
+2. Copy `forge-1.8\build\libs\CookieIAS-3.1+1.8.9-forge.jar` into the instance's **mods** folder.
 3. Open the account switcher from its title-screen button or press **`O`**.
 
 ### 26.2 / 1.21.11 (Fabric or Lunar Fabric)

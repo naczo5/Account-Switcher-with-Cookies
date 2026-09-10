@@ -509,13 +509,16 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
 
         // Log it.
         LOGGER.error("IAS: Login error.", error);
+        System.err.println("IAS: Login error: " + error);
+        error.printStackTrace(System.err);
 
         // Skip if not current screen.
         if (this != this.currentScreen()) return;
 
         FriendlyException probable = FriendlyException.friendlyInChain(error);
         String key = probable != null ? probable.key() : "ias.error";
-        Component component = Component.translatable(key).withStyle(ChatFormatting.RED);
+        Object[] args = probable != null ? probable.args() : new Object[0];
+        Component component = (args.length > 0 ? Component.translatable(key, args) : Component.translatable(key)).withStyle(ChatFormatting.RED);
         synchronized (this.lock) {
             this.stage = component;
             this.label = null;

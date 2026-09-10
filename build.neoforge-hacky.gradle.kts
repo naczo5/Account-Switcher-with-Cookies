@@ -54,7 +54,7 @@ java {
 
 // Metadata.
 group = "ru.vidtu.ias"
-base.archivesName = "IAS"
+base.archivesName = "CookieIAS"
 version = "${version}+${name}"
 description = "Allows you to change which account you are signed in to in-game without restarting Minecraft."
 

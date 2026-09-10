@@ -52,6 +52,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -328,13 +329,15 @@ public final class MSAuth {
                 // Check the code.
                 int status = response.statusCode();
                 if (status != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalArgumentException("Invalid status code: " + status);
+                    throw handleOAuthError(status, response.body(), "Unable to convert Microsoft Authentication Code (MSAC) to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens.", code);
                 }
 
                 // Decode the tokens and return them.
                 JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
                 Objects.requireNonNull(json, "Response is null");
                 return MSTokens.fromJson(json);
+            } catch (FriendlyException fe) {
+                throw fe;
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
                 String message = "Unable to convert Microsoft Authentication Code (MSAC) to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (" + response + " with " + response.headers() + "): " + response.body();
@@ -372,12 +375,14 @@ public final class MSAuth {
             try {
                 int status = response.statusCode();
                 if (status != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalArgumentException("Invalid status code: " + status);
+                    throw handleOAuthError(status, response.body(), "Unable to convert Minecraft Authentication Code (MSAC) to Microsoft tokens.", code);
                 }
 
                 JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
                 Objects.requireNonNull(json, "Response is null");
                 return MSTokens.fromJson(json);
+            } catch (FriendlyException fe) {
+                throw fe;
             } catch (Throwable t) {
                 String message = "Unable to convert Minecraft Authentication Code (MSAC) to Microsoft tokens (" + response + " with " + response.headers() + "): " + response.body();
                 message = message.replace(code, "[MSAC]");
@@ -416,13 +421,15 @@ public final class MSAuth {
                 // Check the code.
                 int status = response.statusCode();
                 if (status != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalArgumentException("Invalid status code: " + status);
+                    throw handleOAuthError(status, response.body(), "Unable to convert Microsoft Refresh (MSR) token to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens.", refresh);
                 }
 
                 // Decode the tokens and return them.
                 JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
                 Objects.requireNonNull(json, "Response is null");
                 return MSTokens.fromJson(json);
+            } catch (FriendlyException fe) {
+                throw fe;
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
                 String message = "Unable to convert Microsoft Refresh (MSR) token to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (" + response + " with " + response.headers() + "): " + response.body();
@@ -456,12 +463,15 @@ public final class MSAuth {
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build(), HttpResponse.BodyHandlers.ofString()).thenApplyAsync(response -> {
             try {
+                if (response.statusCode() != HttpURLConnection.HTTP_OK) {
+                    throw handleOAuthError(response.statusCode(), response.body(), "Unable to convert Localts refresh token to Microsoft tokens.", refresh);
+                }
+
                 JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
                 Objects.requireNonNull(json, "Response is null");
-                if (response.statusCode() != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalArgumentException("Invalid status code: " + response.statusCode());
-                }
                 return MSTokens.fromJson(json);
+            } catch (FriendlyException fe) {
+                throw fe;
             } catch (Throwable t) {
                 String message = "Unable to convert Localts refresh token to Microsoft tokens (" + response + " with " + response.headers() + "): " + response.body();
                 message = message.replace(refresh, "[MSR]");
@@ -1300,5 +1310,74 @@ public final class MSAuth {
     @NotNull
     private static String urlDecode(@NotNull String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    @NotNull
+    private static FriendlyException handleOAuthError(int statusCode, @Nullable String responseBody, @NotNull String defaultMessage, @Nullable String tokenToSanitize) {
+        if (statusCode == 429) {
+            return new FriendlyException("Microsoft authentication is rate-limited.", "ias.error.rateLimited");
+        }
+
+        String error = null;
+        String errorDesc = null;
+        if (responseBody != null && !responseBody.isBlank()) {
+            try {
+                JsonObject json = GSONUtils.GSON.fromJson(responseBody, JsonObject.class);
+                if (json != null) {
+                    if (json.has("error") && !json.get("error").isJsonNull()) {
+                        error = json.get("error").getAsString();
+                    }
+                    if (json.has("error_description") && !json.get("error_description").isJsonNull()) {
+                        errorDesc = json.get("error_description").getAsString();
+                    }
+                }
+            } catch (Throwable ignored) {
+                // Not JSON.
+            }
+        }
+
+        String sanitizedDesc = errorDesc;
+        if (sanitizedDesc != null && tokenToSanitize != null && !tokenToSanitize.isBlank()) {
+            sanitizedDesc = sanitizedDesc.replace(tokenToSanitize, "[TOKEN]");
+        }
+
+        if (sanitizedDesc != null) {
+            String lower = sanitizedDesc.toLowerCase(Locale.ROOT);
+            if (lower.contains("compromised") || lower.contains("security interrupt")) {
+                return new FriendlyException("Account security interrupt: " + sanitizedDesc, "ias.error.token.compromised", statusCode);
+            }
+            if (lower.contains("password has changed") || lower.contains("revoked")) {
+                return new FriendlyException("Token revoked or password changed: " + sanitizedDesc, "ias.error.token.revoked", statusCode);
+            }
+            if (lower.contains("different client id")) {
+                return new FriendlyException("Token client ID mismatch: " + sanitizedDesc, "ias.error.token.clientMismatch", statusCode);
+            }
+            if (lower.contains("not valid") || lower.contains("expired")) {
+                return new FriendlyException("Token invalid or expired: " + sanitizedDesc, "ias.error.token.expired", statusCode);
+            }
+        }
+
+        if ("invalid_grant".equals(error)) {
+            return new FriendlyException("Microsoft token exchange failed: invalid grant (" + statusCode + ").", "ias.error.token.invalidGrant", statusCode);
+        }
+
+        String statusName = getHttpStatusName(statusCode);
+        return new FriendlyException(defaultMessage + " (HTTP " + statusCode + " " + statusName + ")", "ias.error.token.exchange", statusCode, statusName);
+    }
+
+    @NotNull
+    private static String getHttpStatusName(int statusCode) {
+        return switch (statusCode) {
+            case 400 -> "BadRequest";
+            case 401 -> "Unauthorized";
+            case 403 -> "Forbidden";
+            case 404 -> "NotFound";
+            case 429 -> "TooManyRequests";
+            case 500 -> "InternalServerError";
+            case 502 -> "BadGateway";
+            case 503 -> "ServiceUnavailable";
+            case 504 -> "GatewayTimeout";
+            default -> "Error";
+        };
     }
 }
