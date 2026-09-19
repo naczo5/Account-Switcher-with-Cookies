@@ -59,6 +59,7 @@ import ru.vidtu.ias.extension.MinecraftExtension;
 import ru.vidtu.ias.mixins.MinecraftAccessor;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.screen.AccountScreen;
+import ru.vidtu.ias.utils.DirectPlay;
 import ru.vidtu.ias.utils.Expression;
 import ru.vidtu.ias.utils.IUtils;
 import ru.vidtu.ias.utils.MainMenuScreens;
@@ -246,6 +247,25 @@ public final class IASMinecraft {
             button.setTooltip(Tooltip.create(button.getMessage()));
             button.setTooltipDelay(Duration.ofMillis(250L));
             buttonAdder.accept(button);
+        }
+
+        // Direct-play bypass buttons (Lunar account-check bypass).
+        // Opens the vanilla world/server lists straight away, skipping the
+        // launcher's home UI that may demand a signed-in Lunar account.
+        if (IASConfig.directPlayButtons && MainMenuScreens.isMainMenu(screen)) {
+            Button singleplayer = Button.builder(Component.translatable("menu.singleplayer"),
+                            btn -> DirectPlay.openSingleplayer(minecraft, screen))
+                    .bounds(4, 4, 100, 20)
+                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.singleplayer.tip")))
+                    .build();
+            buttonAdder.accept(singleplayer);
+
+            Button multiplayer = Button.builder(Component.translatable("menu.multiplayer"),
+                            btn -> DirectPlay.openMultiplayer(minecraft, screen))
+                    .bounds(4, 28, 100, 20)
+                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.multiplayer.tip")))
+                    .build();
+            buttonAdder.accept(multiplayer);
         }
 
         // Add servers button.

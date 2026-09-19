@@ -138,6 +138,11 @@ public final class IASConfig {
     public static String serversButtonY = null;
 
     /**
+     * Whether the direct-play (singleplayer/multiplayer bypass) buttons are enabled, {@code true} by default.
+     */
+    public static boolean directPlayButtons = true;
+
+    /**
      * Allow storing accounts without Crypt, {@code false} by default.
      */
     public static boolean allowNoCrypt = false;

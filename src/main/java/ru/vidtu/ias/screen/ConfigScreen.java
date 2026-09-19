@@ -445,6 +445,16 @@ public final class ConfigScreen extends Screen {
         box.setTooltipDelay(Duration.ofMillis(250L));
         this.addRenderableWidget(box);
 
+        // Direct Play bypass buttons.
+        Checkbox directPlay = Checkbox.builder(Component.translatable("ias.config.directPlay"), this.font)
+                .pos(10 + box.getWidth(), 212)
+                .selected(IASConfig.directPlayButtons)
+                .onValueChange((cb, value) -> IASConfig.directPlayButtons = value)
+                .tooltip(Tooltip.create(Component.translatable("ias.config.directPlay.tip")))
+                .build();
+        directPlay.setTooltipDelay(Duration.ofMillis(250L));
+        this.addRenderableWidget(directPlay);
+
         // Add done button.
         this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, btn -> this.onClose())
                 .bounds(this.width / 2 - 100, this.height - 24, 200, 20)

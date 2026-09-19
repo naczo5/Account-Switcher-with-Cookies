@@ -45,6 +45,7 @@ import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.config.IASConfig;
+import ru.vidtu.ias.utils.DirectPlay;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -221,6 +222,23 @@ public final class AccountScreen extends Screen {
         this.search = new EditBox(this.font, this.width / 2 - 75, 11, 150, 20, this.search, Component.translatable("ias.accounts.search"));
         this.search.setHint(this.search.getMessage().copy().withStyle(ChatFormatting.DARK_GRAY));
         this.addRenderableWidget(this.search);
+
+        // Direct-play shortcuts: jump straight to vanilla lists after login,
+        // without going back through the launcher home UI (Lunar bypass).
+        if (IASConfig.directPlayButtons) {
+            Button directSingleplayer = Button.builder(Component.translatable("menu.singleplayer"),
+                            btn -> DirectPlay.openSingleplayer(this.minecraft, this))
+                    .bounds(this.width - 104, 8, 100, 20)
+                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.singleplayer.tip")))
+                    .build();
+            this.addRenderableWidget(directSingleplayer);
+            Button directMultiplayer = Button.builder(Component.translatable("menu.multiplayer"),
+                            btn -> DirectPlay.openMultiplayer(this.minecraft, this))
+                    .bounds(this.width - 104, 32, 100, 20)
+                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.multiplayer.tip")))
+                    .build();
+            this.addRenderableWidget(directMultiplayer);
+        }
 
         // Add skin renderer.
         if (this.skin == null) {

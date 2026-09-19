@@ -9,7 +9,9 @@ import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltManager;
 import com.mojang.util.UUIDTypeAdapter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiMultiplayer;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.GuiSelectWorld;
 import net.minecraft.client.gui.GuiSlot;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.resources.I18n;
@@ -97,6 +99,9 @@ public class GuiAccountSelector extends GuiScreen {
 		this.buttonList.add(loginoffline = new GuiButton(2, this.width / 2 - 154 - 10, this.height - 28, 110, 20, I18n.format("ias.login")+" "+I18n.format("ias.offline")));
 		this.buttonList.add(new GuiButton(3, this.width / 2 + 4 + 50, this.height - 28, 110, 20, I18n.format("gui.cancel")));
 		this.buttonList.add(delete = new GuiButton(4, this.width / 2 - 50, this.height - 28, 100, 20, I18n.format("ias.delete")));
+		//Direct Play shortcuts (parity with modern AccountScreen)
+		this.buttonList.add(new GuiButton(12, this.width - 104, 8, 100, 20, I18n.format("menu.singleplayer")));
+		this.buttonList.add(new GuiButton(13, this.width - 104, 32, 100, 20, I18n.format("menu.multiplayer")));
 		search  = new GuiTextField(8, this.fontRendererObj, this.width / 2 - 80, 14, 160, 16);
 		search.setText(query);
 		updateButtons();
@@ -205,6 +210,10 @@ public class GuiAccountSelector extends GuiScreen {
 				checkAllHypixelBans();
 			}else if(button.id == 11){
 				mc.displayGuiScreen(new GuiManageProfile(this, queriedaccounts.get(selectedAccountIndex)));
+			}else if(button.id == 12){
+				mc.displayGuiScreen(new GuiSelectWorld(this));
+			}else if(button.id == 13){
+				mc.displayGuiScreen(new GuiMultiplayer(this));
 			}else{
 				accountsgui.actionPerformed(button);
 			}

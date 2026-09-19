@@ -25,6 +25,16 @@ Lunar replaces the vanilla title screen, so the mod uses multiple entry points:
 2. **Mod Menu** (Fabric profiles only) — **In-Game Account Switcher** in the Mod Menu list.
 3. **Title / multiplayer button** — on compatible `GuiScreen`s; may not appear on Lunar's WebOSR home — use **`O`** instead.
 
+## Bypassing Lunar's signed-in account check (Direct Play)
+
+Lunar's launcher home screen prevents opening Singleplayer or Multiplayer if you are not signed into an account through the Lunar launcher.
+
+This mod provides **Direct Play** buttons to enter the game menus without passing through Lunar's account gate:
+- **Inside Account Switcher (`O`):** **Singleplayer** and **Multiplayer** buttons in the top-right corner. Select or import your alt account, then immediately jump straight into your world or server list.
+- **On compatible title screens:** Direct **Singleplayer** and **Multiplayer** buttons are placed at the top-left.
+- **1.8.9 Forge parity:** Direct-play buttons are also available on both the main menu and the 1.8 account selector GUI.
+- Can be toggled in the mod settings (**Config → Direct Play Buttons**).
+
 ## Localts / cookie import on Lunar
 
 1. Open the account switcher with the `O` keybind or from Mod Menu.
