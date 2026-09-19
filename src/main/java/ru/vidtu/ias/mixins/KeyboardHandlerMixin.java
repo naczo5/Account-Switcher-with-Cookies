@@ -35,9 +35,11 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import ru.vidtu.ias.IASMinecraft;
+import ru.vidtu.ias.platform.IFabric;
 
 /**
- * Captures the open key on Lunar Client, where the custom main menu does not route keys to key mappings.
+ * Captures the open keybind on Lunar Client, where the custom main menu does not route keys to key mappings.
+ * Respects the binding from the controls screen, so it can be changed or disabled.
  *
  * @author VidTu
  * @apiNote Internal use only
@@ -52,8 +54,10 @@ public abstract class KeyboardHandlerMixin {
 
     @Inject(method = "keyPress", at = @At("HEAD"))
     private void ias$keyPress(long window, int action, KeyEvent event, CallbackInfo ci) {
-        if (action != GLFW.GLFW_PRESS || event.key() != GLFW.GLFW_KEY_O) return;
+        if (action != GLFW.GLFW_PRESS) return;
         if (window != this.minecraft.getWindow().handle()) return;
+        if (IFabric.OPEN_ACCOUNT_SWITCHER.isUnbound()) return;
+        if (!IFabric.OPEN_ACCOUNT_SWITCHER.matches(event)) return;
         IASMinecraft.tryOpenAccountSwitcher(this.minecraft);
     }
 }

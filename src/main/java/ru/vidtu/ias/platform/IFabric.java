@@ -32,6 +32,9 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+//? if >=1.21.10 {
+import net.minecraft.resources.Identifier;
+//?}
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.network.chat.Component;
 import org.apache.logging.log4j.LogManager;
@@ -61,14 +64,22 @@ public final class IFabric implements ClientModInitializer {
     private static final Logger LOGGER = LogManager.getLogger("IAS/IFabric");
 
     /**
+     * Keybind category for the account switcher, so it gets its own line in the controls screen.
+     */
+    //? if >=1.21.10 {
+    public static final KeyMapping.Category IAS_CATEGORY =
+            KeyMapping.Category.register(Identifier.fromNamespaceAndPath("ias", "general"));
+    //?}
+
+    /**
      * Keybind that opens the account switcher from menus (works on Lunar Client).
      */
     //? if >=1.21.10 {
-    private static final KeyMapping OPEN_ACCOUNT_SWITCHER = new KeyMapping(
+    public static final KeyMapping OPEN_ACCOUNT_SWITCHER = new KeyMapping(
             "key.ias.open",
             InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_O,
-            KeyMapping.Category.MISC
+            IAS_CATEGORY
     );
     //?} else {
     /*private static final KeyMapping OPEN_ACCOUNT_SWITCHER = new KeyMapping(
@@ -85,9 +96,10 @@ public final class IFabric implements ClientModInitializer {
     private static boolean keybindRegistered;
 
     /**
-     * Previous O-key state for the Lunar Client GLFW fallback.
+     * Whether the open keybind was added to the options array manually.
+     * (Only needed when Fabric's key-mapping API is missing.)
      */
-    private static boolean oWasDown;
+    private static boolean keybindEnsured;
 
     /**
      * Creates a new mod.
@@ -120,22 +132,13 @@ public final class IFabric implements ClientModInitializer {
         // Open account switcher from menus (Lunar Client and other custom title screens).
         registerOpenKeybind();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            boolean pressed = false;
-            if (keybindRegistered) {
-                while (OPEN_ACCOUNT_SWITCHER.consumeClick()) {
-                    pressed = true;
-                }
+            if (!keybindRegistered) {
+                ensureKeybindInOptions(client);
             }
-            //? if >=1.21.10 {
-            long window = client.getWindow().handle();
-            //?} else {
-            /*long window = client.getWindow().getWindow();*/
-            //?}
-            boolean oDown = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_O) == GLFW.GLFW_PRESS;
-            if (!pressed && oDown && !oWasDown) {
+            boolean pressed = false;
+            while (OPEN_ACCOUNT_SWITCHER.consumeClick()) {
                 pressed = true;
             }
-            oWasDown = oDown;
             if (pressed) {
                 IASMinecraft.tryOpenAccountSwitcher(client);
             }
@@ -181,6 +184,73 @@ public final class IFabric implements ClientModInitializer {
             }
         }
         LOGGER.info("IAS: Fabric key-mapping API not present; press O to open the account switcher.");
+    }
+
+    /**
+     * Adds the open keybind to the controls screen when Fabric's key-mapping API is missing,
+     * so it can still be changed or disabled there. Vanilla only lists the mappings
+     * from the options array, which the Fabric API normally appends to via a mixin.
+     */
+    private static void ensureKeybindInOptions(net.minecraft.client.Minecraft client) {
+        if (keybindEnsured) return;
+        try {
+            Object options = client.options;
+            if (options == null) return;
+            java.lang.reflect.Field arrayField = null;
+            for (java.lang.reflect.Field field : options.getClass().getFields()) {
+                if (field.getType() == KeyMapping[].class) {
+                    arrayField = field;
+                    break;
+                }
+            }
+            if (arrayField == null) return;
+            arrayField.setAccessible(true);
+            KeyMapping[] mappings = (KeyMapping[]) arrayField.get(options);
+            if (mappings == null) return;
+            for (KeyMapping mapping : mappings) {
+                if (mapping == OPEN_ACCOUNT_SWITCHER) {
+                    keybindEnsured = true;
+                    return;
+                }
+            }
+            KeyMapping[] resized = java.util.Arrays.copyOf(mappings, mappings.length + 1);
+            resized[mappings.length] = OPEN_ACCOUNT_SWITCHER;
+            arrayField.set(options, resized);
+            applySavedBinding(client);
+            keybindEnsured = true;
+            LOGGER.debug("IAS: Added open keybind to the controls screen without Fabric's key-mapping API.");
+        } catch (Throwable t) {
+            LOGGER.debug("IAS: Unable to add open keybind to the controls screen.", t);
+        }
+    }
+
+    /**
+     * Applies the saved binding from {@code options.txt}, since vanilla loads bindings
+     * before this mod appends its keybind to the options array.
+     */
+    private static void applySavedBinding(net.minecraft.client.Minecraft client) {
+        try {
+            java.io.File file = new java.io.File(client.gameDirectory, "options.txt");
+            if (!file.isFile()) return;
+            String prefix = "key_" + OPEN_ACCOUNT_SWITCHER.getName() + ":";
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                    new java.io.FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8));
+            try {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.startsWith(prefix)) continue;
+                    String saved = line.substring(prefix.length());
+                    if (!OPEN_ACCOUNT_SWITCHER.saveString().equals(saved)) {
+                        OPEN_ACCOUNT_SWITCHER.setKey(InputConstants.getKey(saved));
+                    }
+                    break;
+                }
+            } finally {
+                reader.close();
+            }
+        } catch (Throwable t) {
+            LOGGER.debug("IAS: Unable to apply saved open keybind.", t);
+        }
     }
 
     /**

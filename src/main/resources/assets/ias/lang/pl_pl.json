@@ -197,6 +197,7 @@
   "ias.nick.chars": "Twój nick '%s' zawiera niedozwolone znaki i może uniemożliwić dołączenie do niektórych serwerów.",
   "ias.bar": "%s (Konto: %s)",
   "key.categories.ias": "In-Game Account Switcher",
+  "key.category.ias.general": "In-Game Account Switcher",
   "key.ias.open": "Otwórz przełącznik kont",
   "ias.lunar.hint": "Naciśnij O lub otwórz ten mod w Mod Menu, aby przełączyć konta.",
   "ias.help.crypt": "Czym jest Krypta, dlaczego istnieje i którą powinienem wybrać? (Strona jest tylko w języku angielskim) ",

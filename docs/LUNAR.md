@@ -21,7 +21,7 @@ This fork is scoped for **Lunar Client** and **Localts** cookie alt import. Stan
 
 Lunar replaces the vanilla title screen, so the mod uses multiple entry points:
 
-1. **Keybind (default: `O`)** — works on the main menu and multiplayer list (not while in a world or when a text field is focused).
+1. **Keybind (default: `O`, changeable under Controls → In-Game Account Switcher)** — works on the main menu and multiplayer list (not while in a world or when a text field is focused).
 2. **Mod Menu** (Fabric profiles only) — **In-Game Account Switcher** in the Mod Menu list.
 3. **Title / multiplayer button** — on compatible `GuiScreen`s; may not appear on Lunar's WebOSR home — use **`O`** instead.
 

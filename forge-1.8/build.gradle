@@ -11,7 +11,7 @@ buildscript {
 apply plugin: 'net.minecraftforge.gradle.forge'
 
 group = 'ru.vidtu.ias'
-version = '3.1+1.8.9-forge'
+version = '3.2+1.8.9-forge'
 archivesBaseName = 'CookieIAS'
 
 sourceCompatibility = targetCompatibility = '1.8'
