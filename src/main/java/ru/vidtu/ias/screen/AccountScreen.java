@@ -223,8 +223,9 @@ public final class AccountScreen extends Screen {
         this.search.setHint(this.search.getMessage().copy().withStyle(ChatFormatting.DARK_GRAY));
         this.addRenderableWidget(this.search);
 
-        // Direct-play shortcuts: jump straight to vanilla lists after login,
-        // without going back through the launcher home UI (Lunar bypass).
+        // Direct-play shortcuts: jump straight to the vanilla world list or
+        // direct-connect after login, without going back through the
+        // launcher home UI (Lunar bypass).
         if (IASConfig.directPlayButtons) {
             Button directSingleplayer = Button.builder(Component.translatable("menu.singleplayer"),
                             btn -> DirectPlay.openSingleplayer(this.minecraft, this))

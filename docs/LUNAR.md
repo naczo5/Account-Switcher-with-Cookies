@@ -30,10 +30,15 @@ Lunar replaces the vanilla title screen, so the mod uses multiple entry points:
 Lunar's launcher home screen prevents opening Singleplayer or Multiplayer if you are not signed into an account through the Lunar launcher.
 
 This mod provides **Direct Play** buttons to enter the game menus without passing through Lunar's account gate:
-- **Inside Account Switcher (`O`):** **Singleplayer** and **Multiplayer** buttons in the top-right corner. Select or import your alt account, then immediately jump straight into your world or server list.
+- **Inside Account Switcher (`O`):** **Singleplayer** and **Multiplayer** buttons in the top-right corner. Select or import your alt account, then immediately jump in.
+- **Singleplayer** opens the vanilla world list directly.
+- **Multiplayer** opens an IAS-owned **direct-connect** screen (type a server IP and join, Enter works too). It deliberately avoids all vanilla multiplayer screens: on gated setups Lunar hooks those and their buttons silently do nothing. The last used IP is pre-filled automatically.
+- **On the direct-connect screen:** a **Server List** button offers the vanilla server list as a fallback for setups without the gate.
 - **On compatible title screens:** Direct **Singleplayer** and **Multiplayer** buttons are placed at the top-left.
-- **1.8.9 Forge parity:** Direct-play buttons are also available on both the main menu and the 1.8 account selector GUI.
+- **1.8.9 Forge parity:** Direct-play buttons are also available on both the main menu (non-vanilla menus only, so they don't duplicate the built-in buttons) and the 1.8 account selector GUI. (Note: 1.8.9 still opens the server list, as that version has no direct-connect screen.)
 - Can be toggled in the mod settings (**Config → Direct Play Buttons**).
+
+Online-mode servers still need a valid Microsoft session — log in via IAS first. Offline servers work without one.
 
 ## Localts / cookie import on Lunar
 

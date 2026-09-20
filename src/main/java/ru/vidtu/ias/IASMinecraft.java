@@ -250,8 +250,8 @@ public final class IASMinecraft {
         }
 
         // Direct-play bypass buttons (Lunar account-check bypass).
-        // Opens the vanilla world/server lists straight away, skipping the
-        // launcher's home UI that may demand a signed-in Lunar account.
+        // Opens the vanilla world list / direct-connect straight away, skipping
+        // the launcher's home UI that may demand a signed-in Lunar account.
         if (IASConfig.directPlayButtons && MainMenuScreens.isMainMenu(screen)) {
             Button singleplayer = Button.builder(Component.translatable("menu.singleplayer"),
                             btn -> DirectPlay.openSingleplayer(minecraft, screen))

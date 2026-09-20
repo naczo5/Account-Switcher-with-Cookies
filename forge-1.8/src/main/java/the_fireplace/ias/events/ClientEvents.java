@@ -3,6 +3,7 @@ package the_fireplace.ias.events;
 import com.github.mrebhan.ingameaccountswitcher.tools.Config;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiMultiplayer;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiSelectWorld;
@@ -36,9 +37,13 @@ public class ClientEvents {
         if (MainMenuScreens.isMainMenu(gui)) {
             event.buttonList.add(new GuiButtonWithImage(BUTTON_ID, gui.width / 2 + 104,
                     (gui.height / 4 + 48) + 72 + 12, 20, 20, ""));
-            // Direct-play parity buttons: open the vanilla lists straight away.
-            event.buttonList.add(new GuiButton(BUTTON_SP_ID, 4, 4, 100, 20, I18n.format("menu.singleplayer")));
-            event.buttonList.add(new GuiButton(BUTTON_MP_ID, 4, 28, 100, 20, I18n.format("menu.multiplayer")));
+            // Direct-play bypass buttons, but not on the vanilla main menu:
+            // it already has working Singleplayer/Multiplayer buttons, and the
+            // extras would just duplicate them (needed only on Lunar/custom menus).
+            if (!(gui instanceof GuiMainMenu)) {
+                event.buttonList.add(new GuiButton(BUTTON_SP_ID, 4, 4, 100, 20, I18n.format("menu.singleplayer")));
+                event.buttonList.add(new GuiButton(BUTTON_MP_ID, 4, 28, 100, 20, I18n.format("menu.multiplayer")));
+            }
         } else if (gui instanceof GuiMultiplayer) {
             event.buttonList.add(new GuiButtonWithImage(BUTTON_ID, gui.width / 2 + 158, gui.height - 30, 20, 20, ""));
         }
