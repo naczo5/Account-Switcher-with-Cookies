@@ -51,3 +51,55 @@ jar {
     from(file('../LICENSE'))
     from(file('../NOTICE'))
 }
+
+reobfJar.doLast {
+    File jarFile = tasks.jar.archivePath
+    if (!jarFile.exists()) return
+
+    File tempFile = new File(jarFile.parentFile, jarFile.name + ".tmp")
+    java.util.zip.ZipFile zipIn = new java.util.zip.ZipFile(jarFile)
+    java.util.zip.ZipOutputStream zipOut = new java.util.zip.ZipOutputStream(new FileOutputStream(tempFile))
+
+    try {
+        Set<String> existing = new HashSet<String>()
+        java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zipIn.entries()
+        while (entries.hasMoreElements()) {
+            existing.add(entries.nextElement().getName())
+        }
+
+        entries = zipIn.entries()
+        while (entries.hasMoreElements()) {
+            java.util.zip.ZipEntry entry = entries.nextElement()
+            zipOut.putNextEntry(new java.util.zip.ZipEntry(entry.getName()))
+            InputStream is = zipIn.getInputStream(entry)
+            byte[] buf = new byte[8192]
+            int len
+            while ((len = is.read(buf)) > 0) {
+                zipOut.write(buf, 0, len)
+            }
+            is.close()
+            zipOut.closeEntry()
+
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile('^assets/ias/lang/([a-z]{2})_([a-z]{2})\\.lang$').matcher(entry.getName())
+            if (m.matches()) {
+                String upperName = "assets/ias/lang/" + m.group(1) + "_" + m.group(2).toUpperCase() + ".lang"
+                if (!existing.contains(upperName)) {
+                    zipOut.putNextEntry(new java.util.zip.ZipEntry(upperName))
+                    InputStream is2 = zipIn.getInputStream(entry)
+                    while ((len = is2.read(buf)) > 0) {
+                        zipOut.write(buf, 0, len)
+                    }
+                    is2.close()
+                    zipOut.closeEntry()
+                }
+            }
+        }
+    } finally {
+        zipIn.close()
+        zipOut.close()
+    }
+
+    if (!jarFile.delete() || !tempFile.renameTo(jarFile)) {
+        throw new GradleException("Failed to replace jar with dual-case lang entries")
+    }
+}

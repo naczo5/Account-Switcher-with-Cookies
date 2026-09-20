@@ -70,8 +70,28 @@ public class IAS {
 			config.save();
 	}
 
+	private static void loadFallbackTranslations() {
+		try {
+			for (String filename : new String[]{"en_US.lang", "en_us.lang"}) {
+				java.io.InputStream stream = IAS.class.getResourceAsStream("/assets/ias/lang/" + filename);
+				if (stream != null) {
+					try {
+						java.util.Map<String, String> parsed = net.minecraft.util.StringTranslate.parseLangFile(stream);
+						net.minecraftforge.fml.common.registry.LanguageRegistry.instance().injectLanguage("en_US", new java.util.HashMap<String, String>(parsed));
+						net.minecraftforge.fml.common.registry.LanguageRegistry.instance().injectLanguage("en_us", new java.util.HashMap<String, String>(parsed));
+					} finally {
+						stream.close();
+					}
+					break;
+				}
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
 	@EventHandler
 	public void preInit(FMLPreInitializationEvent event) {
+		loadFallbackTranslations();
 		config = new Configuration(event.getSuggestedConfigurationFile());
 		config.load();
 		CASESENSITIVE_PROPERTY = config.get(Configuration.CATEGORY_GENERAL, ConfigValues.CASESENSITIVE_NAME, ConfigValues.CASESENSITIVE_DEFAULT, I18n.format(ConfigValues.CASESENSITIVE_NAME+".tooltip"));
