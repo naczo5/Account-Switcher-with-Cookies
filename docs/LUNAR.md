@@ -6,14 +6,14 @@ This fork is scoped for **Lunar Client** and **Localts** cookie alt import. Stan
 
 | Minecraft | Loader | Build (PowerShell) | Output jar |
 |-----------|--------|-------------------|------------|
-| **26.1.2** (26.1) | Fabric | `.\gradlew.bat :26.1.2-fabric:jar` | `build\libs\IAS-*+26.1.2-fabric.jar` |
+| **26.2** | Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\IAS-*+26.2-fabric.jar` |
 | **1.21.11** | Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\IAS-*+1.21.11-fabric.jar` |
 
 ## Install
 
-### 26.1.2 / 1.21.11 Fabric
+### 26.2 / 1.21.11 Fabric
 
-1. Use a Lunar **Fabric** profile for **26.1.2** or **1.21.11**.
+1. Use a Lunar **Fabric** profile for **26.2** or **1.21.11**.
 2. Open version **Settings** → **Mods**, drag in the matching jar (or use the folder button).
 3. Ensure **Fabric API** is present for that Minecraft version.
 
