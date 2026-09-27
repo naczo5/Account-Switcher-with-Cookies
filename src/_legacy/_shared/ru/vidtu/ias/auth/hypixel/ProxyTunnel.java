@@ -94,8 +94,7 @@ final class ProxyTunnel {
             throw new IOException("SOCKS proxy is not SOCKS5 (ver=" + ver + ")");
         }
         if (method == 0xFF) {
-            String who = auth ? "user=" + proxy.user : "no username";
-            throw new IOException("SOCKS5 rejected auth methods (" + who + "). Put dedicated.*.liquidproxy.net:1080 on liquidProxyHost and the Proxy Manager user/pass on liquidProxyUsername/liquidProxyPassword.");
+            throw new IOException("SOCKS5 rejected auth methods (credentials " + (auth ? "present" : "missing") + "). Put dedicated.REGION.liquidproxy.net:1080 on liquidProxyHost and the Proxy Manager user/pass on liquidProxyUsername/liquidProxyPassword.");
         }
         if (method == 0x02) {
             if (!auth) {

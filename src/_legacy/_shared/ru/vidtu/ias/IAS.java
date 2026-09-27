@@ -92,7 +92,7 @@ public final class IAS {
 
             Hypixel / LiquidProxy settings live next to this folder:
             config/nfaswitcher/ias.json
-              liquidProxyHost      dedicated.na-ord.liquidproxy.net
+              liquidProxyHost      dedicated.REGION.liquidproxy.net
               liquidProxyPort      1080
               liquidProxyUsername  (Proxy Manager user)
               liquidProxyPassword  (Proxy Manager pass)

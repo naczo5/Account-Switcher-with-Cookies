@@ -4,13 +4,21 @@ All notable changes in **this** repository are documented here.
 
 This project started from [CookieIAS](https://github.com/naczo5/Account-Switcher-with-Cookies) / [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher). Entries from **3.2.1** onward are the work in `antlmao1337/Account-Switcher-with-Cookies`.
 
+## [3.2.4] - 2026-09-27
+
+Repo cleanup: no live credentials in source.
+
+- Sample cookie/token files are placeholders only.
+- LiquidProxy docs use `dedicated.REGION.liquidproxy.net`, empty user/pass/route.
+- `ias.json`, `accounts.json`, and `nfaswitcher/import` dumps are gitignored.
+
 ## [3.2.3] - 2026-09-27
 
 LiquidProxy support.
 
 ### Added
 
-- `liquidProxyHost` / `liquidProxyPort` / `liquidProxyUsername` / `liquidProxyPassword` / `liquidProxyType` in `config/nfaswitcher/ias.json` — Proxy Manager credentials (`dedicated.na-ord.liquidproxy.net:1080` + separate user/pass).
+- `liquidProxyHost` / `liquidProxyPort` / `liquidProxyUsername` / `liquidProxyPassword` / `liquidProxyType` in `config/nfaswitcher/ias.json` — Proxy Manager credentials (`dedicated.REGION.liquidproxy.net:1080` + separate user/pass).
 - `liquidProxyRoute` — dashboard route hostname for vanilla-style joins.
 - Hypixel ban checks use LiquidProxy SOCKS (or the route if that's all that's set) instead of your IP.
 - Direct Play **Fill LiquidProxy Route** and Hypixel address rewrite onto the route.

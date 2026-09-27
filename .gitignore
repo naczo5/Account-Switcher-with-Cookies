@@ -3,6 +3,14 @@
 build/
 cookies/
 RefreshTokenApp/
+ias.json
+accounts.json
+config/nfaswitcher/
+**/nfaswitcher/import/**
+!**/nfaswitcher/import/README.txt
+*.cookies
+good.txt
+fun.txt
 .cursor/
 .vscode/
 .riseclient-ref/

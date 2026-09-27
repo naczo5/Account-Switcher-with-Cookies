@@ -99,12 +99,12 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 **A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, use LiquidProxy in `config/nfaswitcher/ias.json`:
 
 ```json
-"liquidProxyHost": "dedicated.na-ord.liquidproxy.net",
+"liquidProxyHost": "dedicated.REGION.liquidproxy.net",
 "liquidProxyPort": 1080,
-"liquidProxyUsername": "your-proxy-manager-user",
-"liquidProxyPassword": "your-proxy-manager-pass",
+"liquidProxyUsername": "",
+"liquidProxyPassword": "",
 "liquidProxyType": "socks5",
-"liquidProxyRoute": "paste-dashboard-route.na-ord.liquidproxy.net",
+"liquidProxyRoute": "",
 "hypixelApiKey": ""
 ```
 
@@ -116,8 +116,8 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 **Q:** Can I use normal Microsoft login instead of cookies?  
 **A:** Yes. **Add → Microsoft** still works and lets you choose password or hardware encryption.
 
-**Q:** Where is this fork hosted?  
-**A:** [GitHub — naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies). Upstream IAS: [Modrinth](https://modrinth.com/mod/in-game-account-switcher), [CurseForge](https://www.curseforge.com/minecraft/mc-mods/in-game-account-switcher).
+**Q:** Where is this repo hosted?  
+**A:** [GitHub — antlmao1337/Account-Switcher-with-Cookies](https://github.com/antlmao1337/Account-Switcher-with-Cookies). Based on CookieIAS / [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher).
 
 **Q:** Is this mod open source?  
 **A:** Yes, under [GNU LGPLv3](LICENSE), same as upstream IAS.

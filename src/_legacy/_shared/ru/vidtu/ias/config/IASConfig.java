@@ -190,8 +190,8 @@ public final class IASConfig {
     public static String hypixelCheckProxy = "";
 
     /**
-     * LiquidProxy dashboard host, e.g. {@code dedicated.na-ord.liquidproxy.net}
-     * or {@code dedicated.na-ord.liquidproxy.net:1080}.
+     * LiquidProxy dashboard host, e.g. {@code dedicated.REGION.liquidproxy.net}
+     * or {@code dedicated.REGION.liquidproxy.net:1080}.
      */
     @Nullable
     public static String liquidProxyHost = "";
@@ -222,7 +222,7 @@ public final class IASConfig {
     /**
      * Dashboard route hostname for vanilla server-list joins
      * (the copy-paste link from LiquidProxy Routes). Example:
-     * {@code something.na-ord.liquidproxy.net}.
+     * {@code your-route.REGION.liquidproxy.net}.
      */
     @Nullable
     public static String liquidProxyRoute = "";

@@ -213,7 +213,7 @@ public final class LiquidProxy {
 
     /**
      * Dedicated/residential SOCKS endpoints look like
-     * {@code dedicated.na-ord.liquidproxy.net:1080}, not a Minecraft route.
+     * {@code dedicated.REGION.liquidproxy.net:1080}, not a Minecraft route.
      */
     static String socksEndpoint(String raw) {
         String value = blankToNull(raw);
