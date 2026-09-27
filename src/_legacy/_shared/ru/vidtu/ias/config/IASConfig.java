@@ -179,6 +179,46 @@ public final class IASConfig {
     public static boolean passwordEchoing = true;
 
     /**
+     * Optional SOCKS5 or HTTP CONNECT proxy used for Hypixel ban-check joins.
+     * Examples: {@code 127.0.0.1:1080}, {@code socks5://user:pass@host:1080},
+     * {@code http://user:pass@host:8080}. Empty means join from this machine's IP.
+     */
+    @Nullable
+    public static String hypixelCheckProxy = "";
+
+    /**
+     * Optional Hypixel API key ({@code https://developer.hypixel.net}) used to
+     * look up package rank before joining. Unranked banned accounts can IP-ban
+     * the connecting IP; ranked ones generally do not.
+     */
+    @Nullable
+    public static String hypixelApiKey = "";
+
+    /**
+     * Allow a real Hypixel login from this IP for VIP/MVP/staff accounts.
+     */
+    public static boolean hypixelCheckAllowRankedDirect = true;
+
+    /**
+     * Allow a real Hypixel login from this IP for no-rank accounts.
+     * Keep this {@code false} unless you are on a disposable IP — banned
+     * no-rank accounts are what trigger Hypixel IP bans.
+     */
+    public static boolean hypixelCheckAllowUnrankedDirect = false;
+
+    /**
+     * Allow a real Hypixel login from this IP when rank is unknown (no API key).
+     * Default {@code false} so mixed dumps cannot IP-ban you.
+     */
+    public static boolean hypixelCheckAllowUnknownDirect = false;
+
+    /**
+     * Allow a real Hypixel login from this IP when the API says the UUID has
+     * never been on Hypixel.
+     */
+    public static boolean hypixelCheckAllowNeverJoinedDirect = true;
+
+    /**
      * Creates a new config for GSON.
      */
     @Contract(pure = true)

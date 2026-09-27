@@ -1235,22 +1235,31 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         }
 
         LOGGER.info("IAS: Checking Hypixel ban for {} ({}/{}).", account.name(), hypixelCheckCompleted + 1, hypixelCheckTotal);
-        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
-                Component.translatable("ias.hypixel.progress.auth"));
 
-        CompletableFuture<HypixelBanResult> check = this.loginForBanCheck(account)
-                .thenApplyAsync(data -> {
-                    this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
-                            Component.translatable("ias.hypixel.progress.hypixel"));
-                    return HypixelBanChecker.checkBan(data.name(), data.uuid(), data.token());
-                }, IAS.executor());
-        check = check.orTimeout(HYPIXEL_ACCOUNT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        HypixelBanResult unsafe = HypixelBanChecker.skipIfUnsafe(account.uuid());
+        CompletableFuture<HypixelBanResult> check;
+        if (unsafe != null) {
+            this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                    Component.translatable("ias.hypixel.progress.skipped"));
+            check = CompletableFuture.completedFuture(unsafe);
+        } else {
+            this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                    Component.translatable("ias.hypixel.progress.auth"));
+            check = this.loginForBanCheck(account)
+                    .thenApplyAsync(data -> {
+                        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                                Component.translatable("ias.hypixel.progress.hypixel"));
+                        return HypixelBanChecker.checkBan(data.name(), data.uuid(), data.token());
+                    }, IAS.executor());
+            check = check.orTimeout(HYPIXEL_ACCOUNT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        }
 
         check.whenCompleteAsync((result, error) -> {
             if (hypixelCheckCancelled) {
                 return;
             }
             UUID uuid = account.uuid();
+            boolean stopQueue = false;
             synchronized (HYPIXEL_LOCK) {
                 if (error != null || result == null) {
                     Throwable cause = error != null ? unwrapError(error) : new IllegalStateException("No Hypixel result");
@@ -1258,12 +1267,27 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
                     HypixelBanResult err = HypixelBanResult.error(describeError(cause));
                     HYPIXEL_BANS.put(uuid, err);
                     ChecksCache.putHypixelBan(uuid, err);
+                    stopQueue = err.networkBan();
                 } else {
                     LOGGER.info("IAS: Hypixel ban result for {}: {}.", account.name(), result.status());
                     HYPIXEL_BANS.put(uuid, result);
                     ChecksCache.putHypixelBan(uuid, result);
+                    stopQueue = result.networkBan();
                 }
                 HYPIXEL_PHASES.put(uuid, HypixelBanPhase.UNKNOWN);
+                if (stopQueue && !HYPIXEL_QUEUE.isEmpty()) {
+                    LOGGER.warn("IAS: Stopping Hypixel checks after IP/network ban signal from {}.", account.name());
+                    HypixelBanResult rest = HypixelBanResult.skipped(
+                            "Stopped: Hypixel reported an IP/network block. Remaining accounts were not joined from this IP.");
+                    for (UUID left : new java.util.ArrayList<>(HYPIXEL_QUEUE.keySet())) {
+                        HYPIXEL_BANS.put(left, rest);
+                        ChecksCache.putHypixelBan(left, rest);
+                        HYPIXEL_PHASES.put(left, HypixelBanPhase.UNKNOWN);
+                    }
+                    hypixelCheckCompleted += HYPIXEL_QUEUE.size();
+                    HYPIXEL_QUEUE.clear();
+                    hypixelCheckCancelled = true;
+                }
                 try {
                     ChecksCache.save(IAS.gameDirectory());
                 } catch (Throwable ignored) {
@@ -1271,7 +1295,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             }
             hypixelCheckCompleted++;
             this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
-                    Component.translatable("ias.hypixel.progress.accountDone", account.name()));
+                    Component.translatable(stopQueue ? "ias.hypixel.progress.stopped" : "ias.hypixel.progress.accountDone", account.name()));
             this.minecraft.execute(this.screen::updateHypixelCheckButton);
             CompletableFuture.delayedExecutor(HYPIXEL_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor())
                     .execute(this::runNextHypixelCheck);

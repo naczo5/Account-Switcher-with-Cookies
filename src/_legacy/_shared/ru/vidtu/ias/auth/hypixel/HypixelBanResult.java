@@ -28,6 +28,7 @@ public final class HypixelBanResult {
     public enum Status {
         UNBANNED,
         BANNED,
+        SKIPPED,
         ERROR
     }
 
@@ -37,6 +38,7 @@ public final class HypixelBanResult {
     private final String reason;
     private final String rawMessage;
     private final String errorMessage;
+    private final boolean networkBan;
 
     private HypixelBanResult(
             Status status,
@@ -44,7 +46,8 @@ public final class HypixelBanResult {
             String duration,
             String reason,
             String rawMessage,
-            String errorMessage
+            String errorMessage,
+            boolean networkBan
     ) {
         this.status = status;
         this.banType = banType;
@@ -52,10 +55,11 @@ public final class HypixelBanResult {
         this.reason = reason;
         this.rawMessage = rawMessage;
         this.errorMessage = errorMessage;
+        this.networkBan = networkBan;
     }
 
     public static HypixelBanResult unbanned() {
-        return new HypixelBanResult(Status.UNBANNED, null, null, null, null, null);
+        return new HypixelBanResult(Status.UNBANNED, null, null, null, null, null, false);
     }
 
     public static HypixelBanResult banned(
@@ -64,11 +68,15 @@ public final class HypixelBanResult {
             String reason,
             String rawMessage
     ) {
-        return new HypixelBanResult(Status.BANNED, banType, duration, reason, rawMessage, null);
+        return new HypixelBanResult(Status.BANNED, banType, duration, reason, rawMessage, null, isNetworkBanText(rawMessage));
+    }
+
+    public static HypixelBanResult skipped(String message) {
+        return new HypixelBanResult(Status.SKIPPED, null, null, null, null, message, false);
     }
 
     public static HypixelBanResult error(String message) {
-        return new HypixelBanResult(Status.ERROR, null, null, null, null, message);
+        return new HypixelBanResult(Status.ERROR, null, null, null, null, message, isNetworkBanText(message));
     }
 
     public static HypixelBanResult of(
@@ -79,7 +87,8 @@ public final class HypixelBanResult {
             String rawMessage,
             String errorMessage
     ) {
-        return new HypixelBanResult(status, banType, duration, reason, rawMessage, errorMessage);
+        String text = rawMessage != null ? rawMessage : errorMessage;
+        return new HypixelBanResult(status, banType, duration, reason, rawMessage, errorMessage, isNetworkBanText(text));
     }
 
     public Status status() {
@@ -104,5 +113,30 @@ public final class HypixelBanResult {
 
     public String errorMessage() {
         return this.errorMessage;
+    }
+
+    /**
+     * Whether the kick/error looks like an IP/network block rather than a normal account ban.
+     */
+    public boolean networkBan() {
+        return this.networkBan;
+    }
+
+    public static boolean isNetworkBanText(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("your ip")
+                || lower.contains("ip address")
+                || lower.contains("ip is banned")
+                || lower.contains("ip banned")
+                || lower.contains("this ip")
+                || lower.contains("vpn") && lower.contains("banned")
+                || lower.contains("proxy") && (lower.contains("blocked") || lower.contains("banned"))
+                || lower.contains("network is blocked")
+                || lower.contains("blocked from this server")
+                || lower.contains("blocked from hypixel")
+                || (lower.contains("suspicious activity") && lower.contains("ip"));
     }
 }

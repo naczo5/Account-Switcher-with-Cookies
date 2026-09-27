@@ -4,6 +4,23 @@ All notable changes in **this** repository are documented here.
 
 This project started from [CookieIAS](https://github.com/naczo5/Account-Switcher-with-Cookies) / [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher). Entries from **3.2.1** onward are the work in `antlmao1337/Account-Switcher-with-Cookies`.
 
+## [3.2.2] - 2026-09-27
+
+Hypixel ban-check IP-ban protection.
+
+### Changed
+
+- Check Hypixel no longer logs **no-rank / unknown-rank** alts into `mc.hypixel.net` from your IP. Those joins are what IP-ban the connection when the alt is banned and has no rank.
+- Ranked (VIP+) alts still join locally by default.
+- If Hypixel kicks with an IP/network block, the rest of the queue is **not** joined.
+
+### Added
+
+- `hypixelCheckProxy` in `config/ias.json` — SOCKS5 or HTTP CONNECT proxy for ban-check joins (`socks5://user:pass@host:1080` or `host:port`).
+- `hypixelApiKey` — optional key from [developer.hypixel.net](https://developer.hypixel.net) so rank can be read *before* any Hypixel login.
+- Skip marker `H-` on accounts that were not joined (tooltip explains why).
+- Config flags: `hypixelCheckAllowRankedDirect` (default true), `hypixelCheckAllowUnrankedDirect` (false), `hypixelCheckAllowUnknownDirect` (false), `hypixelCheckAllowNeverJoinedDirect` (true).
+
 ## [3.2.1] - 2026-09-27
 
 Checker-dump import, live session swap, and bulk cookie-alt loading.

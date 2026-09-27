@@ -204,11 +204,13 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
                 hypixelMarker = switch (hypixelResult.status()) {
                     case UNBANNED -> Component.literal("H\u2713");
                     case BANNED -> Component.literal("H\u2715");
+                    case SKIPPED -> Component.literal("H-");
                     case ERROR -> Component.literal("H!");
                 };
                 hypixelColor = switch (hypixelResult.status()) {
                     case UNBANNED -> 0xFF_00_FF_00;
                     case BANNED -> 0xFF_FF_40_40;
+                    case SKIPPED -> 0xFF_80_C0_FF;
                     case ERROR -> 0xFF_FF_A0_00;
                 };
             } else {
@@ -332,6 +334,7 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
                 }
                 yield line;
             }
+            case SKIPPED -> Component.translatable("ias.hypixel.skipped", result.errorMessage() != null ? result.errorMessage() : "");
             case ERROR -> Component.translatable("ias.hypixel.error", result.errorMessage() != null ? result.errorMessage() : "");
         };
     }

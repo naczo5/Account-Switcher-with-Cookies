@@ -45,6 +45,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.X509EncodedKeySpec;
+import ru.vidtu.ias.config.IASConfig;
+
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -64,7 +66,7 @@ public final class HypixelBanChecker {
     private static final int HYPIXEL_PORT = 25565;
     private static final int CONNECT_TIMEOUT_MS = 15_000;
     private static final int READ_TIMEOUT_MS = 8_000;
-    private static final String USER_AGENT = "IAS-HypixelBanChecker/1.0";
+    static final String USER_AGENT = "IAS-HypixelBanChecker/1.0";
     private static final Gson GSON = new Gson();
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Pattern DURATION_PATTERN = Pattern.compile(
@@ -88,16 +90,39 @@ public final class HypixelBanChecker {
      * @param accessToken Minecraft services access token
      * @return Ban check result
      */
+    /**
+     * {@code null} if a Hypixel login is allowed (proxy or safe rank).
+     * Otherwise a skipped result — do not authenticate or join.
+     */
+    public static HypixelBanResult skipIfUnsafe(UUID uuid) {
+        if (hasProxy()) {
+            return null;
+        }
+        HypixelRankLookup.Kind rank = HypixelRankLookup.lookup(uuid);
+        return allowDirectJoin(rank) ? null : HypixelBanResult.skipped(skipReason(rank));
+    }
+
+    public static boolean hasProxy() {
+        String proxy = IASConfig.hypixelCheckProxy;
+        return proxy != null && !proxy.isBlank();
+    }
+
     public static HypixelBanResult checkBan(String username, UUID uuid, String accessToken) {
         if (username == null || username.trim().isEmpty() || "Unknown".equalsIgnoreCase(username)
                 || accessToken == null || accessToken.trim().isEmpty()) {
             return HypixelBanResult.error("Missing account info");
         }
+        HypixelBanResult skipped = skipIfUnsafe(uuid);
+        if (skipped != null) {
+            return skipped;
+        }
+        boolean viaProxy = hasProxy();
+        String proxy = IASConfig.hypixelCheckProxy;
         String uuidStr = uuidToUndashed(uuid);
         Exception lastError = null;
         for (String host : HYPIXEL_HOSTS) {
             try {
-                return tryHypixelConnect(host, username, uuidStr, accessToken);
+                return tryHypixelConnect(host, username, uuidStr, accessToken, viaProxy ? proxy.trim() : null);
             } catch (Exception e) {
                 lastError = e;
             }
@@ -109,15 +134,32 @@ public final class HypixelBanChecker {
         return HypixelBanResult.unbanned();
     }
 
+    private static boolean allowDirectJoin(HypixelRankLookup.Kind rank) {
+        return switch (rank) {
+            case RANKED -> IASConfig.hypixelCheckAllowRankedDirect;
+            case UNRANKED -> IASConfig.hypixelCheckAllowUnrankedDirect;
+            case NEVER_JOINED -> IASConfig.hypixelCheckAllowNeverJoinedDirect;
+            case UNKNOWN -> IASConfig.hypixelCheckAllowUnknownDirect;
+        };
+    }
+
+    private static String skipReason(HypixelRankLookup.Kind rank) {
+        return switch (rank) {
+            case UNRANKED -> "Skipped local Hypixel login: no-rank accounts can IP-ban this IP. Set hypixelCheckProxy in ias.json (SOCKS5) to check them.";
+            case UNKNOWN -> "Skipped local Hypixel login: rank unknown (set hypixelApiKey or hypixelCheckProxy in ias.json).";
+            case RANKED -> "Skipped local Hypixel login (ranked direct joins disabled).";
+            case NEVER_JOINED -> "Skipped local Hypixel login (never-joined direct joins disabled).";
+        };
+    }
+
     private static HypixelBanResult tryHypixelConnect(
             String host,
             String username,
             String uuidStr,
-            String accessToken
+            String accessToken,
+            String proxySpec
     ) throws Exception {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, HYPIXEL_PORT), CONNECT_TIMEOUT_MS);
-            socket.setSoTimeout(READ_TIMEOUT_MS);
+        try (Socket socket = openSocket(host, proxySpec)) {
             InputStream rawIn = socket.getInputStream();
             OutputStream rawOut = socket.getOutputStream();
             StreamIO io = new StreamIO(rawIn, rawOut);
@@ -151,6 +193,16 @@ public final class HypixelBanChecker {
                 }
             }
         }
+    }
+
+    private static Socket openSocket(String host, String proxySpec) throws IOException {
+        if (proxySpec == null || proxySpec.isBlank()) {
+            Socket socket = new Socket();
+            socket.connect(new InetSocketAddress(host, HYPIXEL_PORT), CONNECT_TIMEOUT_MS);
+            socket.setSoTimeout(READ_TIMEOUT_MS);
+            return socket;
+        }
+        return ProxyTunnel.connect(proxySpec, host, HYPIXEL_PORT, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
     }
 
     private static byte[] buildHandshake(String address) throws IOException {
