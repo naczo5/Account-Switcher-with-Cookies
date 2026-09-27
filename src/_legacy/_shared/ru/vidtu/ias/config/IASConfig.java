@@ -319,6 +319,21 @@ public final class IASConfig {
 
             // Hacky JSON reading.
             GSON.fromJson(json, IASConfig.class);
+            liquidProxyHost = readString(json, "liquidProxyHost", liquidProxyHost);
+            liquidProxyUsername = readString(json, "liquidProxyUsername", liquidProxyUsername);
+            liquidProxyPassword = readString(json, "liquidProxyPassword", liquidProxyPassword);
+            liquidProxyType = readString(json, "liquidProxyType", liquidProxyType);
+            liquidProxyRoute = readString(json, "liquidProxyRoute", liquidProxyRoute);
+            if (json.has("liquidProxyPort") && json.get("liquidProxyPort").isJsonPrimitive()) {
+                liquidProxyPort = json.get("liquidProxyPort").getAsInt();
+            }
+            if (json.has("liquidProxyRoutePort") && json.get("liquidProxyRoutePort").isJsonPrimitive()) {
+                liquidProxyRoutePort = json.get("liquidProxyRoutePort").getAsInt();
+            }
+            LOGGER.info("IAS: LiquidProxy host='{}' user={} route='{}'",
+                    liquidProxyHost,
+                    liquidProxyUsername == null || liquidProxyUsername.isBlank() ? "missing" : "set",
+                    liquidProxyRoute);
 
             // Rewrite so new keys (proxy, API key, etc.) show up in the file.
             if (!json.has("hypixelCheckProxy") || !json.has("hypixelApiKey")
@@ -387,6 +402,14 @@ public final class IASConfig {
      *
      * @return Whether to use server auth for MS
      */
+    @Nullable
+    private static String readString(@NotNull JsonObject json, @NotNull String key, @Nullable String fallback) {
+        if (!json.has(key) || json.get(key).isJsonNull() || !json.get(key).isJsonPrimitive()) {
+            return fallback;
+        }
+        return json.get(key).getAsString();
+    }
+
     public static boolean useServerAuth() {
         if (server == null) return IUtils.canUseSunServer();
         return switch (server) {

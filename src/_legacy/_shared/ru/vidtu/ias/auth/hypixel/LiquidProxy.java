@@ -35,7 +35,7 @@ public final class LiquidProxy {
     }
 
     public static boolean credentialsConfigured() {
-        return host() != null;
+        return host() != null && username() != null;
     }
 
     public static boolean routeConfigured() {
@@ -47,7 +47,10 @@ public final class LiquidProxy {
     }
 
     public static String host() {
-        String raw = blankToNull(IASConfig.liquidProxyHost);
+        String raw = socksEndpoint(IASConfig.liquidProxyHost);
+        if (raw == null) {
+            raw = socksEndpoint(IASConfig.liquidProxyRoute);
+        }
         if (raw == null) {
             return null;
         }
@@ -59,7 +62,10 @@ public final class LiquidProxy {
     }
 
     public static int port() {
-        String raw = blankToNull(IASConfig.liquidProxyHost);
+        String raw = socksEndpoint(IASConfig.liquidProxyHost);
+        if (raw == null) {
+            raw = socksEndpoint(IASConfig.liquidProxyRoute);
+        }
         if (raw != null) {
             int colon = raw.lastIndexOf(':');
             if (colon > 0 && colon < raw.length() - 1 && looksLikePort(raw.substring(colon + 1))) {
@@ -90,7 +96,7 @@ public final class LiquidProxy {
 
     public static String routeHost() {
         String raw = blankToNull(IASConfig.liquidProxyRoute);
-        if (raw == null) {
+        if (raw == null || socksEndpoint(raw) != null) {
             return null;
         }
         int slash = raw.indexOf('/');
@@ -124,6 +130,9 @@ public final class LiquidProxy {
      * or, if only a route is set, directly to the route hostname.
      */
     public static Socket open(String targetHost, int targetPort, int connectTimeoutMs, int readTimeoutMs) throws IOException {
+        if (host() != null && username() == null) {
+            throw new IOException("liquidProxyHost is set but liquidProxyUsername is empty. Paste the Proxy Manager username/password, not the route.");
+        }
         if (credentialsConfigured()) {
             ProxyTunnel.ParsedProxy proxy = new ProxyTunnel.ParsedProxy(
                     http(), host(), port(), username(), password());
@@ -200,6 +209,27 @@ public final class LiquidProxy {
         }
         String lower = address.toLowerCase(Locale.ROOT);
         return lower.contains("hypixel.net") || lower.contains("hypixel.io") || "hypixel".equals(lower);
+    }
+
+    /**
+     * Dedicated/residential SOCKS endpoints look like
+     * {@code dedicated.na-ord.liquidproxy.net:1080}, not a Minecraft route.
+     */
+    static String socksEndpoint(String raw) {
+        String value = blankToNull(raw);
+        if (value == null) {
+            return null;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        boolean named = lower.startsWith("dedicated.") || lower.startsWith("residential.")
+                || lower.startsWith("socks.") || lower.contains(".dedicated.") || lower.contains(".residential.");
+        int colon = value.lastIndexOf(':');
+        boolean port1080 = colon > 0 && looksLikePort(value.substring(colon + 1))
+                && Integer.parseInt(value.substring(colon + 1).trim()) == 1080;
+        if ((named || port1080) && lower.contains("liquidproxy.net")) {
+            return value;
+        }
+        return null;
     }
 
     private static String blankToNull(String value) {

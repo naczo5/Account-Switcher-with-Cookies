@@ -43,22 +43,37 @@ final class ProxyTunnel {
     }
 
     static Socket connect(ParsedProxy proxy, String targetHost, int targetPort, int connectTimeoutMs, int readTimeoutMs) throws IOException {
+        IOException socksError = null;
+        if (!proxy.http) {
+            Socket socket = new Socket();
+            socket.connect(new InetSocketAddress(proxy.host, proxy.port), connectTimeoutMs);
+            socket.setSoTimeout(readTimeoutMs);
+            try {
+                socks5Connect(socket, proxy, targetHost, targetPort);
+                return socket;
+            } catch (IOException e) {
+                try {
+                    socket.close();
+                } catch (IOException ignored) {
+                }
+                socksError = e;
+            }
+        }
         Socket socket = new Socket();
         socket.connect(new InetSocketAddress(proxy.host, proxy.port), connectTimeoutMs);
         socket.setSoTimeout(readTimeoutMs);
         try {
-            if (proxy.http) {
-                httpConnect(socket, proxy, targetHost, targetPort);
-            } else {
-                socks5Connect(socket, proxy, targetHost, targetPort);
-            }
+            httpConnect(socket, proxy, targetHost, targetPort);
             return socket;
-        } catch (IOException e) {
+        } catch (IOException httpError) {
             try {
                 socket.close();
             } catch (IOException ignored) {
             }
-            throw e;
+            if (socksError != null) {
+                httpError.addSuppressed(socksError);
+            }
+            throw socksError != null ? socksError : httpError;
         }
     }
 
@@ -66,19 +81,31 @@ final class ProxyTunnel {
         OutputStream out = socket.getOutputStream();
         InputStream in = socket.getInputStream();
         boolean auth = proxy.user != null && !proxy.user.isEmpty();
-        out.write(auth ? new byte[]{0x05, 0x01, 0x02} : new byte[]{0x05, 0x01, 0x00});
+        // Netty / LiquidBounce offer NO_AUTH + PASSWORD together when credentials exist.
+        if (auth) {
+            out.write(new byte[]{0x05, 0x02, 0x00, 0x02});
+        } else {
+            out.write(new byte[]{0x05, 0x01, 0x00});
+        }
         out.flush();
         int ver = in.read();
         int method = in.read();
         if (ver != 0x05) {
             throw new IOException("SOCKS proxy is not SOCKS5 (ver=" + ver + ")");
         }
+        if (method == 0xFF) {
+            String who = auth ? "user=" + proxy.user : "no username";
+            throw new IOException("SOCKS5 rejected auth methods (" + who + "). Put dedicated.*.liquidproxy.net:1080 on liquidProxyHost and the Proxy Manager user/pass on liquidProxyUsername/liquidProxyPassword.");
+        }
         if (method == 0x02) {
             if (!auth) {
                 throw new IOException("SOCKS5 proxy requested a username/password");
             }
-            byte[] user = proxy.user.getBytes(StandardCharsets.UTF_8);
-            byte[] pass = proxy.pass == null ? new byte[0] : proxy.pass.getBytes(StandardCharsets.UTF_8);
+            byte[] user = proxy.user.getBytes(StandardCharsets.ISO_8859_1);
+            byte[] pass = (proxy.pass == null ? "" : proxy.pass).getBytes(StandardCharsets.ISO_8859_1);
+            if (user.length > 255 || pass.length > 255) {
+                throw new IOException("SOCKS5 username/password longer than 255 bytes");
+            }
             ByteArrayOutputStream authBuf = new ByteArrayOutputStream();
             authBuf.write(0x01);
             authBuf.write(user.length);
@@ -87,8 +114,10 @@ final class ProxyTunnel {
             authBuf.write(pass);
             out.write(authBuf.toByteArray());
             out.flush();
-            if (in.read() != 0x01 || in.read() != 0x00) {
-                throw new IOException("SOCKS5 proxy rejected username/password");
+            int authVer = in.read();
+            int authStatus = in.read();
+            if (authVer != 0x01 || authStatus != 0x00) {
+                throw new IOException("SOCKS5 username/password rejected (status=" + authStatus + ")");
             }
         } else if (method != 0x00) {
             throw new IOException("SOCKS5 proxy rejected auth method " + method);
