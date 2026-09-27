@@ -89,6 +89,9 @@ public final class IAS {
             - .json / .cookies files
 
             README.txt is ignored.
+
+            Hypixel checker proxy / API key live next to this folder:
+            config/nfaswitcher/ias.json
             """;
 
     /**
@@ -435,7 +438,7 @@ public final class IAS {
      * @throws RuntimeException If unable to load the config
      */
     public static void loadConfig() {
-        IASConfig.load(configDirectory);
+        IASConfig.load(nfaSwitcherDirectory());
     }
 
     /**
@@ -444,7 +447,7 @@ public final class IAS {
      * @throws RuntimeException If unable to save the config
      */
     public static void saveConfig() {
-        IASConfig.save(configDirectory);
+        IASConfig.save(nfaSwitcherDirectory());
     }
 
     /**

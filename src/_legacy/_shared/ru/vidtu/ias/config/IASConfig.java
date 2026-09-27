@@ -49,6 +49,8 @@ public final class IASConfig {
     @NotNull
     private static final Gson GSON = new GsonBuilder()
             .excludeFieldsWithModifiers(Modifier.TRANSIENT, Modifier.FINAL)
+            .serializeNulls()
+            .setPrettyPrinting()
             .create();
 
     /**
@@ -237,8 +239,14 @@ public final class IASConfig {
             // Log.
             LOGGER.debug("IAS: Loading config for {}...", path);
 
-            // Get the file.
+            Files.createDirectories(path);
             Path file = path.resolve("ias.json");
+            Path legacy = path.getFileName() != null && "nfaswitcher".equals(path.getFileName().toString())
+                    && path.getParent() != null ? path.getParent().resolve("ias.json") : null;
+            if (!Files.isRegularFile(file) && legacy != null && Files.isRegularFile(legacy)) {
+                LOGGER.info("IAS: Moving config from {} to {}.", legacy, file);
+                Files.copy(legacy, file);
+            }
 
             // Skip if it doesn't exist.
             if (!Files.isRegularFile(file)) {
@@ -267,6 +275,11 @@ public final class IASConfig {
 
             // Hacky JSON reading.
             GSON.fromJson(json, IASConfig.class);
+
+            // Rewrite so new keys (proxy, API key, etc.) show up in the file.
+            if (!json.has("hypixelCheckProxy") || !json.has("hypixelApiKey")) {
+                save(path);
+            }
 
             // Log it.
             LOGGER.debug("IAS: Config loaded.");

@@ -10,6 +10,7 @@ Hypixel ban-check IP-ban protection.
 
 ### Changed
 
+- `ias.json` is stored in `config/nfaswitcher/` (next to `accounts.json` and `import/`), pretty-printed, and created on launch.
 - Hypixel checker popups use short labels (`12/195  Name` + one status line) instead of overflowing the panel.
 - Check Hypixel no longer logs **no-rank / unknown-rank** alts into `mc.hypixel.net` from your IP. Those joins are what IP-ban the connection when the alt is banned and has no rank.
 - Ranked (VIP+) alts still join locally by default.

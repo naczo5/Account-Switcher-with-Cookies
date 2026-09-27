@@ -96,7 +96,7 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 **A:** Localts tokens and session cookies expire or get revoked. Export a fresh alt from Localts and import again.
 
 **Q:** Will Check Hypixel IP-ban my main?  
-**A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, put a SOCKS5/HTTP proxy in `config/ias.json`:
+**A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, put a SOCKS5/HTTP proxy in `config/nfaswitcher/ias.json`:
 
 ```json
 "hypixelCheckProxy": "socks5://user:pass@host:1080",

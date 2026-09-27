@@ -27,7 +27,7 @@
   "ias.accounts.checkHypixel.running": "Checking Hypixel...",
   "ias.accounts.checkHypixel.tip": "Check Hypixel bans. No-rank alts are skipped unless hypixelCheckProxy is set.",
   "ias.accounts.checkHypixel.confirm.title": "Check Hypixel?",
-  "ias.accounts.checkHypixel.confirm": "No-rank alts are not joined from this IP. Set hypixelCheckProxy in ias.json to check them.",
+  "ias.accounts.checkHypixel.confirm": "No-rank alts are not joined from this IP. Set hypixelCheckProxy in config/nfaswitcher/ias.json to check them.",
   "ias.accounts.checkHypixel.confirm.button": "Check",
   "ias.accounts.checkUsernames": "Check Usernames",
   "ias.accounts.checkUsernames.running": "Checking...",
