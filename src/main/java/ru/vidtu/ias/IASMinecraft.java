@@ -121,6 +121,12 @@ public final class IASMinecraft {
     private static volatile LoginData launchAccount;
 
     /**
+     * Active swapped session. {@code Minecraft.user} is {@code final} on 1.21.x, so getters
+     * are redirected to this value when a login succeeds.
+     */
+    private static volatile User swappedUser;
+
+    /**
      * An instance of this class cannot be created.
      *
      * @throws AssertionError Always
@@ -421,8 +427,10 @@ public final class IASMinecraft {
             return CompletableFuture.failedFuture(new FriendlyException("Changing accounts in world.", "ias.error.world"));
         }
 
+        CompletableFuture<Void> applied = new CompletableFuture<>();
+
         // Create everything async, because it lags.
-        return CompletableFuture.runAsync(() -> {
+        CompletableFuture.runAsync(() -> {
             // Create the user.
             LOGGER.info("IAS: Creating user...");
             // I have no idea what are the OPTIONAL fields and the game
@@ -471,38 +479,66 @@ public final class IASMinecraft {
             ProfileKeyPairManager keyPair = ProfileKeyPairManager.create(apiService, user, minecraft.gameDirectory.toPath());
             ReportingContext reporting = ReportingContext.create(ReportEnvironment.local(), apiService);
 
-            // Schedule to the main thread
+            // Schedule to the main thread and only complete once the session is actually live.
             minecraft.execute(() -> {
-                // Flush everything.
-                LOGGER.info("IAS: Flushing user...");
-                //? if >=1.21.10 {
-                accessor.ias$services(services);
-                //?}
-                accessor.ias$user(user);
-                accessor.ias$profileFuture(profile);
-                accessor.ias$userApiService(apiService);
-                accessor.ias$userPropertiesFuture(propertiesFuture);
-                accessor.ias$playerSocialManager(social);
-                //? if >=26.2 {
-                accessor.ias$remoteFriendListUpdateHandler().close();
-                accessor.ias$remoteFriendListUpdateHandler(friendList);
-                if (social.isFriendListEnabled()) {
-                    friendList.start();
+                try {
+                    LOGGER.info("IAS: Flushing user...");
+                    swappedUser = user;
+                    try {
+                        //? if >=1.21.10 {
+                        accessor.ias$services(services);
+                        //?}
+                        accessor.ias$user(user);
+                        accessor.ias$profileFuture(profile);
+                        accessor.ias$userApiService(apiService);
+                        accessor.ias$userPropertiesFuture(propertiesFuture);
+                        accessor.ias$playerSocialManager(social);
+                        //? if >=26.2 {
+                        accessor.ias$remoteFriendListUpdateHandler().close();
+                        accessor.ias$remoteFriendListUpdateHandler(friendList);
+                        if (social.isFriendListEnabled()) {
+                            friendList.start();
+                        }
+                        //?}
+                        accessor.ias$telemetryManager(telemetry);
+                        accessor.ias$profileKeyPairManager(keyPair);
+                        accessor.ias$reportingContext(reporting);
+                    } catch (Throwable accessorError) {
+                        LOGGER.warn("IAS: Unable to rewrite Minecraft session fields; getter override will still apply.", accessorError);
+                    }
+                    refreshTitleText(minecraft);
+                    minecraft.updateTitle();
+                    LOGGER.info("IAS: Flushed user as {}.", data.name());
+                    applied.complete(null);
+                } catch (Throwable t) {
+                    applied.completeExceptionally(t);
                 }
-                //?}
-                accessor.ias$telemetryManager(telemetry);
-                accessor.ias$profileKeyPairManager(keyPair);
-                accessor.ias$reportingContext(reporting);
-                minecraft.updateTitle();
-                LOGGER.info("IAS: Flushed user.");
             });
         }, IAS.executor()).exceptionally(t -> {
-            // Log it.
             LOGGER.error("IAS: Unable to log in: {}.", data, t);
-
-            // Rethrow.
-            throw new RuntimeException("Unable to change account to: " + data, t);
+            applied.completeExceptionally(new RuntimeException("Unable to change account to: " + data, t));
+            return null;
         });
+        return applied;
+    }
+
+    /**
+     * Session currently forced by IAS, or {@code null} if the launcher session is in use.
+     *
+     * @return Swapped user
+     */
+    public static User swappedUser() {
+        return swappedUser;
+    }
+
+    /**
+     * Rebuilds the on-screen IAS username label from the live session.
+     *
+     * @param minecraft Minecraft instance
+     */
+    public static void refreshTitleText(Minecraft minecraft) {
+        User user = minecraft.getUser();
+        text = Component.translatable("ias.title", user != null ? user.getName() : "(broken by mods)");
     }
 
     private static UserApiService.UserProperties fetchUserProperties(UserApiService apiService, boolean online) {

@@ -19,12 +19,12 @@
 
 package ru.vidtu.ias.mixins;
 
+import com.mojang.authlib.GameProfile;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.User;
 import net.minecraft.client.main.GameConfig;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.locale.Language;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -32,6 +32,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import ru.vidtu.ias.IASMinecraft;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.extension.MinecraftExtension;
 
@@ -43,7 +44,8 @@ import ru.vidtu.ias.extension.MinecraftExtension;
 @SuppressWarnings("DollarSignInName") // <- Mixin.
 @Mixin(Minecraft.class)
 public final class MinecraftMixin implements MinecraftExtension {
-    @Shadow @Final private User user;
+    @Shadow
+    private User user;
 
     @Unique
     private GameConfig ias_gameConfig;
@@ -63,14 +65,32 @@ public final class MinecraftMixin implements MinecraftExtension {
         this.ias_gameConfig = config;
     }
 
+    @Inject(method = "getUser", at = @At("HEAD"), cancellable = true)
+    private void ias$getUser(CallbackInfoReturnable<User> cir) {
+        User swapped = IASMinecraft.swappedUser();
+        if (swapped != null) {
+            cir.setReturnValue(swapped);
+        }
+    }
+
+    @Inject(method = "getGameProfile", at = @At("HEAD"), cancellable = true)
+    private void ias$getGameProfile(CallbackInfoReturnable<GameProfile> cir) {
+        User swapped = IASMinecraft.swappedUser();
+        if (swapped != null) {
+            cir.setReturnValue(new GameProfile(swapped.getProfileId(), swapped.getName()));
+        }
+    }
+
     @Inject(method = "createTitle", at = @At("RETURN"), cancellable = true)
     private void ias$createTitle$return(CallbackInfoReturnable<String> cir) {
-        // Skip if not enabled or not fully loaded.
-        if (!IASConfig.barNick || !Language.getInstance().has("ias.bar") || this.user == null) return;
+        User user = IASMinecraft.swappedUser();
+        if (user == null) {
+            user = this.user;
+        }
+        if (!IASConfig.barNick || !Language.getInstance().has("ias.bar") || user == null) return;
 
-        // Modify otherwise.
         String original = cir.getReturnValue();
-        cir.setReturnValue(I18n.get("ias.bar", original, this.user.getName()));
+        cir.setReturnValue(I18n.get("ias.bar", original, user.getName()));
     }
 
     /**

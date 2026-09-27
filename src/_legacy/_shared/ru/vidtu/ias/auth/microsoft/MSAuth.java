@@ -32,6 +32,7 @@ import ru.vidtu.ias.auth.microsoft.fields.DeviceAuth;
 import ru.vidtu.ias.auth.microsoft.fields.MCProfile;
 import ru.vidtu.ias.auth.microsoft.fields.MSTokens;
 import ru.vidtu.ias.auth.microsoft.fields.XHashedToken;
+import ru.vidtu.ias.utils.AuthLog;
 import ru.vidtu.ias.utils.GSONUtils;
 import ru.vidtu.ias.utils.exceptions.DevicePendingException;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
@@ -216,7 +217,7 @@ public final class MSAuth {
                 return DeviceAuth.fromJson(json);
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to request Device Auth Code (DAC) from (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to request Device Auth Code (DAC) (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 throw new RuntimeException(message, t);
             }
         }, IAS.executor());
@@ -432,7 +433,7 @@ public final class MSAuth {
                 throw fe;
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to convert Microsoft Refresh (MSR) token to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Microsoft Refresh (MSR) token to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(refresh, "[MSR]");
                 throw new RuntimeException(message, t);
             }
@@ -473,7 +474,7 @@ public final class MSAuth {
             } catch (FriendlyException fe) {
                 throw fe;
             } catch (Throwable t) {
-                String message = "Unable to convert Localts refresh token to Microsoft tokens (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Localts refresh token to Microsoft tokens (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(refresh, "[MSR]");
                 throw new RuntimeException(message, t);
             }
@@ -545,7 +546,7 @@ public final class MSAuth {
                 return XHashedToken.fromJson(json);
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to convert Microsoft Access (MSA) token to Xbox Live (XBL) token (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Microsoft Access (MSA) token to Xbox Live (XBL) token (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(authToken, "[MSA]");
                 throw new RuntimeException(message, t);
             }
@@ -636,7 +637,7 @@ public final class MSAuth {
                 return token;
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to convert Xbox Live (XBL) token to Xbox Secure Token Service (XSTS) token (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Xbox Live (XBL) token to Xbox Secure Token Service (XSTS) token (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(xbl, "[XBL]");
                 if (hash != null) {
                     message = message.replace(hash, "[HASH]");
@@ -689,7 +690,7 @@ public final class MSAuth {
                 return GSONUtils.getStringOrThrow(json, "access_token");
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to convert Xbox Secure Token Service (XSTS) token to Minecraft Access (MCA) token (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Xbox Secure Token Service (XSTS) token to Minecraft Access (MCA) token (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(xsts, "[XSTS]");
                 message = message.replace(hash, "[HASH]");
                 throw new RuntimeException(message, t);
@@ -736,7 +737,7 @@ public final class MSAuth {
                 return MCProfile.fromJson(json);
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to convert Minecraft Access (MCA) token to Minecraft Profile (MCP) (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Minecraft Access (MCA) token to Minecraft Profile (MCP) (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(access, "[MCA]");
                 throw new RuntimeException(message, t);
             }
@@ -777,7 +778,7 @@ public final class MSAuth {
                         : null;
                 return new NameChangeInfo(allowed, createdAt, changedAt);
             } catch (Throwable t) {
-                String message = "Unable to query Minecraft profile name-change state (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to query Minecraft profile name-change state (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(access, "[MCA]");
                 throw new RuntimeException(message, t);
             }
@@ -835,7 +836,7 @@ public final class MSAuth {
                 boolean allowed = !latest.plus(30L, ChronoUnit.DAYS).isAfter(Instant.now());
                 return new NameChangeInfo(allowed, null, latest.toString());
             } catch (Throwable t) {
-                throw new RuntimeException("Unable to infer Minecraft profile name-change state from NameMC (" + response + "): " + response.body(), t);
+                throw new RuntimeException("Unable to infer Minecraft profile name-change state from NameMC (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body()), t);
             }
         }, IAS.executor());
     }
@@ -876,7 +877,7 @@ public final class MSAuth {
             } catch (FriendlyException e) {
                 throw e;
             } catch (Throwable t) {
-                String message = "Unable to change Minecraft profile name to '" + name + "' (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to change Minecraft profile name to '" + name + "' (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(access, "[MCA]");
                 throw new RuntimeException(message, t);
             }
@@ -935,7 +936,7 @@ public final class MSAuth {
             } catch (FriendlyException e) {
                 return CompletableFuture.failedFuture(e);
             } catch (Throwable t) {
-                String message = "Unable to upload Minecraft profile skin (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to upload Minecraft profile skin (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
                 message = message.replace(access, "[MCA]");
                 return CompletableFuture.failedFuture(new RuntimeException(message, t));
             }
@@ -971,7 +972,7 @@ public final class MSAuth {
                 return MCProfile.fromJson(json);
             } catch (Throwable t) {
                 // Rethrow.
-                throw new RuntimeException("Unable to obtain Minecraft profile by name '" + name + "' (" + response + " with " + response.headers() + "): " + response.body(), t);
+                throw new RuntimeException("Unable to obtain Minecraft profile by name '" + name + "' (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body()), t);
             }
         }, IAS.executor());
     }
@@ -1003,7 +1004,7 @@ public final class MSAuth {
                 return new CookieMcaResult(mca, tokens.refresh());
             }, IAS.executor());
         }, IAS.executor()).exceptionallyComposeAsync(oauthErr -> {
-            LOGGER.warn("IAS: Direct OAuth exchange failed from cookies, falling back to leaf SISU: {}", oauthErr.getMessage());
+            AuthLog.expected(LOGGER, "Direct OAuth exchange failed from cookies, falling back to SISU", oauthErr);
             return cookiesToMcaViaSisuLeaf(cookieHeader).thenApply(mca -> new CookieMcaResult(mca, ""));
         }, IAS.executor());
     }

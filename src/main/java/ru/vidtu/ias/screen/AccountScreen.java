@@ -223,6 +223,12 @@ public final class AccountScreen extends Screen {
         this.search.setHint(this.search.getMessage().copy().withStyle(ChatFormatting.DARK_GRAY));
         this.addRenderableWidget(this.search);
 
+        Button bulkImport = Button.builder(Component.translatable("ias.accounts.bulkImport"), btn -> this.list.importBulk())
+                .bounds(this.width / 2 + 80, 11, 100, 20)
+                .tooltip(Tooltip.create(Component.translatable("ias.accounts.bulkImport.tip")))
+                .build();
+        this.addRenderableWidget(bulkImport);
+
         // Direct-play shortcuts: jump straight to the vanilla world list or
         // direct-connect after login, without going back through the
         // launcher home UI (Lunar bypass).

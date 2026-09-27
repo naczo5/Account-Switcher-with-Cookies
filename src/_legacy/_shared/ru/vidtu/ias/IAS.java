@@ -33,8 +33,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -65,6 +71,25 @@ public final class IAS {
      */
     @NotNull
     public static final String USER_AGENT = "IAS/%s (https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher; pig@vidtu.ru)".formatted(IAS.class.getPackage().getImplementationVersion());
+
+    /**
+     * README dropped into {@code config/nfaswitcher/import}.
+     */
+    @NotNull
+    private static final String IMPORT_README = """
+            NFA Switcher bulk import
+            ========================
+            Drop cookie dumps and refresh-token lists in this folder, then in-game open
+            the account switcher and click Bulk Import (or Cookie / Token -> Import).
+
+            Supported:
+            - Netscape cookie .txt files (one account per file)
+            - One refresh token per line (M.C... or email:M.C...)
+            - Localts exports
+            - .json / .cookies files
+
+            README.txt is ignored.
+            """;
 
     /**
      * Logger for this class.
@@ -117,6 +142,11 @@ public final class IAS {
         // Initialize the dirs.
         gameDirectory = gamePath;
         configDirectory = configPath;
+        try {
+            ensureImportDirectory();
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Unable to create config/nfaswitcher/import.", t);
+        }
 
         // Set up IAS.
         LOGGER.debug("IAS: Current user agent: {}", USER_AGENT);
@@ -290,6 +320,103 @@ public final class IAS {
     @Contract(pure = true)
     public static Path gameDirectory() {
         return gameDirectory;
+    }
+
+    /**
+     * {@code .minecraft/config/nfaswitcher}
+     *
+     * @return NFA Switcher config directory
+     */
+    @Contract(pure = true)
+    @NotNull
+    public static Path nfaSwitcherDirectory() {
+        Objects.requireNonNull(configDirectory, "IAS config directory is not available.");
+        return configDirectory.resolve("nfaswitcher");
+    }
+
+    /**
+     * {@code .minecraft/config/nfaswitcher/import}
+     *
+     * @return Bulk cookie/token drop folder
+     */
+    @Contract(pure = true)
+    @NotNull
+    public static Path importDirectory() {
+        return nfaSwitcherDirectory().resolve("import");
+    }
+
+    /**
+     * Creates the NFA Switcher import folder and a README if missing.
+     */
+    public static void ensureImportDirectory() {
+        Path dir = importDirectory();
+        try {
+            Files.createDirectories(dir);
+            Path readme = dir.resolve("README.txt");
+            if (!Files.isRegularFile(readme)) {
+                Files.writeString(readme, IMPORT_README, StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to create " + dir, e);
+        }
+    }
+
+    /**
+     * Cookie/token files sitting in {@link #importDirectory()}, excluding README.
+     *
+     * @return Absolute file paths
+     */
+    @NotNull
+    public static List<String> listImportFiles() {
+        ensureImportDirectory();
+        Path dir = importDirectory();
+        List<String> files = new ArrayList<>();
+        try (Stream<Path> stream = Files.list(dir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(IAS::isImportFile)
+                    .map(path -> path.toAbsolutePath().toString())
+                    .sorted()
+                    .forEach(files::add);
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to list " + dir, e);
+        }
+        return files;
+    }
+
+    /**
+     * Cookie/token files in an arbitrary directory.
+     *
+     * @param dir Folder to scan
+     * @return Absolute file paths
+     */
+    @NotNull
+    public static List<String> listImportFiles(@NotNull Path dir) {
+        List<String> files = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return files;
+        }
+        try (Stream<Path> stream = Files.list(dir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(IAS::isImportFile)
+                    .map(path -> path.toAbsolutePath().toString())
+                    .sorted()
+                    .forEach(files::add);
+        } catch (Exception e) {
+            throw new RuntimeException("Unable to list " + dir, e);
+        }
+        return files;
+    }
+
+    @Contract(pure = true)
+    private static boolean isImportFile(@NotNull Path path) {
+        String name = path.getFileName().toString();
+        if ("README.txt".equalsIgnoreCase(name)) {
+            return false;
+        }
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".txt") || lower.endsWith(".json")
+                || lower.endsWith(".cookies") || lower.endsWith(".cookie");
     }
 
     /**

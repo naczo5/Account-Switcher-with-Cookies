@@ -22,6 +22,7 @@ package ru.vidtu.ias.auth;
 import com.google.errorprone.annotations.CheckReturnValue;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.auth.handlers.CreateHandler;
@@ -89,10 +90,7 @@ public final class TokenImporter {
         Set<String> tokens = new LinkedHashSet<>();
         Matcher matcher = MC_TOKEN_JSON.matcher(text);
         while (matcher.find()) {
-            String token = normalizeToken(matcher.group(1));
-            if (!token.isBlank()) {
-                tokens.add(token);
-            }
+            addIfToken(tokens, matcher.group(1));
         }
         if (!tokens.isEmpty()) {
             return new ArrayList<>(tokens);
@@ -101,18 +99,43 @@ public final class TokenImporter {
         List<String> lines = text.lines().map(String::strip).filter(line -> !line.isBlank()).toList();
         if (lines.size() > 1) {
             for (String line : lines) {
-                String token = normalizeToken(line);
-                if (!token.isBlank()) {
-                    tokens.add(token);
-                }
+                addIfToken(tokens, line);
             }
         } else {
-            String token = normalizeToken(text);
-            if (!token.isBlank()) {
-                tokens.add(token);
-            }
+            addIfToken(tokens, text);
         }
         return new ArrayList<>(tokens);
+    }
+
+    private static void addIfToken(@NotNull Set<String> tokens, @Nullable String raw) {
+        String token = normalizeToken(raw);
+        if (looksLikeImportToken(token)) {
+            tokens.add(token);
+        }
+    }
+
+    /**
+     * Whether a string is a usable Minecraft/Microsoft token rather than a cookie TSV row or header.
+     */
+    @Contract(value = "null -> false", pure = true)
+    public static boolean looksLikeImportToken(@Nullable String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        if (token.contains("\t") || token.startsWith("#")) {
+            return false;
+        }
+        String lower = token.toLowerCase();
+        if (lower.contains("thanks for choosing") || lower.contains("netscape") || lower.contains("http cookie file")) {
+            return false;
+        }
+        if (looksLikeMinecraftAccessToken(token)) {
+            return true;
+        }
+        if (token.startsWith("M.C") || token.startsWith("M.") || token.startsWith("0.")) {
+            return token.length() > 40;
+        }
+        return token.length() >= 80 && token.matches("[A-Za-z0-9._\\-+=/*!$]+");
     }
 
     private static void importValues(@NotNull Crypt crypt, @NotNull List<String> tokens, int index, @NotNull CreateHandler handler) {
@@ -251,11 +274,18 @@ public final class TokenImporter {
             return value;
         }
         String prefix = value.substring(0, colon);
-        String rest = value.substring(colon + 1);
-        if (rest.isBlank() || prefix.contains(".") || prefix.length() > 32) {
+        String rest = value.substring(colon + 1).strip();
+        if (rest.isBlank()) {
             return value;
         }
-        return rest;
+        boolean emailOrName = prefix.contains("@") || prefix.length() <= 32;
+        if (emailOrName && looksLikeImportToken(rest)) {
+            return rest;
+        }
+        if (rest.startsWith("M.") || rest.startsWith("0.") || looksLikeMinecraftAccessToken(rest)) {
+            return rest;
+        }
+        return value;
     }
 
     private static String unwrap(String value) {

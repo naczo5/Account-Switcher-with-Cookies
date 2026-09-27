@@ -39,8 +39,11 @@ import ru.vidtu.ias.auth.hypixel.HypixelBanResult;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.config.ChecksCache;
 import ru.vidtu.ias.config.IASStorage;
+import ru.vidtu.ias.crypt.DummyCrypt;
+import ru.vidtu.ias.utils.AuthLog;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -628,6 +631,36 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     }
 
     /**
+     * Imports every cookie/token file from {@code config/nfaswitcher/import}.
+     */
+    void importBulk() {
+        try {
+            IAS.ensureImportDirectory();
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Unable to create import folder.", t);
+        }
+        CookiePopupScreen screen = new CookiePopupScreen(this.screen, account -> {
+            //$ set_screen 'this.minecraft' 'this.screen'
+            this.minecraft.gui.setScreen(this.screen);
+            IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
+            IASStorage.ACCOUNTS.add(account);
+            try {
+                IAS.disclaimersStorage();
+                IAS.saveStorage();
+            } catch (Throwable t) {
+                LOGGER.error("IAS: Unable to save storage.", t);
+            }
+            this.update(this.screen.search().getValue());
+        }, DummyCrypt.INSTANCE);
+        //$ set_screen 'this.minecraft' screen
+        this.minecraft.gui.setScreen(screen);
+        List<String> files = IAS.listImportFiles();
+        if (!files.isEmpty()) {
+            screen.importFromFolder(IAS.importDirectory());
+        }
+    }
+
+    /**
      * Opens the account adding screen.
      */
     void add() {
@@ -650,6 +683,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
             // Update the list.
             this.update(this.screen.search().getValue());
+            this.setSelected(this.entryFor(account));
+
+            // Cookie/token import otherwise only stores the account. Switch into it immediately.
+            if (account.canLogin()) {
+                this.login(true, null);
+            }
         });
         //$ set_screen 'this.minecraft' 'add'
         this.minecraft.gui.setScreen(add);
@@ -701,7 +740,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             loaded.ifPresent(newSkin -> SKINS.put(uuid, newSkin));
         }, this.minecraft).exceptionally(t -> {
             // Log it.
-            LOGGER.warn("IAS: Unable to load skin: {}", entry, t);
+            AuthLog.expected(LOGGER, "Unable to load skin for " + entry, t);
 
             // Return null.
             return null;
@@ -894,7 +933,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
                             needsTokenFallback = true;
                             NAME_CHANGE_TOKEN_QUEUE.putIfAbsent(uuid, checkAccount);
                         } else {
-                            LOGGER.warn("IAS: Unable to check public name-change availability for {}.", checkAccount, error);
+                            AuthLog.expected(LOGGER, "Unable to check public name-change availability for " + checkAccount.name(), error);
                             NAME_CHANGES.put(uuid, NameChangeState.UNKNOWN);
                             ChecksCache.putNameChange(uuid, NameChangeState.UNKNOWN.name());
                             usernameCheckCompleted++;
@@ -1215,7 +1254,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             synchronized (HYPIXEL_LOCK) {
                 if (error != null || result == null) {
                     Throwable cause = error != null ? unwrapError(error) : new IllegalStateException("No Hypixel result");
-                    LOGGER.warn("IAS: Unable to check Hypixel ban status for {}.", account.name(), cause);
+                    AuthLog.expected(LOGGER, "Unable to check Hypixel ban status for " + account.name(), cause);
                     HypixelBanResult err = HypixelBanResult.error(describeError(cause));
                     HYPIXEL_BANS.put(uuid, err);
                     ChecksCache.putHypixelBan(uuid, err);

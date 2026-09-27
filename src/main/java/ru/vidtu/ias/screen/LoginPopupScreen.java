@@ -40,6 +40,7 @@ import ru.vidtu.ias.auth.LoginData;
 import ru.vidtu.ias.auth.handlers.LoginHandler;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.platform.IStonecutter;
+import ru.vidtu.ias.utils.AuthLog;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -507,10 +508,11 @@ final class LoginPopupScreen extends Screen implements LoginHandler {
         // Bruh.
         assert this.minecraft != null;
 
-        // Log it.
-        LOGGER.error("IAS: Login error.", error);
-        System.err.println("IAS: Login error: " + error);
-        error.printStackTrace(System.err);
+        if (AuthLog.expectedFailure(error)) {
+            AuthLog.expected(LOGGER, "Login failed", error);
+        } else {
+            AuthLog.unexpected(LOGGER, "Login error", error);
+        }
 
         // Skip if not current screen.
         if (this != this.currentScreen()) return;

@@ -49,11 +49,13 @@ import ru.vidtu.ias.config.IASStorage;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.crypt.PasswordCrypt;
 import ru.vidtu.ias.platform.IStonecutter;
+import ru.vidtu.ias.utils.AuthLog;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -338,8 +340,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         } else {
             this.pathInput = new PopupBox(this.font, inputX, inputY, PATH_WIDTH, 20, this.pathInput,
                     Component.translatable("ias.cookie.path.hint"), this::importCookies, false);
-            this.pathInput.setHint(Component.literal("C:\\alts\\account.txt").withStyle(ChatFormatting.DARK_GRAY));
+            this.pathInput.setHint(Component.literal(IAS.importDirectory().toString()).withStyle(ChatFormatting.DARK_GRAY));
             this.pathInput.setMaxLength(512);
+            if (this.savedPath.isBlank()) {
+                this.savedPath = IAS.importDirectory().toString();
+            }
             if (!this.savedPath.isBlank()) {
                 this.pathInput.setValue(this.savedPath);
             }
@@ -416,8 +421,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 return;
             }
             raw = this.pathInput.getValue().strip();
-            if (raw.isBlank()) return;
+            if (raw.isBlank()) {
+                this.importFromFolder(IAS.importDirectory());
+                return;
+            }
             this.savedPath = raw;
+            Path path = Path.of(unwrapPath(raw));
+            if (Files.isDirectory(path)) {
+                this.importFromFolder(path);
+                return;
+            }
         }
 
         this.importing = true;
@@ -437,6 +450,26 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         IAS.executor().execute(() -> this.startCreateFromSource(source, fromPath, this));
     }
 
+    void importFromFolder(Path dir) {
+        List<String> files;
+        try {
+            IAS.ensureImportDirectory();
+            files = IAS.listImportFiles(dir);
+        } catch (Throwable t) {
+            this.error(new FriendlyException("Unable to read import folder: " + dir, t, "ias.error.cookie.file"));
+            return;
+        }
+        if (files.isEmpty()) {
+            synchronized (this.lock) {
+                this.stage = Component.translatable("ias.cookie.folder.empty", dir.toAbsolutePath().toString()).withStyle(ChatFormatting.YELLOW);
+                this.label = null;
+                this.error = 0.0F;
+            }
+            return;
+        }
+        this.importCookieFiles(files);
+    }
+
     private void importCookieFiles(List<String> sources) {
         assert this.minecraft != null;
         if (this.crypt == null || this.importing || sources.isEmpty()) return;
@@ -453,7 +486,83 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         //?} else
         /*this.init(this.minecraft, this.width, this.height);*/
 
-        IAS.executor().execute(() -> this.importCookieFileAt(this.selectedCookieFiles, 0, 0, 0, 0, 0));
+        IAS.executor().execute(() -> {
+            List<String> records = new ArrayList<>();
+            int readFailed = 0;
+            for (String source : sources) {
+                try {
+                    records.addAll(CookieParser.splitRecords(CookieParser.readText(Path.of(unwrapPath(source)))));
+                } catch (Throwable t) {
+                    readFailed++;
+                    AuthLog.expected(LOGGER, "Unable to read " + source, t);
+                }
+            }
+            if (records.isEmpty()) {
+                this.error(new FriendlyException("No cookie accounts found in the selected files.", "ias.error.cookie.invalid"));
+                return;
+            }
+            this.importTextRecords(records, 0, 0, readFailed, 0, 0, this);
+        });
+    }
+
+    private void importTextRecords(List<String> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, CreateHandler handler) {
+        if (this.closed) {
+            return;
+        }
+        if (index >= records.size()) {
+            this.finishCookieFileImport(imported, failed, duplicate, records.size());
+            return;
+        }
+
+        int number = index + 1;
+        this.stage(Component.translatable("ias.cookie.multi.progress", number, records.size()).withStyle(ChatFormatting.YELLOW));
+        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
+        this.startCreateFromSource(records.get(index), false, new CreateHandler() {
+            @Override
+            public boolean cancelled() {
+                return CookiePopupScreen.this.closed || handler.cancelled();
+            }
+
+            @Override
+            public void stage(String stage, Object... args) {
+                handler.stage(stage, args);
+            }
+
+            @Override
+            public void success(MicrosoftAccount account) {
+                future.complete(account);
+            }
+
+            @Override
+            public void error(Throwable error) {
+                future.completeExceptionally(error);
+            }
+        });
+
+        future.whenCompleteAsync((account, error) -> {
+            if (this.closed) {
+                return;
+            }
+            if (error != null || account == null) {
+                if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
+                    int attempt = rateLimitRetries + 1;
+                    this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + records.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
+                    this.scheduleTextRecordImport(records, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+                    return;
+                }
+                AuthLog.expected(LOGGER, "Cookie account " + number + "/" + records.size() + " failed", error);
+                this.scheduleTextRecordImport(records, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                return;
+            }
+
+            boolean wasDuplicate = this.storeImportedAccount(account);
+            this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+        }, IAS.executor());
+    }
+
+    private void scheduleTextRecordImport(List<String> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs, CreateHandler handler) {
+        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
+                .execute(() -> this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, handler));
     }
 
     private void importCookieFileAt(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries) {
@@ -501,7 +610,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     this.scheduleCookieFileImport(sources, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS);
                     return;
                 }
-                LOGGER.warn("IAS: Cookie file {}/{} failed during batch import: {}", number, sources.size(), sources.get(index), error);
+                AuthLog.expected(LOGGER, "Cookie file " + number + "/" + sources.size() + " failed: " + sources.get(index), error);
                 this.scheduleCookieFileImport(sources, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS);
                 return;
             }
@@ -565,13 +674,25 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             final String text;
             if (fromPath) {
                 try {
-                    text = Files.readString(Path.of(unwrapPath(source)));
+                    text = CookieParser.readText(Path.of(unwrapPath(source)));
                 } catch (java.io.IOException e) {
                     createHandler.error(new FriendlyException("Unable to read cookie file: " + source, e, "ias.error.cookie.file"));
                     return;
                 }
             } else {
                 text = source;
+            }
+
+            List<String> records = CookieParser.splitRecords(text);
+            if (records.size() > 1) {
+                this.importTextRecords(records, 0, 0, 0, 0, 0, createHandler);
+                return;
+            }
+
+            List<String> tokens = TokenImporter.extractValues(text);
+            if (tokens.size() > 1) {
+                this.importTokenValues(tokens, 0, 0, 0, 0, createHandler);
+                return;
             }
 
             try {
@@ -603,12 +724,6 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     createHandler.error(cookieError);
                     return;
                 }
-            }
-
-            List<String> tokens = TokenImporter.extractValues(text);
-            if (tokens.size() > 1) {
-                this.importTokenValues(tokens, 0, 0, 0, 0, createHandler);
-                return;
             }
 
             TokenImporter.importText(this.crypt, text, createHandler);
@@ -647,7 +762,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
             @Override
             public void error(Throwable error) {
-                LOGGER.warn("IAS: Token {}/{} failed during batch import.", number, tokens.size(), error);
+                AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
                 CookiePopupScreen.this.importTokenValues(tokens, index + 1, imported, failed + 1, duplicate, handler);
             }
         });
@@ -925,9 +1040,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
     @Override
     public void error(Throwable error) {
-        LOGGER.error("IAS: Cookie import error.", error);
-        System.err.println("IAS: Cookie import error: " + error);
-        error.printStackTrace(System.err);
+        if (AuthLog.expectedFailure(error)) {
+            AuthLog.expected(LOGGER, "Cookie import failed", error);
+        } else {
+            AuthLog.unexpected(LOGGER, "Cookie import error", error);
+        }
         assert this.minecraft != null;
 
         if (this.pathInput != null) {
