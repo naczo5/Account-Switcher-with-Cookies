@@ -39,7 +39,10 @@ final class ProxyTunnel {
     }
 
     static Socket connect(String spec, String targetHost, int targetPort, int connectTimeoutMs, int readTimeoutMs) throws IOException {
-        ParsedProxy proxy = ParsedProxy.parse(spec);
+        return connect(ParsedProxy.parse(spec), targetHost, targetPort, connectTimeoutMs, readTimeoutMs);
+    }
+
+    static Socket connect(ParsedProxy proxy, String targetHost, int targetPort, int connectTimeoutMs, int readTimeoutMs) throws IOException {
         Socket socket = new Socket();
         socket.connect(new InetSocketAddress(proxy.host, proxy.port), connectTimeoutMs);
         socket.setSoTimeout(readTimeoutMs);

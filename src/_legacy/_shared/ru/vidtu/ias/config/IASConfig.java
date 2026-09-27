@@ -184,9 +184,53 @@ public final class IASConfig {
      * Optional SOCKS5 or HTTP CONNECT proxy used for Hypixel ban-check joins.
      * Examples: {@code 127.0.0.1:1080}, {@code socks5://user:pass@host:1080},
      * {@code http://user:pass@host:8080}. Empty means join from this machine's IP.
+     * Prefer the {@code liquidProxy*} fields if you use LiquidProxy.
      */
     @Nullable
     public static String hypixelCheckProxy = "";
+
+    /**
+     * LiquidProxy dashboard host, e.g. {@code dedicated.na-ord.liquidproxy.net}
+     * or {@code dedicated.na-ord.liquidproxy.net:1080}.
+     */
+    @Nullable
+    public static String liquidProxyHost = "";
+
+    /**
+     * LiquidProxy SOCKS/HTTP port. Ignored when the host string already has {@code :port}.
+     */
+    public static int liquidProxyPort = 1080;
+
+    /**
+     * LiquidProxy Proxy Manager username.
+     */
+    @Nullable
+    public static String liquidProxyUsername = "";
+
+    /**
+     * LiquidProxy Proxy Manager password.
+     */
+    @Nullable
+    public static String liquidProxyPassword = "";
+
+    /**
+     * {@code socks5} (default) or {@code http}.
+     */
+    @Nullable
+    public static String liquidProxyType = "socks5";
+
+    /**
+     * Dashboard route hostname for vanilla server-list joins
+     * (the copy-paste link from LiquidProxy Routes). Example:
+     * {@code something.na-ord.liquidproxy.net}.
+     */
+    @Nullable
+    public static String liquidProxyRoute = "";
+
+    /**
+     * Route listen port, {@code 25565} by default.
+     */
+    public static int liquidProxyRoutePort = 25565;
 
     /**
      * Optional Hypixel API key ({@code https://developer.hypixel.net}) used to
@@ -277,7 +321,8 @@ public final class IASConfig {
             GSON.fromJson(json, IASConfig.class);
 
             // Rewrite so new keys (proxy, API key, etc.) show up in the file.
-            if (!json.has("hypixelCheckProxy") || !json.has("hypixelApiKey")) {
+            if (!json.has("hypixelCheckProxy") || !json.has("hypixelApiKey")
+                    || !json.has("liquidProxyHost") || !json.has("liquidProxyRoute")) {
                 save(path);
             }
 

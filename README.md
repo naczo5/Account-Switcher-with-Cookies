@@ -96,12 +96,20 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 **A:** Localts tokens and session cookies expire or get revoked. Export a fresh alt from Localts and import again.
 
 **Q:** Will Check Hypixel IP-ban my main?  
-**A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, put a SOCKS5/HTTP proxy in `config/nfaswitcher/ias.json`:
+**A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, use LiquidProxy in `config/nfaswitcher/ias.json`:
 
 ```json
-"hypixelCheckProxy": "socks5://user:pass@host:1080",
-"hypixelApiKey": "your-key-from-developer.hypixel.net"
+"liquidProxyHost": "dedicated.na-ord.liquidproxy.net",
+"liquidProxyPort": 1080,
+"liquidProxyUsername": "your-proxy-manager-user",
+"liquidProxyPassword": "your-proxy-manager-pass",
+"liquidProxyType": "socks5",
+"liquidProxyRoute": "paste-dashboard-route.na-ord.liquidproxy.net",
+"hypixelApiKey": ""
 ```
+
+- **Host + user/pass** — Proxy Manager credentials. Ban checks SOCKS5 through LiquidProxy to `mc.hypixel.net`.
+- **Route** — the copy-paste join link from the dashboard. Direct Play rewrites Hypixel joins onto this so you don't connect from your IP.
 
 `hypixelApiKey` is optional and only used to read package rank *before* joining. If Hypixel returns an IP/network block, remaining accounts are not joined.
 

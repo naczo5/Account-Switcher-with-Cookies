@@ -29,6 +29,7 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.vidtu.ias.auth.hypixel.LiquidProxy;
 import ru.vidtu.ias.utils.DirectPlay;
 
 //? if >=26.1 {
@@ -119,6 +120,21 @@ public final class DirectPlayScreen extends Screen {
                 .bounds(this.width / 2 - 100, this.height / 2 + 12, 200, 20)
                 .build());
 
+        if (LiquidProxy.routeConfigured()) {
+            Button route = Button.builder(Component.translatable("ias.directPlay.liquidProxyRoute"), btn -> {
+                this.address.setValue(LiquidProxy.joinAddress());
+                this.status = Component.translatable("ias.directPlay.liquidProxyRoute.filled");
+                this.statusColor = 0xFF_AA_FF_AA;
+                if (this.join != null) {
+                    this.join.active = ServerAddress.isValidAddress(this.address.getValue().trim());
+                }
+            })
+                    .bounds(this.width / 2 - 100, this.height / 2 + 36, 200, 20)
+                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.liquidProxyRoute.tip", LiquidProxy.joinAddress())))
+                    .build();
+            this.addRenderableWidget(route);
+        }
+
         // Add server-list fallback button.
         Button serverList = Button.builder(Component.translatable("ias.directPlay.serverList"),
                         btn -> DirectPlay.openServerList(this.minecraft, this))
@@ -151,7 +167,8 @@ public final class DirectPlayScreen extends Screen {
      */
     private void doJoin() {
         assert this.minecraft != null;
-        String ip = this.address.getValue().trim();
+        String ip = LiquidProxy.rewriteJoinAddress(this.address.getValue().trim());
+        this.address.setValue(ip);
         if (!ServerAddress.isValidAddress(ip)) {
             this.status = Component.translatable("ias.directPlay.invalid").withStyle(ChatFormatting.RED);
             this.statusColor = 0xFF_FF_55_55;
@@ -216,17 +233,26 @@ public final class DirectPlayScreen extends Screen {
         /*super.render(graphics, mouseX, mouseY, delta);*/
 
         // Render title.
+        Component proxyHint = LiquidProxy.routeConfigured()
+                ? Component.translatable("ias.directPlay.liquidProxy.hint.route")
+                : Component.translatable("ias.directPlay.liquidProxy.hint.socks");
         //? if >=26.1 {
         graphics.centeredText(this.font, this.title, this.width / 2, this.height / 2 - 60, 0xFF_FF_FF_FF);
+        if (LiquidProxy.available()) {
+            graphics.centeredText(this.font, proxyHint, this.width / 2, this.height / 2 - 72, 0xFF_AA_AA_AA);
+        }
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, this.width / 2, this.height / 2 - 60, 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, this.width / 2, this.height / 2 - 60, 0xFF_FF_FF_FF);
+        if (LiquidProxy.available()) {
+            graphics.drawCenteredString(this.font, proxyHint, this.width / 2, this.height / 2 - 72, 0xFF_AA_AA_AA);
+        }*/
 
         // Render status line.
         if (!this.status.getString().isBlank()) {
             //? if >=26.1 {
-            graphics.centeredText(this.font, this.status, this.width / 2, this.height / 2 + 38, this.statusColor);
+            graphics.centeredText(this.font, this.status, this.width / 2, this.height / 2 + 62, this.statusColor);
             //?} else
-            /*graphics.drawCenteredString(this.font, this.status, this.width / 2, this.height / 2 + 38, this.statusColor);*/
+            /*graphics.drawCenteredString(this.font, this.status, this.width / 2, this.height / 2 + 62, this.statusColor);*/
         }
     }
 }

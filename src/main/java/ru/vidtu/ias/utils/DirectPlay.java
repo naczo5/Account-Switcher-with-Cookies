@@ -28,6 +28,7 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.vidtu.ias.auth.hypixel.LiquidProxy;
 import ru.vidtu.ias.screen.DirectPlayScreen;
 
 import java.lang.reflect.Field;
@@ -116,6 +117,7 @@ public final class DirectPlay {
      * @throws Exception If the connect entrypoint cannot be invoked
      */
     public static String joinServer(Minecraft minecraft, Screen parent, String ip) throws Exception {
+        ip = LiquidProxy.rewriteJoinAddress(ip);
         //? if >=1.20.5 {
         ServerData data = new ServerData(ip, ip, ServerData.Type.OTHER);
         //?} else

@@ -85,12 +85,6 @@ public final class HypixelBanChecker {
     /**
      * Checks whether the given account is banned on Hypixel.
      *
-     * @param username    Minecraft username
-     * @param uuid        Profile UUID
-     * @param accessToken Minecraft services access token
-     * @return Ban check result
-     */
-    /**
      * {@code null} if a Hypixel login is allowed (proxy or safe rank).
      * Otherwise a skipped result — do not authenticate or join.
      */
@@ -103,10 +97,21 @@ public final class HypixelBanChecker {
     }
 
     public static boolean hasProxy() {
+        if (LiquidProxy.available()) {
+            return true;
+        }
         String proxy = IASConfig.hypixelCheckProxy;
         return proxy != null && !proxy.isBlank();
     }
 
+    /**
+     * Checks whether the given account is banned on Hypixel.
+     *
+     * @param username    Minecraft username
+     * @param uuid        Profile UUID
+     * @param accessToken Minecraft services access token
+     * @return Ban check result
+     */
     public static HypixelBanResult checkBan(String username, UUID uuid, String accessToken) {
         if (username == null || username.trim().isEmpty() || "Unknown".equalsIgnoreCase(username)
                 || accessToken == null || accessToken.trim().isEmpty()) {
@@ -116,13 +121,23 @@ public final class HypixelBanChecker {
         if (skipped != null) {
             return skipped;
         }
+        String uuidStr = uuidToUndashed(uuid);
+        if (LiquidProxy.routeConfigured() && !LiquidProxy.credentialsConfigured()) {
+            try {
+                return tryHypixelConnect(LiquidProxy.handshakeHost("mc.hypixel.net"), username, uuidStr, accessToken, null);
+            } catch (Exception e) {
+                String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                return HypixelBanResult.error("LiquidProxy route failed: " + detail);
+            }
+        }
         boolean viaProxy = hasProxy();
         String proxy = IASConfig.hypixelCheckProxy;
-        String uuidStr = uuidToUndashed(uuid);
         Exception lastError = null;
         for (String host : HYPIXEL_HOSTS) {
             try {
-                return tryHypixelConnect(host, username, uuidStr, accessToken, viaProxy ? proxy.trim() : null);
+                return tryHypixelConnect(host, username, uuidStr, accessToken,
+                        viaProxy && !LiquidProxy.credentialsConfigured() && proxy != null && !proxy.isBlank()
+                                ? proxy.trim() : null);
             } catch (Exception e) {
                 lastError = e;
             }
@@ -164,7 +179,11 @@ public final class HypixelBanChecker {
             OutputStream rawOut = socket.getOutputStream();
             StreamIO io = new StreamIO(rawIn, rawOut);
 
-            io.writePacket(buildHandshake(host), 0x00);
+            String handshakeHost = LiquidProxy.handshakeHost(host);
+            int handshakePort = LiquidProxy.credentialsConfigured() || (proxySpec != null && !proxySpec.isBlank())
+                    ? HYPIXEL_PORT
+                    : (LiquidProxy.routeConfigured() ? LiquidProxy.routePort() : HYPIXEL_PORT);
+            io.writePacket(buildHandshake(handshakeHost, handshakePort), 0x00);
             io.writePacket(buildLoginStart(username), 0x00);
 
             while (true) {
@@ -196,6 +215,9 @@ public final class HypixelBanChecker {
     }
 
     private static Socket openSocket(String host, String proxySpec) throws IOException {
+        if (LiquidProxy.available()) {
+            return LiquidProxy.open(host, HYPIXEL_PORT, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+        }
         if (proxySpec == null || proxySpec.isBlank()) {
             Socket socket = new Socket();
             socket.connect(new InetSocketAddress(host, HYPIXEL_PORT), CONNECT_TIMEOUT_MS);
@@ -205,12 +227,12 @@ public final class HypixelBanChecker {
         return ProxyTunnel.connect(proxySpec, host, HYPIXEL_PORT, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
     }
 
-    private static byte[] buildHandshake(String address) throws IOException {
+    private static byte[] buildHandshake(String address, int port) throws IOException {
         ByteArrayOutputStream payload = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(payload);
         McProtocolIO.writeVarInt(out, HYPIXEL_PROTOCOL);
         McProtocolIO.writeString(out, address);
-        McProtocolIO.writeUnsignedShort(out, HYPIXEL_PORT);
+        McProtocolIO.writeUnsignedShort(out, port);
         McProtocolIO.writeVarInt(out, 2);
         return payload.toByteArray();
     }

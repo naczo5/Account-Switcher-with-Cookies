@@ -90,8 +90,13 @@ public final class IAS {
 
             README.txt is ignored.
 
-            Hypixel checker proxy / API key live next to this folder:
+            Hypixel / LiquidProxy settings live next to this folder:
             config/nfaswitcher/ias.json
+              liquidProxyHost      dedicated.na-ord.liquidproxy.net
+              liquidProxyPort      1080
+              liquidProxyUsername  (Proxy Manager user)
+              liquidProxyPassword  (Proxy Manager pass)
+              liquidProxyRoute     (dashboard route hostname for joins)
             """;
 
     /**
