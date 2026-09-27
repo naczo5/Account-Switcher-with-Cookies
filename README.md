@@ -28,7 +28,8 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 | **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
 | **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\CookieIAS-3.2+1.8.9-forge.jar` |
 
-**26.2** supports both standard Fabric and Lunar Fabric profiles. **1.8.9 Forge** is a standard Forge build and can be opened from the title-screen button or the `O` keybind.
+If you need cookie alts on Lunar Client 1.8.9,
+check out my injectable tool here https://github.com/naczo5/lunar-cookies
 
 ## Dependencies
 
