@@ -1112,6 +1112,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     }
 
     void checkAllHypixelBans(@Nullable HypixelCheckProgress progress) {
+        IAS.reloadConfig();
         synchronized (HYPIXEL_LOCK) {
             hypixelCheckCancelled = false;
             hypixelProgress = progress;

@@ -447,6 +447,17 @@ public final class IAS {
     }
 
     /**
+     * Re-reads {@code config/nfaswitcher/ias.json} so proxy edits apply without a full restart.
+     */
+    public static void reloadConfig() {
+        try {
+            loadConfig();
+        } catch (Throwable t) {
+            LOGGER.warn("IAS: Unable to reload ias.json.", t);
+        }
+    }
+
+    /**
      * Delegates to {@link IASConfig#save(Path)} with {@link #configDirectory}.
      *
      * @throws RuntimeException If unable to save the config

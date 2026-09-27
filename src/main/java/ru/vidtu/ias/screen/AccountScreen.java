@@ -188,6 +188,7 @@ public final class AccountScreen extends Screen {
     protected void init() {
         // Bruh.
         assert this.minecraft != null;
+        IAS.reloadConfig();
 
         // Disabled check.
         if (IAS.disabled()) {
