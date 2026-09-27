@@ -145,10 +145,10 @@ public final class HypixelBanChecker {
 
     private static String skipReason(HypixelRankLookup.Kind rank) {
         return switch (rank) {
-            case UNRANKED -> "Skipped local Hypixel login: no-rank accounts can IP-ban this IP. Set hypixelCheckProxy in ias.json (SOCKS5) to check them.";
-            case UNKNOWN -> "Skipped local Hypixel login: rank unknown (set hypixelApiKey or hypixelCheckProxy in ias.json).";
-            case RANKED -> "Skipped local Hypixel login (ranked direct joins disabled).";
-            case NEVER_JOINED -> "Skipped local Hypixel login (never-joined direct joins disabled).";
+            case UNRANKED -> "No-rank — not joined from this IP.";
+            case UNKNOWN -> "Rank unknown — not joined from this IP.";
+            case RANKED -> "Ranked direct joins disabled.";
+            case NEVER_JOINED -> "Never-joined direct joins disabled.";
         };
     }
 

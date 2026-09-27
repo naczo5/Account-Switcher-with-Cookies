@@ -37,7 +37,7 @@ import java.util.function.Supplier;
  */
 final class HypixelCheckPopupScreen extends Screen implements AccountList.HypixelCheckProgress {
     private static final int PANEL_HALF_WIDTH = 125;
-    private static final int PANEL_HALF_HEIGHT = 60;
+    private static final int PANEL_HALF_HEIGHT = 72;
 
     private final Screen parent;
     private final AccountList list;
@@ -69,7 +69,7 @@ final class HypixelCheckPopupScreen extends Screen implements AccountList.Hypixe
             this.statusLabel = MultiLineLabel.create(this.font, Component.translatable("ias.hypixel.progress.preparing"), 220);
         }
 
-        this.dismissButton = new PopupButton(this.width / 2 - 37, this.height / 2 + 44, 74, 20,
+        this.dismissButton = new PopupButton(this.width / 2 - 37, this.height / 2 + 50, 74, 20,
                 this.dismissLabel(), btn -> this.onClose(), Supplier::get);
         this.clearWidgets();
         this.addRenderableWidget(this.dismissButton);
@@ -96,10 +96,18 @@ final class HypixelCheckPopupScreen extends Screen implements AccountList.Hypixe
     public void onHypixelProgress(int completed, int total, String accountName, Component stage) {
         this.completed = completed;
         this.total = total;
-        this.statusLabel = MultiLineLabel.create(this.font,
-                Component.translatable("ias.hypixel.progress.account", completed + 1, total, accountName)
-                        .append("\n")
-                        .append(stage), 220);
+        this.statusLabel = MultiLineLabel.create(this.font, this.statusText(completed, total, accountName, stage), 210);
+    }
+
+    private Component statusText(int completed, int total, String accountName, Component stage) {
+        if (accountName == null || accountName.isBlank() || total <= 0) {
+            return stage;
+        }
+        String name = accountName.length() > 16 ? accountName.substring(0, 16) : accountName;
+        int current = Math.min(total, Math.max(completed, 1));
+        return Component.translatable("ias.hypixel.progress.account", Integer.toString(current), Integer.toString(total), name)
+                .append("\n")
+                .append(stage);
     }
 
     @Override
@@ -127,16 +135,16 @@ final class HypixelCheckPopupScreen extends Screen implements AccountList.Hypixe
         pose.pushMatrix();
         pose.scale(2.0F, 2.0F);
         //? if >=26.1 {
-        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 56 / 2, 0xFF_FF_FF_FF);
+        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 64 / 2, 0xFF_FF_FF_FF);
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 56 / 2, 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 64 / 2, 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
-        IStonecutter.renderMultilineLabelCentered(this.statusLabel, graphics, this.width / 2, this.height / 2 - 18);
+        IStonecutter.renderMultilineLabelCentered(this.statusLabel, graphics, this.width / 2, this.height / 2 - 22);
 
-        int barX = this.width / 2 - 100;
-        int barY = this.height / 2 + 18;
-        int barW = 200;
+        int barX = this.width / 2 - 90;
+        int barY = this.height / 2 + 22;
+        int barW = 180;
         int barH = 8;
         graphics.fill(barX - 1, barY - 1, barX + barW + 1, barY + barH + 1, 0xFF_40_40_40);
         graphics.fill(barX, barY, barX + barW, barY + barH, 0xFF_10_10_10);

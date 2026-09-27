@@ -1238,16 +1238,17 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
         HypixelBanResult unsafe = HypixelBanChecker.skipIfUnsafe(account.uuid());
         CompletableFuture<HypixelBanResult> check;
+        int current = hypixelCheckCompleted + 1;
         if (unsafe != null) {
-            this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+            this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
                     Component.translatable("ias.hypixel.progress.skipped"));
             check = CompletableFuture.completedFuture(unsafe);
         } else {
-            this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+            this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
                     Component.translatable("ias.hypixel.progress.auth"));
             check = this.loginForBanCheck(account)
                     .thenApplyAsync(data -> {
-                        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                        this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
                                 Component.translatable("ias.hypixel.progress.hypixel"));
                         return HypixelBanChecker.checkBan(data.name(), data.uuid(), data.token());
                     }, IAS.executor());
@@ -1277,8 +1278,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
                 HYPIXEL_PHASES.put(uuid, HypixelBanPhase.UNKNOWN);
                 if (stopQueue && !HYPIXEL_QUEUE.isEmpty()) {
                     LOGGER.warn("IAS: Stopping Hypixel checks after IP/network ban signal from {}.", account.name());
-                    HypixelBanResult rest = HypixelBanResult.skipped(
-                            "Stopped: Hypixel reported an IP/network block. Remaining accounts were not joined from this IP.");
+                    HypixelBanResult rest = HypixelBanResult.skipped("Stopped after an IP/network block.");
                     for (UUID left : new java.util.ArrayList<>(HYPIXEL_QUEUE.keySet())) {
                         HYPIXEL_BANS.put(left, rest);
                         ChecksCache.putHypixelBan(left, rest);
