@@ -2,15 +2,28 @@
 
 # Account Switcher with Cookies (Forge / Fabric / Lunar / Localts)
 
-[![Release](https://img.shields.io/github/v/release/naczo5/Account-Switcher-with-Cookies?include_prereleases&color=238636&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
-[![Downloads](https://img.shields.io/github/downloads/naczo5/Account-Switcher-with-Cookies/total?color=1f6feb&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
-[![Stars](https://img.shields.io/github/stars/naczo5/Account-Switcher-with-Cookies?color=e3b341&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/stargazers)
+[![Changelog](https://img.shields.io/badge/changelog-3.2.1-1f6feb?logo=github)](CHANGELOG.md)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](LICENSE)
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.8.9%20%7C%201.21.11%20%7C%2026.2-brightgreen)](#supported-versions)
+[![Stars](https://img.shields.io/github/stars/antlmao1337/Account-Switcher-with-Cookies?color=e3b341&logo=github)](https://github.com/antlmao1337/Account-Switcher-with-Cookies/stargazers)
 
-A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) with support for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
+In-game Microsoft account switching for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alts. Add accounts from Netscape dumps, checker exports, refresh tokens, or session tokens without restarting Minecraft.
 
-## What this fork adds
+See **[CHANGELOG.md](CHANGELOG.md)** for what this repo actually changed.
+
+Based on [CookieIAS](https://github.com/naczo5/Account-Switcher-with-Cookies) / [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher).
+
+## What's new in this repo (3.2.1)
+
+- **Checker dump import** — one `.txt` with many `Source:` / Netscape / `--------` blocks becomes one account per block. Dead alts fail individually.
+- **Bulk Import** — drop files in `.minecraft/config/nfaswitcher/import` and import them from the account manager.
+- **Live session swap** — logging into a cookie alt actually becomes that account (mixin override of `getUser` / `getGameProfile`).
+- **HttpOnly Netscape cookies** — `#HttpOnly_` lines are kept (`__Host-MSAAUTH`, `MSPAuth`, `WLSSID`, …).
+- **Quiet auth failures** — expired cookies no longer dump Microsoft HTML into `latest.log`.
+
+Full list: [CHANGELOG.md](CHANGELOG.md).
+
+## Features
 
 - **Localts import** — single-line `M.C…` Microsoft refresh tokens (Localts export format) are detected and exchanged for a full Minecraft session.
 - **Netscape cookie import** — tab-separated browser cookie exports with `__Host-MSAAUTH` / `__Host-MSAAUTHP` still work via Xbox SISU.
@@ -59,14 +72,17 @@ See [docs/LUNAR.md](docs/LUNAR.md) for Lunar Fabric setup and troubleshooting.
    - **File Path** — path to your `.txt` alt file, e.g. `C:\alts\myaccount.txt`, or click **...** to open the OS file picker (multiple files are allowed)
    - **Paste** — paste the full cookie file into the multi-line text box, or leave it empty and click **Import** to use the clipboard
 
-If import fails, check `latest.log` in your instance folder and search for `IAS/Cookie`.
+For a dump with many alts: put the `.txt` in `.minecraft/config/nfaswitcher/import`, open the switcher, and click **Bulk Import**. Each `Source:` / Netscape / `--------` block becomes its own account.
+
+If import fails, check `latest.log` in your instance folder and search for `IAS`.
 
 ### Supported file formats
 
 | Format | What it looks like | Notes |
 |--------|-------------------|-------|
-| **Localts** | One line starting with `M.C`, often ending in `MsaArtifacts` | Primary format this fork targets |
-| **Netscape** | Tab-separated lines with `.login.live.com` domains | Full browser cookie jar |
+| **Checker dump** | `Source:` / `Email:` / `Username:` then Netscape cookies, separated by `--------` | One file, many alts — Bulk Import splits each block |
+| **Localts** | One line starting with `M.C`, often ending in `MsaArtifacts` | Refresh-token export |
+| **Netscape** | Tab-separated lines with `.login.live.com` domains, including `#HttpOnly_` | Full browser cookie jar |
 | **Cookie header** | Semicolon-separated `name=value` pairs on one or more lines | Pasted from devtools |
 
 Place personal alt files in a local `cookies/` folder (gitignored) — **never** commit them.
