@@ -291,8 +291,9 @@ final class ProxyTunnel {
         private static String percentDecode(String value) {
             try {
                 // '+' is a literal plus in userinfo, not a space — protect it first.
-                return java.net.URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8);
-            } catch (IllegalArgumentException e) {
+                // String charset name (not Charset) keeps this Java 8 compatible for the 1.8.9 backport.
+                return java.net.URLDecoder.decode(value.replace("+", "%2B"), "UTF-8");
+            } catch (Exception e) {
                 return value;
             }
         }
