@@ -102,7 +102,12 @@ public final class MainMenuScreens {
                 || simple.contains("Popup")
                 || simple.contains("Account")
                 || simple.contains("Config")
-                || simple.contains("Cookie");
+                || simple.contains("Cookie")
+                || simple.contains("Pause")
+                || simple.contains("Ingame")
+                || simple.contains("InGame")
+                || simple.contains("GameMenu")
+                || simple.contains("Death");
     }
 
     private static boolean hasMainMenuButton(GuiScreen screen) {

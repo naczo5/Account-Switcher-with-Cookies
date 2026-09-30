@@ -30,7 +30,7 @@ Full list: [CHANGELOG.md](CHANGELOG.md).
 - **Token login** — import Minecraft access tokens from files or paste.
 - **Multi-file cookie import** — the file picker can select several alt files at once.
 - **Lunar Client support** — keyboard shortcut (`O` by default) and Mod Menu entry work on Lunar's custom main menu where the vanilla title button does not appear.
-- **Direct Play bypass buttons** — Singleplayer world list and Multiplayer direct-connect (server IP) shortcuts inside the switcher and on menus to bypass Lunar's account-check gate.
+- **Direct Play bypass buttons** — Singleplayer world list and Multiplayer direct-connect (server IP) shortcuts on the account switcher screen, to bypass Lunar's account-check gate.
 - **No encryption prompt on cookie import** — cookie imports skip the Crypt selection screen and are stored unencrypted.
 
 ## Supported versions

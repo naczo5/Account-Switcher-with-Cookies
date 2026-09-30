@@ -59,7 +59,6 @@ import ru.vidtu.ias.extension.MinecraftExtension;
 import ru.vidtu.ias.mixins.MinecraftAccessor;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.screen.AccountScreen;
-import ru.vidtu.ias.utils.DirectPlay;
 import ru.vidtu.ias.utils.Expression;
 import ru.vidtu.ias.utils.IUtils;
 import ru.vidtu.ias.utils.MainMenuScreens;
@@ -208,6 +207,11 @@ public final class IASMinecraft {
     public static void onInit(Minecraft minecraft, Screen screen, Consumer<Button> buttonAdder) {
         captureLaunchAccount(minecraft);
 
+        // Pause, death, and other in-game screens must not receive title-menu widgets.
+        // This hook runs for every screen, and main-menu detection is intentionally loose
+        // for Lunar's custom home UI.
+        if (minecraft.player != null || minecraft.level != null) return;
+
         // Add title button.
         if (IASConfig.titleButton && MainMenuScreens.isMainMenu(screen)) {
             // Calculate the position.
@@ -253,25 +257,6 @@ public final class IASMinecraft {
             button.setTooltip(Tooltip.create(button.getMessage()));
             button.setTooltipDelay(Duration.ofMillis(250L));
             buttonAdder.accept(button);
-        }
-
-        // Direct-play bypass buttons (Lunar account-check bypass).
-        // Opens the vanilla world list / direct-connect straight away, skipping
-        // the launcher's home UI that may demand a signed-in Lunar account.
-        if (IASConfig.directPlayButtons && MainMenuScreens.isMainMenu(screen)) {
-            Button singleplayer = Button.builder(Component.translatable("menu.singleplayer"),
-                            btn -> DirectPlay.openSingleplayer(minecraft, screen))
-                    .bounds(4, 4, 100, 20)
-                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.singleplayer.tip")))
-                    .build();
-            buttonAdder.accept(singleplayer);
-
-            Button multiplayer = Button.builder(Component.translatable("menu.multiplayer"),
-                            btn -> DirectPlay.openMultiplayer(minecraft, screen))
-                    .bounds(4, 28, 100, 20)
-                    .tooltip(Tooltip.create(Component.translatable("ias.directPlay.multiplayer.tip")))
-                    .build();
-            buttonAdder.accept(multiplayer);
         }
 
         // Add servers button.

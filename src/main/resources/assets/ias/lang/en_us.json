@@ -243,7 +243,7 @@
   "ias.config.closeOnLogin": "Close On Login",
   "ias.config.closeOnLogin.tip": "Close the account screen after logging in.",
   "ias.config.directPlay": "Direct Play Buttons",
-  "ias.config.directPlay.tip": "Show Singleplayer/Multiplayer shortcut buttons that bypass the launcher menu (e.g. Lunar account check). Multiplayer uses direct-connect to avoid the gated server list.",
+  "ias.config.directPlay.tip": "Show Singleplayer/Multiplayer shortcut buttons on the account switcher screen. Multiplayer uses direct-connect to avoid the gated server list.",
   "ias.directPlay.singleplayer.tip": "Open vanilla Singleplayer directly, bypassing the launcher menu.",
   "ias.directPlay.multiplayer.tip": "Open direct-connect (type a server IP and join), bypassing the launcher menu and the gated server list. Log in via IAS first for online-mode servers.",
   "ias.directPlay.address": "Server Address",

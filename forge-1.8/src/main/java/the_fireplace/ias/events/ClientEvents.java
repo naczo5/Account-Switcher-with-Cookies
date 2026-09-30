@@ -2,11 +2,8 @@ package the_fireplace.ias.events;
 
 import com.github.mrebhan.ingameaccountswitcher.tools.Config;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiButton;
-import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiMultiplayer;
 import net.minecraft.client.gui.GuiScreen;
-import net.minecraft.client.gui.GuiSelectWorld;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.resources.I18n;
 import net.minecraftforge.client.event.GuiScreenEvent;
@@ -28,22 +25,17 @@ import java.lang.reflect.Field;
  */
 public class ClientEvents {
     private static final int BUTTON_ID = 20;
-    private static final int BUTTON_SP_ID = 21;
-    private static final int BUTTON_MP_ID = 22;
 
     @SubscribeEvent
     public void guiEvent(GuiScreenEvent.InitGuiEvent.Post event) {
         GuiScreen gui = event.gui;
+        // Never inject menu widgets while a world is loaded (pause, death, etc.).
+        if (Minecraft.getMinecraft().thePlayer != null) {
+            return;
+        }
         if (MainMenuScreens.isMainMenu(gui)) {
             event.buttonList.add(new GuiButtonWithImage(BUTTON_ID, gui.width / 2 + 104,
                     (gui.height / 4 + 48) + 72 + 12, 20, 20, ""));
-            // Direct-play bypass buttons, but not on the vanilla main menu:
-            // it already has working Singleplayer/Multiplayer buttons, and the
-            // extras would just duplicate them (needed only on Lunar/custom menus).
-            if (!(gui instanceof GuiMainMenu)) {
-                event.buttonList.add(new GuiButton(BUTTON_SP_ID, 4, 4, 100, 20, I18n.format("menu.singleplayer")));
-                event.buttonList.add(new GuiButton(BUTTON_MP_ID, 4, 28, 100, 20, I18n.format("menu.multiplayer")));
-            }
         } else if (gui instanceof GuiMultiplayer) {
             event.buttonList.add(new GuiButtonWithImage(BUTTON_ID, gui.width / 2 + 158, gui.height - 30, 20, 20, ""));
         }
@@ -53,16 +45,6 @@ public class ClientEvents {
     public void onClick(GuiScreenEvent.ActionPerformedEvent event) {
         if (event.button.id == BUTTON_ID && canOpenFromScreen(event.gui)) {
             openAccountSwitcher();
-        } else if (event.button.id == BUTTON_SP_ID && MainMenuScreens.isMainMenu(event.gui)) {
-            Minecraft mc = Minecraft.getMinecraft();
-            if (mc.thePlayer == null) {
-                mc.displayGuiScreen(new GuiSelectWorld(event.gui));
-            }
-        } else if (event.button.id == BUTTON_MP_ID && MainMenuScreens.isMainMenu(event.gui)) {
-            Minecraft mc = Minecraft.getMinecraft();
-            if (mc.thePlayer == null) {
-                mc.displayGuiScreen(new GuiMultiplayer(event.gui));
-            }
         }
     }
 

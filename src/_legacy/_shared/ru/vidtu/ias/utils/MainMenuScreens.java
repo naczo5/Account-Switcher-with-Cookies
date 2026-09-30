@@ -122,7 +122,12 @@ public final class MainMenuScreens {
                 || simple.contains("Confirm")
                 || simple.contains("Popup")
                 || simple.contains("Account")
-                || simple.contains("Config");
+                || simple.contains("Config")
+                || simple.contains("Pause")
+                || simple.contains("Ingame")
+                || simple.contains("InGame")
+                || simple.contains("GameMenu")
+                || simple.contains("Death");
     }
 
     @Contract(pure = true)
@@ -154,7 +159,6 @@ public final class MainMenuScreens {
                 || simple.contains("main_menu")
                 || simple.contains("homescreen")
                 || simple.contains("home_screen")
-                || simple.equals("home")
-                || lunarLike && (simple.contains("menu") || simple.contains("screen") || simple.contains("gui"));
+                || simple.equals("home");
     }
 }
