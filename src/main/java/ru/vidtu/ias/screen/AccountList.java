@@ -19,7 +19,11 @@
 
 package ru.vidtu.ias.screen;
 
-import com.mojang.authlib.yggdrasil.ProfileResult;
+//? if >=26.3 {
+import com.mojang.authlib.services.ProfileResult;
+//?} else {
+/*import com.mojang.authlib.yggdrasil.ProfileResult;*/
+//?}
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
@@ -164,6 +168,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private static boolean hypixelWorkerRunning;
 
     /**
+     * Run epoch, bumped on every {@link #checkAllHypixelBans} start.
+     * Stale worker callbacks from a previous run carry the old epoch and must be ignored.
+     */
+    private static volatile long hypixelRunEpoch;
+
+    /**
      * Delay between Hypixel ban checks (2.5 seconds to avoid Mojang auth / Hypixel rate limits).
      */
     private static final long HYPIXEL_CHECK_DELAY_MS = 2500L;
@@ -179,6 +189,21 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     private static volatile boolean hypixelCheckCancelled;
 
     /**
+     * Join every account from this IP and wait for Continue after each one.
+     */
+    private static volatile boolean hypixelDirectOverride;
+
+    /**
+     * Override run is waiting for the Continue button.
+     */
+    private static volatile boolean hypixelAwaitContinue;
+
+    /**
+     * A login plus Hypixel connect is in flight on the worker.
+     */
+    private static volatile boolean hypixelJoinInFlight;
+
+    /**
      * Active Hypixel check progress listener.
      */
     @Nullable
@@ -187,12 +212,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     /**
      * Total accounts in the current Hypixel check run.
      */
-    private static int hypixelCheckTotal;
+    private static volatile int hypixelCheckTotal;
 
     /**
      * Accounts finished in the current Hypixel check run.
      */
-    private static int hypixelCheckCompleted;
+    private static volatile int hypixelCheckCompleted;
 
     interface UsernameCheckProgress {
         void onUsernameProgress(int completed, int total, String accountName, Component stage);
@@ -204,6 +229,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         void onHypixelProgress(int completed, int total, String accountName, Component stage);
 
         void onHypixelComplete();
+
+        /**
+         * Override mode is waiting for the user to press Continue.
+         */
+        default void onHypixelPause(boolean waiting) {
+        }
     }
 
     enum HypixelBanPhase {
@@ -631,7 +662,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     }
 
     /**
-     * Imports every cookie/token file from {@code config/nfaswitcher/import}.
+     * Imports every cookie/token file from {@code config/cookieias/import}.
      */
     void importBulk() {
         try {
@@ -1108,13 +1139,26 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
     }
 
     void checkAllHypixelBans() {
-        this.checkAllHypixelBans(null);
+        this.checkAllHypixelBans(null, false);
     }
 
     void checkAllHypixelBans(@Nullable HypixelCheckProgress progress) {
+        this.checkAllHypixelBans(progress, false);
+    }
+
+    /**
+     * @param directOverride join from this IP and pause after every account
+     */
+    void checkAllHypixelBans(@Nullable HypixelCheckProgress progress, boolean directOverride) {
         IAS.reloadConfig();
+        final long runEpoch;
         synchronized (HYPIXEL_LOCK) {
+            hypixelRunEpoch++;
+            runEpoch = hypixelRunEpoch;
             hypixelCheckCancelled = false;
+            hypixelDirectOverride = directOverride;
+            hypixelAwaitContinue = false;
+            hypixelJoinInFlight = false;
             hypixelProgress = progress;
             hypixelCheckCompleted = 0;
             HYPIXEL_QUEUE.clear();
@@ -1131,18 +1175,39 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
                 HYPIXEL_QUEUE.putIfAbsent(uuid, microsoft);
             }
             hypixelCheckTotal = HYPIXEL_QUEUE.size();
-            LOGGER.info("IAS: Starting Hypixel ban check for {} account(s).", hypixelCheckTotal);
-            this.startHypixelWorker();
+            hypixelWorkerRunning = true;
+            LOGGER.info("IAS: Starting Hypixel ban check for {} account(s). directOverride={}", hypixelCheckTotal, directOverride);
         }
-        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, "", Component.translatable("ias.hypixel.progress.preparing"));
+        IAS.executor().execute(() -> this.runNextHypixelCheck(runEpoch));
         this.refreshHypixelDisplay();
+    }
+
+    /**
+     * Continues an override run that paused after the previous account.
+     */
+    void continueHypixelCheck() {
+        final long runEpoch;
+        synchronized (HYPIXEL_LOCK) {
+            if (!hypixelAwaitContinue || hypixelCheckCancelled) {
+                return;
+            }
+            hypixelAwaitContinue = false;
+            runEpoch = hypixelRunEpoch;
+        }
+        this.notifyHypixelPause(false);
+        IAS.executor().execute(() -> this.runNextHypixelCheck(runEpoch));
     }
 
     void cancelHypixelCheck() {
         synchronized (HYPIXEL_LOCK) {
             hypixelCheckCancelled = true;
+            hypixelAwaitContinue = false;
+            hypixelRunEpoch++;
             HYPIXEL_QUEUE.clear();
             hypixelProgress = null;
+            if (!hypixelJoinInFlight) {
+                hypixelWorkerRunning = false;
+            }
         }
         LOGGER.info("IAS: Hypixel ban check cancelled.");
     }
@@ -1205,106 +1270,224 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         }
     }
 
-    private void startHypixelWorker() {
-        synchronized (HYPIXEL_LOCK) {
-            if (hypixelWorkerRunning) {
-                return;
-            }
-            hypixelWorkerRunning = true;
-        }
-        this.runNextHypixelCheck();
-    }
-
-    private void runNextHypixelCheck() {
-        if (hypixelCheckCancelled) {
-            synchronized (HYPIXEL_LOCK) {
-                hypixelWorkerRunning = false;
-            }
-            this.finishHypixelCheckRun();
+    private void runNextHypixelCheck(long runEpoch) {
+        if (IAS.executor().isShutdown()) {
             return;
         }
-
-        MicrosoftAccount account;
-        synchronized (HYPIXEL_LOCK) {
-            if (HYPIXEL_QUEUE.isEmpty()) {
+        try {
+            this.runNextHypixelCheckOnWorker(runEpoch);
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Hypixel check worker failed.", t);
+            synchronized (HYPIXEL_LOCK) {
+                if (runEpoch != hypixelRunEpoch) {
+                    return;
+                }
                 hypixelWorkerRunning = false;
-                this.finishHypixelCheckRun();
+                hypixelJoinInFlight = false;
+                hypixelAwaitContinue = false;
+            }
+            this.finishHypixelCheckRun(runEpoch);
+        }
+    }
+
+    private void runNextHypixelCheckOnWorker(long runEpoch) {
+        while (true) {
+            synchronized (HYPIXEL_LOCK) {
+                if (runEpoch != hypixelRunEpoch) {
+                    return;
+                }
+            }
+            if (hypixelCheckCancelled) {
+                synchronized (HYPIXEL_LOCK) {
+                    if (runEpoch != hypixelRunEpoch) {
+                        return;
+                    }
+                    hypixelWorkerRunning = false;
+                    hypixelJoinInFlight = false;
+                }
+                this.finishHypixelCheckRun(runEpoch);
                 return;
             }
-            UUID uuid = HYPIXEL_QUEUE.keySet().iterator().next();
-            account = HYPIXEL_QUEUE.remove(uuid);
-        }
 
-        LOGGER.info("IAS: Checking Hypixel ban for {} ({}/{}).", account.name(), hypixelCheckCompleted + 1, hypixelCheckTotal);
+            MicrosoftAccount account;
+            final int current;
+            synchronized (HYPIXEL_LOCK) {
+                if (runEpoch != hypixelRunEpoch) {
+                    return;
+                }
+                if (hypixelAwaitContinue) {
+                    return;
+                }
+                if (HYPIXEL_QUEUE.isEmpty()) {
+                    hypixelWorkerRunning = false;
+                    this.finishHypixelCheckRun(runEpoch);
+                    return;
+                }
+                UUID uuid = HYPIXEL_QUEUE.keySet().iterator().next();
+                account = HYPIXEL_QUEUE.remove(uuid);
+                current = hypixelCheckCompleted + 1;
+            }
 
-        HypixelBanResult unsafe = HypixelBanChecker.skipIfUnsafe(account.uuid());
-        CompletableFuture<HypixelBanResult> check;
-        int current = hypixelCheckCompleted + 1;
-        if (unsafe != null) {
-            this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
-                    Component.translatable("ias.hypixel.progress.skipped"));
-            check = CompletableFuture.completedFuture(unsafe);
-        } else {
+            LOGGER.info("IAS: Checking Hypixel ban for {} ({}/{}).", account.name(), current, hypixelCheckTotal);
+            HypixelBanResult unsafe = hypixelDirectOverride ? null : HypixelBanChecker.skipIfUnsafe(account.uuid());
+            if (unsafe != null) {
+                String reason = unsafe.errorMessage();
+                this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
+                        reason == null || reason.isBlank()
+                                ? Component.translatable("ias.hypixel.progress.skipped")
+                                : Component.literal(reason));
+                if (this.storeHypixelResult(runEpoch, account, unsafe, null)) {
+                    this.finishHypixelCheckRun(runEpoch);
+                    return;
+                }
+                this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                        Component.translatable("ias.hypixel.progress.accountDone"));
+                this.minecraft.execute(this.screen::updateHypixelCheckButton);
+                if (this.pauseIfOverride()) {
+                    return;
+                }
+                continue;
+            }
+
             this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
                     Component.translatable("ias.hypixel.progress.auth"));
-            check = this.loginForBanCheck(account)
+            synchronized (HYPIXEL_LOCK) {
+                hypixelJoinInFlight = true;
+            }
+            CompletableFuture<HypixelBanResult> check = this.loginForBanCheck(account)
                     .thenApplyAsync(data -> {
                         this.reportHypixelProgress(current, hypixelCheckTotal, account.name(),
                                 Component.translatable("ias.hypixel.progress.hypixel"));
-                        return HypixelBanChecker.checkBan(data.name(), data.uuid(), data.token());
+                        return HypixelBanChecker.checkBan(data.name(), data.uuid(), data.token(), hypixelDirectOverride);
                     }, IAS.executor());
             check = check.orTimeout(HYPIXEL_ACCOUNT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        }
-
-        check.whenCompleteAsync((result, error) -> {
-            if (hypixelCheckCancelled) {
-                return;
-            }
-            UUID uuid = account.uuid();
-            boolean stopQueue = false;
-            synchronized (HYPIXEL_LOCK) {
-                if (error != null || result == null) {
-                    Throwable cause = error != null ? unwrapError(error) : new IllegalStateException("No Hypixel result");
-                    AuthLog.expected(LOGGER, "Unable to check Hypixel ban status for " + account.name(), cause);
-                    HypixelBanResult err = HypixelBanResult.error(describeError(cause));
-                    HYPIXEL_BANS.put(uuid, err);
-                    ChecksCache.putHypixelBan(uuid, err);
-                    stopQueue = err.networkBan();
-                } else {
-                    LOGGER.info("IAS: Hypixel ban result for {}: {}.", account.name(), result.status());
-                    HYPIXEL_BANS.put(uuid, result);
-                    ChecksCache.putHypixelBan(uuid, result);
-                    stopQueue = result.networkBan();
-                }
-                HYPIXEL_PHASES.put(uuid, HypixelBanPhase.UNKNOWN);
-                if (stopQueue && !HYPIXEL_QUEUE.isEmpty()) {
-                    LOGGER.warn("IAS: Stopping Hypixel checks after IP/network ban signal from {}.", account.name());
-                    HypixelBanResult rest = HypixelBanResult.skipped("Stopped after an IP/network block.");
-                    for (UUID left : new java.util.ArrayList<>(HYPIXEL_QUEUE.keySet())) {
-                        HYPIXEL_BANS.put(left, rest);
-                        ChecksCache.putHypixelBan(left, rest);
-                        HYPIXEL_PHASES.put(left, HypixelBanPhase.UNKNOWN);
-                    }
-                    hypixelCheckCompleted += HYPIXEL_QUEUE.size();
-                    HYPIXEL_QUEUE.clear();
-                    hypixelCheckCancelled = true;
-                }
+            check.whenCompleteAsync((result, error) -> {
                 try {
-                    ChecksCache.save(IAS.gameDirectory());
-                } catch (Throwable ignored) {
+                    if (runEpoch != hypixelRunEpoch) {
+                        return;
+                    }
+                    if (this.storeHypixelResult(runEpoch, account, result, error)) {
+                        this.finishHypixelCheckRun(runEpoch);
+                        return;
+                    }
+                    HypixelBanResult stored = HYPIXEL_BANS.get(account.uuid());
+                    boolean stopQueue = stored != null && stored.networkBan();
+                    this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
+                            Component.translatable(stopQueue ? "ias.hypixel.progress.stopped" : "ias.hypixel.progress.accountDone"));
+                    this.minecraft.execute(this.screen::updateHypixelCheckButton);
+                    if (stopQueue || this.pauseIfOverride()) {
+                        if (stopQueue) {
+                            this.finishHypixelCheckRun(runEpoch);
+                        }
+                        return;
+                    }
+                    CompletableFuture.delayedExecutor(HYPIXEL_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor())
+                            .execute(() -> this.runNextHypixelCheck(runEpoch));
+                } catch (Throwable t) {
+                    LOGGER.error("IAS: Hypixel check result handling failed for {}.", account.name(), t);
+                    synchronized (HYPIXEL_LOCK) {
+                        if (runEpoch != hypixelRunEpoch) {
+                            return;
+                        }
+                        hypixelWorkerRunning = false;
+                        hypixelJoinInFlight = false;
+                    }
+                    this.finishHypixelCheckRun(runEpoch);
                 }
-            }
-            hypixelCheckCompleted++;
-            this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, account.name(),
-                    Component.translatable(stopQueue ? "ias.hypixel.progress.stopped" : "ias.hypixel.progress.accountDone", account.name()));
-            this.minecraft.execute(this.screen::updateHypixelCheckButton);
-            CompletableFuture.delayedExecutor(HYPIXEL_CHECK_DELAY_MS, TimeUnit.MILLISECONDS, IAS.executor())
-                    .execute(this::runNextHypixelCheck);
-        }, IAS.executor());
+            }, IAS.executor());
+            return;
+        }
     }
 
-    private void finishHypixelCheckRun() {
+    /**
+     * @return {@code true} when the run was cancelled/stale and the caller should stop
+     */
+    private boolean storeHypixelResult(long runEpoch, MicrosoftAccount account, @Nullable HypixelBanResult result, @Nullable Throwable error) {
+        UUID uuid = account.uuid();
+        synchronized (HYPIXEL_LOCK) {
+            if (runEpoch != hypixelRunEpoch) {
+                return true;
+            }
+            hypixelJoinInFlight = false;
+            if (hypixelCheckCancelled) {
+                hypixelWorkerRunning = false;
+                return true;
+            }
+            boolean stopQueue = false;
+            if (error != null || result == null) {
+                Throwable cause = error != null ? unwrapError(error) : new IllegalStateException("No Hypixel result");
+                AuthLog.expected(LOGGER, "Unable to check Hypixel ban status for " + account.name(), cause);
+                HypixelBanResult err = HypixelBanResult.error(describeError(cause));
+                HYPIXEL_BANS.put(uuid, err);
+                ChecksCache.putHypixelBan(uuid, err);
+                stopQueue = err.networkBan();
+            } else {
+                LOGGER.info("IAS: Hypixel ban result for {}: {}.", account.name(), result.status());
+                HYPIXEL_BANS.put(uuid, result);
+                ChecksCache.putHypixelBan(uuid, result);
+                stopQueue = result.networkBan();
+            }
+            HYPIXEL_PHASES.put(uuid, HypixelBanPhase.UNKNOWN);
+            if (stopQueue && !HYPIXEL_QUEUE.isEmpty()) {
+                LOGGER.warn("IAS: Stopping Hypixel checks after IP/network ban signal from {}.", account.name());
+                HypixelBanResult rest = HypixelBanResult.skipped("Stopped after an IP/network block.");
+                for (UUID left : new java.util.ArrayList<>(HYPIXEL_QUEUE.keySet())) {
+                    HYPIXEL_BANS.put(left, rest);
+                    ChecksCache.putHypixelBan(left, rest);
+                    HYPIXEL_PHASES.put(left, HypixelBanPhase.UNKNOWN);
+                }
+                hypixelCheckCompleted += HYPIXEL_QUEUE.size();
+                HYPIXEL_QUEUE.clear();
+                hypixelCheckCancelled = true;
+            }
+            hypixelCheckCompleted++;
+            if (HYPIXEL_QUEUE.isEmpty()) {
+                hypixelWorkerRunning = false;
+            }
+            try {
+                ChecksCache.save(IAS.gameDirectory());
+            } catch (Throwable ignored) {
+            }
+            return false;
+        }
+    }
+
+    private boolean pauseIfOverride() {
+        synchronized (HYPIXEL_LOCK) {
+            if (hypixelCheckCancelled || !hypixelDirectOverride || HYPIXEL_QUEUE.isEmpty()) {
+                return false;
+            }
+            hypixelAwaitContinue = true;
+        }
+        this.reportHypixelProgress(hypixelCheckCompleted, hypixelCheckTotal, "",
+                Component.translatable("ias.hypixel.progress.paused"));
+        this.notifyHypixelPause(true);
+        return true;
+    }
+
+    private void notifyHypixelPause(boolean waiting) {
+        HypixelCheckProgress progress = hypixelProgress;
+        if (progress == null) {
+            return;
+        }
+        this.minecraft.execute(() -> progress.onHypixelPause(waiting));
+    }
+
+    private void finishHypixelCheckRun(long runEpoch) {
         this.minecraft.execute(() -> {
+            synchronized (HYPIXEL_LOCK) {
+                if (runEpoch != hypixelRunEpoch) {
+                    return;
+                }
+            }
+            // Don't touch a screen the user already closed.
+            try {
+                if (this.currentScreen() != this.screen) {
+                    hypixelProgress = null;
+                    return;
+                }
+            } catch (Throwable ignored) {
+            }
             this.screen.updateHypixelCheckButton();
             this.update(this.screen.search().getValue());
             HypixelCheckProgress progress = hypixelProgress;

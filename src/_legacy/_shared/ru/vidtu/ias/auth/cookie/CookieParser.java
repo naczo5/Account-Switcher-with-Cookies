@@ -187,7 +187,7 @@ public final class CookieParser {
      * <p>
      * Supports:
      * <ul>
-     *     <li>{@code Source:} / Email / Username metadata blocks (NFA loader / checker exports)</li>
+     *     <li>{@code Source:} / Email / Username metadata blocks (checker exports)</li>
      *     <li>Multiple {@code # Netscape HTTP Cookie File} headers in one file</li>
      *     <li>{@code --------} separators</li>
      * </ul>
@@ -412,7 +412,7 @@ public final class CookieParser {
                 end++;
             }
             String token = value.substring(mc, end);
-            if (looksLikeLocaltsRefreshToken(token) || token.startsWith("M.") || token.startsWith("0.")) {
+            if (looksLikeRefreshToken(token)) {
                 return token;
             }
         }

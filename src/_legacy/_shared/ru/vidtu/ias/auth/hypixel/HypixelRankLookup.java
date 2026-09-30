@@ -28,6 +28,8 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -37,12 +39,18 @@ import java.util.UUID;
  * accounts are not joined from the local IP.
  */
 final class HypixelRankLookup {
-    private static final Set<String> EMPTY_RANKS = Set.of("", "none", "normal", "null");
-    private static final Set<String> PAID_OR_STAFF = Set.of(
+    private static final Set<String> EMPTY_RANKS = rankSet("", "none", "normal", "null");
+    private static final Set<String> PAID_OR_STAFF = rankSet(
             "vip", "vip_plus", "mvp", "mvp_plus", "superstar",
             "youtuber", "helper", "moderator", "admin", "game_master",
             "gm", "staff", "owner", "pig", "pig+++", "events", "mcp"
     );
+
+    private static Set<String> rankSet(String... values) {
+        Set<String> set = new HashSet<String>();
+        Collections.addAll(set, values);
+        return Collections.unmodifiableSet(set);
+    }
 
     enum Kind {
         /** VIP / MVP / staff / youtuber — Hypixel typically does not IP-ban these on join. */
@@ -60,12 +68,13 @@ final class HypixelRankLookup {
 
     static Kind lookup(UUID uuid) {
         String key = IASConfig.hypixelApiKey;
-        if (key == null || key.isBlank()) {
+        if (key == null || key.trim().isEmpty() || uuid == null) {
             return Kind.UNKNOWN;
         }
+        HttpURLConnection connection = null;
         try {
             String undashed = uuid.toString().replace("-", "");
-            HttpURLConnection connection = (HttpURLConnection) new URL(
+            connection = (HttpURLConnection) new URL(
                     "https://api.hypixel.net/v2/player?uuid=" + undashed).openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(10_000);
@@ -74,11 +83,18 @@ final class HypixelRankLookup {
             connection.setRequestProperty("User-Agent", HypixelBanChecker.USER_AGENT);
             int status = connection.getResponseCode();
             InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            String body = stream == null ? "" : new String(readAll(stream), StandardCharsets.UTF_8);
+            String body;
+            if (stream == null) {
+                body = "";
+            } else {
+                try (InputStream s = stream) {
+                    body = new String(readAll(s), StandardCharsets.UTF_8);
+                }
+            }
             if (status != 200) {
                 return Kind.UNKNOWN;
             }
-            JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+            JsonObject json = new JsonParser().parse(body).getAsJsonObject();
             if (!json.has("success") || !json.get("success").getAsBoolean()) {
                 return Kind.UNKNOWN;
             }
@@ -92,6 +108,10 @@ final class HypixelRankLookup {
             return isRanked(playerEl.getAsJsonObject()) ? Kind.RANKED : Kind.UNRANKED;
         } catch (Exception e) {
             return Kind.UNKNOWN;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
@@ -101,7 +121,7 @@ final class HypixelRankLookup {
                 || rankedValue(player, "newPackageRank")
                 || rankedValue(player, "packageRank")
                 || (player.has("prefix") && player.get("prefix").isJsonPrimitive()
-                && !player.get("prefix").getAsString().isBlank());
+                && !player.get("prefix").getAsString().trim().isEmpty());
     }
 
     private static boolean rankedValue(JsonObject player, String key) {
@@ -116,6 +136,12 @@ final class HypixelRankLookup {
     }
 
     private static byte[] readAll(InputStream in) throws java.io.IOException {
-        return in.readAllBytes();
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        int n;
+        while ((n = in.read(buf)) >= 0) {
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
     }
 }

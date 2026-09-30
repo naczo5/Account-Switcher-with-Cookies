@@ -182,6 +182,27 @@ public class GuiCookieImport extends GuiScreen {
         return out;
     }
 
+    public void beginImport(List<String> paths) {
+        if (paths == null || paths.isEmpty() || importing) {
+            return;
+        }
+        pasteMode = false;
+        selectedFiles.clear();
+        selectedFiles.addAll(paths);
+        StringBuilder joined = new StringBuilder();
+        for (int i = 0; i < paths.size(); i++) {
+            if (i > 0) {
+                joined.append('\n');
+            }
+            joined.append(paths.get(i));
+        }
+        savedPath = joined.toString();
+        if (pathInput != null) {
+            pathInput.setText(savedPath);
+        }
+        importCookies();
+    }
+
     private void importCookies() {
         if (importing) {
             return;
@@ -385,15 +406,15 @@ public class GuiCookieImport extends GuiScreen {
                     final int idx = i;
                     postStatus(I18n.format("ias.cookie.multi.progress", idx + 1, total));
                     String path = paths.get(idx);
-                    CookieAuth.MinecraftProfile profile = null;
+                    List<CookieAuth.MinecraftProfile> profiles = null;
                     Throwable lastError = null;
                     int rateLimitRetries = 0;
-                    while (profile == null) {
+                    while (profiles == null) {
                         if (closed) {
                             return;
                         }
                         try {
-                            profile = importOneFile(path);
+                            profiles = importOneFile(path);
                         } catch (Throwable t) {
                             if (isRateLimited(t) && rateLimitRetries < 2) {
                                 rateLimitRetries++;
@@ -410,8 +431,8 @@ public class GuiCookieImport extends GuiScreen {
                             break;
                         }
                     }
-                    if (profile != null) {
-                        ok.add(profile);
+                    if (profiles != null && !profiles.isEmpty()) {
+                        ok.addAll(profiles);
                     } else {
                         failed++;
                         if (lastError != null) {
@@ -466,9 +487,52 @@ public class GuiCookieImport extends GuiScreen {
                 });
             }
 
-            private CookieAuth.MinecraftProfile importOneFile(String path) throws Exception {
+            private List<CookieAuth.MinecraftProfile> importOneFile(String path) throws Exception {
                 try {
-                    return CookieAuth.authenticate(CookieParser.fromPath(path));
+                    String text = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path.trim())), java.nio.charset.StandardCharsets.UTF_8);
+                    List<String> records = CookieParser.splitRecords(text);
+                    if (records.size() > 1) {
+                        List<CookieAuth.MinecraftProfile> out = new ArrayList<CookieAuth.MinecraftProfile>();
+                        int blobFailed = 0;
+                        Throwable last = null;
+                        for (String blob : records) {
+                            if (closed) {
+                                break;
+                            }
+                            try {
+                                out.add(CookieAuth.authenticate(CookieParser.fromText(blob)));
+                            } catch (Throwable t) {
+                                List<String> tokens = ru.vidtu.iasfork.cookie.TokenImporter.extractValues(blob);
+                                if (tokens.size() == 1) {
+                                    try {
+                                        out.add(ru.vidtu.iasfork.cookie.TokenImporter.importSingleToken(tokens.get(0)));
+                                    } catch (Throwable tt) {
+                                        blobFailed++;
+                                        last = tt;
+                                    }
+                                } else {
+                                    blobFailed++;
+                                    last = t;
+                                }
+                            }
+                        }
+                        if (out.isEmpty()) {
+                            if (last instanceof Exception) {
+                                throw (Exception) last;
+                            }
+                            throw new Exception(last == null ? "No accounts in dump" : last.getMessage());
+                        }
+                        if (blobFailed > 0) {
+                            // Surface partial-dump failures in the log; the file still
+                            // counts once, but no blob is silently dropped.
+                            System.err.println("IAS: " + blobFailed + " of " + records.size()
+                                    + " dump blobs failed in " + path + (last == null ? "" : ": " + last.getMessage()));
+                        }
+                        return out;
+                    }
+                    List<CookieAuth.MinecraftProfile> single = new ArrayList<CookieAuth.MinecraftProfile>(1);
+                    single.add(CookieAuth.authenticate(CookieParser.fromPath(path)));
+                    return single;
                 } catch (Throwable cookieFailed) {
                     List<String> tokens = readTokenFileFallback(path);
                     if (tokens.isEmpty()) {
@@ -478,7 +542,9 @@ public class GuiCookieImport extends GuiScreen {
                         throw new Exception(cookieFailed);
                     }
                     if (tokens.size() == 1) {
-                        return ru.vidtu.iasfork.cookie.TokenImporter.importSingleToken(tokens.get(0));
+                        List<CookieAuth.MinecraftProfile> single = new ArrayList<CookieAuth.MinecraftProfile>(1);
+                        single.add(ru.vidtu.iasfork.cookie.TokenImporter.importSingleToken(tokens.get(0)));
+                        return single;
                     }
                     List<CookieAuth.MinecraftProfile> out = new ArrayList<CookieAuth.MinecraftProfile>();
                     importTokensWithDelay(tokens, out);
@@ -488,18 +554,7 @@ public class GuiCookieImport extends GuiScreen {
                         }
                         throw new Exception(cookieFailed);
                     }
-                    // First profile counts for this file; extras are saved too.
-                    for (int i = 1; i < out.size(); i++) {
-                        final CookieAuth.MinecraftProfile extra = out.get(i);
-                        Minecraft.getMinecraft().addScheduledTask(new Runnable() {
-                            @Override
-                            public void run() {
-                                saveAccount(extra);
-                                Config.save();
-                            }
-                        });
-                    }
-                    return out.get(0);
+                    return out;
                 }
             }
 

@@ -123,7 +123,7 @@ public final class HypixelBanResult {
     }
 
     public static boolean isNetworkBanText(String text) {
-        if (text == null || text.isBlank()) {
+        if (text == null || text.trim().isEmpty()) {
             return false;
         }
         String lower = text.toLowerCase(java.util.Locale.ROOT);
@@ -132,8 +132,8 @@ public final class HypixelBanResult {
                 || lower.contains("ip is banned")
                 || lower.contains("ip banned")
                 || lower.contains("this ip")
-                || lower.contains("vpn") && lower.contains("banned")
-                || lower.contains("proxy") && (lower.contains("blocked") || lower.contains("banned"))
+                || (lower.contains("vpn") && lower.contains("banned"))
+                || (lower.contains("proxy") && (lower.contains("blocked") || lower.contains("banned")))
                 || lower.contains("network is blocked")
                 || lower.contains("blocked from this server")
                 || lower.contains("blocked from hypixel")

@@ -5,9 +5,9 @@ cookies/
 RefreshTokenApp/
 ias.json
 accounts.json
-config/nfaswitcher/
-**/nfaswitcher/import/**
-!**/nfaswitcher/import/README.txt
+config/cookieias/
+**/cookieias/import/**
+!**/cookieias/import/README.txt
 *.cookies
 good.txt
 fun.txt

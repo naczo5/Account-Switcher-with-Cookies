@@ -26,7 +26,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Locale;
@@ -123,6 +122,9 @@ final class ProxyTunnel {
         }
 
         byte[] host = targetHost.getBytes(StandardCharsets.US_ASCII);
+        if (host.length > 255) {
+            throw new IOException("Target hostname too long for SOCKS5 (" + host.length + " > 255)");
+        }
         ByteArrayOutputStream req = new ByteArrayOutputStream();
         req.write(0x05);
         req.write(0x01);
@@ -145,11 +147,14 @@ final class ProxyTunnel {
         }
         data.readUnsignedByte();
         int atyp = data.readUnsignedByte();
-        switch (atyp) {
-            case 0x01 -> data.skipBytes(4);
-            case 0x03 -> data.skipBytes(data.readUnsignedByte());
-            case 0x04 -> data.skipBytes(16);
-            default -> throw new IOException("SOCKS5 unknown address type " + atyp);
+        if (atyp == 0x01) {
+            data.skipBytes(4);
+        } else if (atyp == 0x03) {
+            data.skipBytes(data.readUnsignedByte());
+        } else if (atyp == 0x04) {
+            data.skipBytes(16);
+        } else {
+            throw new IOException("SOCKS5 unknown address type " + atyp);
         }
         data.readUnsignedShort();
     }
@@ -189,7 +194,7 @@ final class ProxyTunnel {
                 throw new IOException("HTTP proxy CONNECT header too large");
             }
         }
-        String text = header.toString(StandardCharsets.US_ASCII);
+        String text = header.toString("US-ASCII");
         String line = text.split("\\r\\n", 2)[0];
         if (!line.contains(" 200")) {
             throw new IOException("HTTP proxy CONNECT failed: " + line);
@@ -218,39 +223,87 @@ final class ProxyTunnel {
             }
             String lower = raw.toLowerCase(Locale.ROOT);
             boolean http = lower.startsWith("http://") || lower.startsWith("https://");
-            if (!lower.startsWith("socks5://") && !lower.startsWith("socks://") && !http) {
-                raw = "socks5://" + raw;
-                lower = raw.toLowerCase(Locale.ROOT);
+            boolean socks = lower.startsWith("socks5://") || lower.startsWith("socks://");
+            String remainder = raw;
+            if (http || socks) {
+                int scheme = remainder.indexOf("://");
+                remainder = remainder.substring(scheme + 3);
+            } else {
+                remainder = "socks5://" + remainder;
+                // Recompute without scheme prefix for host parsing below.
+                remainder = remainder.substring("socks5://".length());
                 http = false;
             }
-            URI uri;
-            try {
-                uri = URI.create(raw);
-            } catch (IllegalArgumentException e) {
-                throw new IOException("Invalid proxy URL: " + spec, e);
-            }
-            String host = uri.getHost();
-            if (host == null || host.isBlank()) {
-                throw new IOException("Proxy host missing: " + spec);
-            }
-            int port = uri.getPort();
-            if (port <= 0) {
-                port = http ? 8080 : 1080;
-            }
+            // Split on last '@' so passwords containing '@', ':', '/', '?', '#' survive.
             String user = null;
             String pass = null;
-            String info = uri.getUserInfo();
-            if (info != null && !info.isEmpty()) {
+            String hostPort = remainder;
+            int at = remainder.lastIndexOf('@');
+            if (at >= 0) {
+                String info = remainder.substring(0, at);
+                hostPort = remainder.substring(at + 1);
                 int colon = info.indexOf(':');
                 if (colon >= 0) {
-                    user = info.substring(0, colon);
-                    pass = info.substring(colon + 1);
+                    user = percentDecode(info.substring(0, colon));
+                    pass = percentDecode(info.substring(colon + 1));
                 } else {
-                    user = info;
+                    user = percentDecode(info);
                     pass = "";
                 }
             }
+            // Strip any path/query after host:port.
+            int slash = hostPort.indexOf('/');
+            if (slash >= 0) {
+                hostPort = hostPort.substring(0, slash);
+            }
+            int q = hostPort.indexOf('?');
+            if (q >= 0) {
+                hostPort = hostPort.substring(0, q);
+            }
+            int hash = hostPort.indexOf('#');
+            if (hash >= 0) {
+                hostPort = hostPort.substring(0, hash);
+            }
+            hostPort = hostPort.trim();
+            if (hostPort.isEmpty()) {
+                throw new IOException("Proxy host missing: " + spec);
+            }
+            String host;
+            int port;
+            int colon = hostPort.lastIndexOf(':');
+            if (colon > 0 && looksLikePort(hostPort.substring(colon + 1))) {
+                host = hostPort.substring(0, colon).trim();
+                port = Integer.parseInt(hostPort.substring(colon + 1).trim());
+            } else {
+                host = hostPort;
+                port = http ? 8080 : 1080;
+            }
+            if (host.isEmpty()) {
+                throw new IOException("Proxy host missing: " + spec);
+            }
+            // Strip IPv6 brackets.
+            if (host.length() >= 2 && host.startsWith("[") && host.endsWith("]")) {
+                host = host.substring(1, host.length() - 1);
+            }
             return new ParsedProxy(http, host, port, user, pass);
+        }
+
+        private static String percentDecode(String value) {
+            try {
+                // '+' is a literal plus in userinfo, not a space — protect it first.
+                return java.net.URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                return value;
+            }
+        }
+
+        private static boolean looksLikePort(String value) {
+            try {
+                int port = Integer.parseInt(value.trim());
+                return port > 0 && port <= 65535;
+            } catch (NumberFormatException e) {
+                return false;
+            }
         }
     }
 }

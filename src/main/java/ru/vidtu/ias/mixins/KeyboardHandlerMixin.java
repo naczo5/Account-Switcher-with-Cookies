@@ -27,7 +27,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.input.KeyEvent;
 import org.jetbrains.annotations.ApiStatus;
 import org.jspecify.annotations.NullMarked;
-import org.lwjgl.glfw.GLFW;
+//? if >=26.3 {
+import com.mojang.blaze3d.platform.InputConstants;
+//?} else {
+/*import org.lwjgl.glfw.GLFW;*/
+//?}
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -54,7 +58,10 @@ public abstract class KeyboardHandlerMixin {
 
     @Inject(method = "keyPress", at = @At("HEAD"))
     private void ias$keyPress(long window, int action, KeyEvent event, CallbackInfo ci) {
-        if (action != GLFW.GLFW_PRESS) return;
+        //? if >=26.3 {
+        if (action != InputConstants.PRESS) return;
+        //?} else
+        /*if (action != GLFW.GLFW_PRESS) return;*/
         if (window != this.minecraft.getWindow().handle()) return;
         if (IFabric.OPEN_ACCOUNT_SWITCHER.isUnbound()) return;
         if (!IFabric.OPEN_ACCOUNT_SWITCHER.matches(event)) return;

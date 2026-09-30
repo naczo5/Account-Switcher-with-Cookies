@@ -27,11 +27,92 @@ public final class CookieParser {
     private CookieParser() {
     }
 
+    public static List<String> splitRecords(String text) {
+        String trimmed = normalizeInput(text).trim();
+        List<String> empty = new ArrayList<String>();
+        if (trimmed.isEmpty()) {
+            return empty;
+        }
+        List<String> bySource = splitLookahead(trimmed, "(?m)(?=^Source\\s*:)");
+        if (bySource.size() > 1) {
+            return bySource;
+        }
+        List<String> byNetscape = splitLookahead(trimmed, "(?m)(?=^# Netscape HTTP Cookie File)");
+        if (byNetscape.size() > 1) {
+            return byNetscape;
+        }
+        List<String> byDash = new ArrayList<String>();
+        String[] dashParts = trimmed.split("(?m)^-{3,}\\s*$");
+        for (String part : dashParts) {
+            String blob = part.trim();
+            if (!blob.isEmpty()) {
+                byDash.add(blob);
+            }
+        }
+        if (byDash.size() > 1) {
+            return byDash;
+        }
+        List<String> single = new ArrayList<String>();
+        single.add(trimmed);
+        return single;
+    }
+
+    private static List<String> splitLookahead(String text, String regex) {
+        String[] parts = text.split(regex);
+        List<String> out = new ArrayList<String>(parts.length);
+        for (String part : parts) {
+            String blob = part.trim();
+            if (!blob.isEmpty()) {
+                out.add(blob);
+            }
+        }
+        return out;
+    }
+
+    private static String visibleLine(String line) {
+        line = line.trim();
+        if (line.length() >= "#HttpOnly_".length()
+                && line.regionMatches(true, 0, "#HttpOnly_", 0, "#HttpOnly_".length())) {
+            return line.substring("#HttpOnly_".length()).trim();
+        }
+        return line;
+    }
+
+    static String decodeBytes(byte[] bytes) {
+        if (bytes.length >= 2 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xFE) {
+            return new String(bytes, StandardCharsets.UTF_16LE);
+        }
+        if (bytes.length >= 2 && (bytes[0] & 0xFF) == 0xFE && (bytes[1] & 0xFF) == 0xFF) {
+            return new String(bytes, StandardCharsets.UTF_16BE);
+        }
+        if (bytes.length >= 3 && (bytes[0] & 0xFF) == 0xEF && (bytes[1] & 0xFF) == 0xBB && (bytes[2] & 0xFF) == 0xBF) {
+            return new String(bytes, 3, bytes.length - 3, StandardCharsets.UTF_8);
+        }
+        int nuls = 0;
+        int probe = Math.min(bytes.length, 64);
+        for (int i = 0; i < probe; i++) {
+            if (bytes[i] == 0) {
+                nuls++;
+            }
+        }
+        if (nuls > 8) {
+            return new String(bytes, StandardCharsets.UTF_16LE);
+        }
+        String utf8 = new String(bytes, StandardCharsets.UTF_8);
+        if (utf8.indexOf('\uFFFD') >= 0) {
+            try {
+                return new String(bytes, "windows-1252");
+            } catch (Exception ignored) {
+            }
+        }
+        return utf8;
+    }
+
     public static ParsedCookies fromPath(String path) throws CookieAuthException {
         String normalized = normalizePath(path);
         try {
             byte[] bytes = Files.readAllBytes(Paths.get(normalized));
-            return fromText(new String(bytes, StandardCharsets.UTF_8));
+            return fromText(decodeBytes(bytes));
         } catch (IOException e) {
             throw new CookieAuthException("Unable to read cookie file: " + normalized, "ias.error.cookie.file");
         }
@@ -56,8 +137,8 @@ public final class CookieParser {
         if (looksLikeCookieHeader(trimmed)) {
             return fromCookieHeader(trimmed);
         }
-        if (trimmed.contains("\t")) {
-            return fromNetscape(trimmed);
+        if (trimmed.contains("\t") || looksLikeSpaceSeparatedNetscape(trimmed)) {
+            return fromNetscape(trimmed.contains("\t") ? trimmed : convertSpaceSeparatedNetscape(trimmed));
         }
         throw new CookieAuthException(
                 "Unrecognized cookie format. Use a Netscape cookie file, semicolon-separated cookie header, or Localts token file.",
@@ -77,7 +158,7 @@ public final class CookieParser {
 
     private static boolean looksLikeSpaceSeparatedNetscape(String text) {
         for (String line : text.split("\n")) {
-            line = line.trim();
+            line = visibleLine(line);
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
@@ -89,7 +170,7 @@ public final class CookieParser {
     private static String convertSpaceSeparatedNetscape(String text) {
         StringBuilder out = new StringBuilder(text.length());
         for (String line : text.split("\n", -1)) {
-            String stripped = line.trim();
+            String stripped = visibleLine(line);
             if (stripped.isEmpty() || stripped.startsWith("#")) {
                 out.append(line).append('\n');
                 continue;
@@ -116,7 +197,7 @@ public final class CookieParser {
 
     private static boolean looksLikeNetscape(String text) {
         for (String line : text.split("\n")) {
-            line = line.trim();
+            line = visibleLine(line);
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
@@ -170,15 +251,66 @@ public final class CookieParser {
         }
         boolean hasAuth = false;
         for (CookieEntry entry : cookies.values()) {
-            if ("__Host-MSAAUTHP".equals(entry.name()) || "__Host-MSAAUTH".equals(entry.name())) {
+            if (isAuthCookie(entry.name())) {
                 hasAuth = true;
                 break;
             }
         }
-        if (!hasAuth) {
-            throw new CookieAuthException("Cookie file is missing __Host-MSAAUTHP or __Host-MSAAUTH.", "ias.error.cookie.invalid");
+        String embedded = extractEmbeddedRefresh(cookies);
+        if (!hasAuth && (embedded == null || embedded.trim().isEmpty())) {
+            throw new CookieAuthException("Cookie file is missing Microsoft session cookies (__Host-MSAAUTHP / __Host-MSAAUTH / MSPAuth).", "ias.error.cookie.invalid");
         }
-        return new ParsedCookies(cookies);
+        return embedded == null || embedded.trim().isEmpty()
+                ? new ParsedCookies(cookies)
+                : new ParsedCookies(cookies, embedded);
+    }
+
+    private static boolean isAuthCookie(String name) {
+        if (name == null) {
+            return false;
+        }
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        return "__host-msaauthp".equals(lower) || "__host-msaauth".equals(lower)
+                || "msaauthp".equals(lower) || "msaauth".equals(lower)
+                || "mspauth".equals(lower) || "mspprof".equals(lower) || "wlssid".equals(lower);
+    }
+
+    private static String extractEmbeddedRefresh(Map<String, CookieEntry> cookies) {
+        for (CookieEntry entry : cookies.values()) {
+            String value = entry.value();
+            if (value == null || value.trim().isEmpty()) {
+                continue;
+            }
+            int mc = indexOfTokenPrefix(value);
+            if (mc < 0) {
+                continue;
+            }
+            int end = mc;
+            while (end < value.length()) {
+                char c = value.charAt(end);
+                if (c == '\n' || c == '\r' || c == ' ' || c == '\t') {
+                    break;
+                }
+                end++;
+            }
+            String token = value.substring(mc, end);
+            if (looksLikeRefreshToken(token)) {
+                return token;
+            }
+        }
+        return null;
+    }
+
+    private static int indexOfTokenPrefix(String value) {
+        int mc = value.indexOf(MSA_TOKEN_PREFIX);
+        if (mc >= 0) {
+            return mc;
+        }
+        int m = value.indexOf("M.");
+        if (m >= 0) {
+            return m;
+        }
+        return value.indexOf("0.");
     }
 
     private static boolean looksLikeLocalts(String text) {
@@ -255,16 +387,23 @@ public final class CookieParser {
         return value.startsWith(MSA_TOKEN_PREFIX);
     }
 
+    private static boolean looksLikeRefreshToken(String value) {
+        if (value.startsWith(MSA_TOKEN_PREFIX) || value.startsWith("M.") || value.startsWith("0.")) {
+            return value.length() > 40;
+        }
+        return value.length() >= 80 && value.matches("[A-Za-z0-9._\\-+=/*!$]+");
+    }
+
     private static ParsedCookies fromNetscape(String text) throws CookieAuthException {
         Map<String, CookieEntry> cookies = new LinkedHashMap<>();
         for (String line : text.split("\n")) {
-            line = line.trim();
+            line = visibleLine(line);
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
             String[] parts = line.split("\t", -1);
             if (parts.length < 6) {
-                throw new CookieAuthException("Invalid cookie line (expected at least 6 tab-separated fields): " + line, "ias.error.cookie.invalid");
+                continue;
             }
             String domain = parts[0];
             String cookiePath = parts[2];

@@ -2,31 +2,22 @@
 
 # Account Switcher with Cookies (Forge / Fabric / Lunar / Localts)
 
-[![Changelog](https://img.shields.io/badge/changelog-3.2.1-1f6feb?logo=github)](CHANGELOG.md)
+[![Release](https://img.shields.io/github/v/release/naczo5/Account-Switcher-with-Cookies?include_prereleases&color=238636&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
+[![Downloads](https://img.shields.io/github/downloads/naczo5/Account-Switcher-with-Cookies/total?color=1f6feb&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
+[![Stars](https://img.shields.io/github/stars/naczo5/Account-Switcher-with-Cookies?color=e3b341&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/stargazers)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](LICENSE)
-[![Minecraft](https://img.shields.io/badge/Minecraft-1.8.9%20%7C%201.21.11%20%7C%2026.2-brightgreen)](#supported-versions)
-[![Stars](https://img.shields.io/github/stars/antlmao1337/Account-Switcher-with-Cookies?color=e3b341&logo=github)](https://github.com/antlmao1337/Account-Switcher-with-Cookies/stargazers)
+[![Minecraft](https://img.shields.io/badge/Minecraft-1.8.9%20%7C%201.21.11%20%7C%2026.2%20%7C%2026.3-brightgreen)](#supported-versions)
 
-In-game Microsoft account switching for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alts. Add accounts from Netscape dumps, checker exports, refresh tokens, or session tokens without restarting Minecraft.
+A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher) with support for **Forge**, **Fabric**, **Lunar Fabric**, and **Localts** cookie alt files. Switch Minecraft accounts in-game without restarting, and add Microsoft accounts by importing cookie files exported from Localts or standard Netscape cookie dumps.
 
-See **[CHANGELOG.md](CHANGELOG.md)** for what this repo actually changed.
-
-Based on [CookieIAS](https://github.com/naczo5/Account-Switcher-with-Cookies) / [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher).
-
-## What's new in this repo (3.2.1)
-
-- **Checker dump import** — one `.txt` with many `Source:` / Netscape / `--------` blocks becomes one account per block. Dead alts fail individually.
-- **Bulk Import** — drop files in `.minecraft/config/nfaswitcher/import` and import them from the account manager.
-- **Live session swap** — logging into a cookie alt actually becomes that account (mixin override of `getUser` / `getGameProfile`).
-- **HttpOnly Netscape cookies** — `#HttpOnly_` lines are kept (`__Host-MSAAUTH`, `MSPAuth`, `WLSSID`, …).
-- **Quiet auth failures** — expired cookies no longer dump Microsoft HTML into `latest.log`.
-
-Full list: [CHANGELOG.md](CHANGELOG.md).
-
-## Features
+## What this fork adds
 
 - **Localts import** — single-line `M.C…` Microsoft refresh tokens (Localts export format) are detected and exchanged for a full Minecraft session.
 - **Netscape cookie import** — tab-separated browser cookie exports with `__Host-MSAAUTH` / `__Host-MSAAUTHP` still work via Xbox SISU.
+- **Checker dump import** — one `.txt` with many `Source:` / Netscape / `--------` blocks becomes one account per block. Dead alts fail individually.
+- **Bulk Import** — drop files in `.minecraft/config/cookieias/import` and import them from the account manager.
+- **Live session swap** — logging into a cookie alt actually becomes that account.
+- **HttpOnly Netscape cookies** — `#HttpOnly_` lines are kept (`__Host-MSAAUTH`, `MSPAuth`, `WLSSID`, …).
 - **Token login** — import Minecraft access tokens from files or paste.
 - **Multi-file cookie import** — the file picker can select several alt files at once.
 - **Lunar Client support** — keyboard shortcut (`O` by default) and Mod Menu entry work on Lunar's custom main menu where the vanilla title button does not appear.
@@ -37,9 +28,10 @@ Full list: [CHANGELOG.md](CHANGELOG.md).
 
 | Minecraft | Loader | Build (PowerShell) | Output jar |
 |-----------|--------|-------------------|------------|
+| **26.3** | Fabric / Lunar Fabric | `.\gradlew.bat :26.3-fabric:jar` | `build\libs\CookieIAS-*+26.3-fabric.jar` |
 | **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\CookieIAS-*+26.2-fabric.jar` |
 | **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
-| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\CookieIAS-3.2+1.8.9-forge.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\CookieIAS-3.3+1.8.9-forge.jar` |
 
 If you need cookie alts on Lunar Client 1.8.9,
 check out my injectable tool here https://github.com/naczo5/lunar-cookies
@@ -53,10 +45,10 @@ check out my injectable tool here https://github.com/naczo5/lunar-cookies
 ### 1.8.9 (Forge)
 
 1. Install Forge for **1.8.9**.
-2. Copy `forge-1.8\build\libs\CookieIAS-3.2+1.8.9-forge.jar` into the instance's **mods** folder.
+2. Copy `forge-1.8\build\libs\CookieIAS-3.3+1.8.9-forge.jar` into the instance's **mods** folder.
 3. Open the account switcher from its title-screen button or press **`O`**.
 
-### 26.2 / 1.21.11 (Fabric or Lunar Fabric)
+### 26.3 / 26.2 / 1.21.11 (Fabric or Lunar Fabric)
 
 1. Use a **Fabric** or Lunar **Fabric** profile matching one of the supported versions above.
 2. Copy the matching jar from `build\libs\` into the profile **mods** folder, or install via the Lunar launcher mod browser.
@@ -72,17 +64,14 @@ See [docs/LUNAR.md](docs/LUNAR.md) for Lunar Fabric setup and troubleshooting.
    - **File Path** — path to your `.txt` alt file, e.g. `C:\alts\myaccount.txt`, or click **...** to open the OS file picker (multiple files are allowed)
    - **Paste** — paste the full cookie file into the multi-line text box, or leave it empty and click **Import** to use the clipboard
 
-For a dump with many alts: put the `.txt` in `.minecraft/config/nfaswitcher/import`, open the switcher, and click **Bulk Import**. Each `Source:` / Netscape / `--------` block becomes its own account.
-
-If import fails, check `latest.log` in your instance folder and search for `IAS`.
+If import fails, check `latest.log` in your instance folder and search for `IAS/Cookie`.
 
 ### Supported file formats
 
 | Format | What it looks like | Notes |
 |--------|-------------------|-------|
-| **Checker dump** | `Source:` / `Email:` / `Username:` then Netscape cookies, separated by `--------` | One file, many alts — Bulk Import splits each block |
-| **Localts** | One line starting with `M.C`, often ending in `MsaArtifacts` | Refresh-token export |
-| **Netscape** | Tab-separated lines with `.login.live.com` domains, including `#HttpOnly_` | Full browser cookie jar |
+| **Localts** | One line starting with `M.C`, often ending in `MsaArtifacts` | Primary format this fork targets |
+| **Netscape** | Tab-separated lines with `.login.live.com` domains | Full browser cookie jar |
 | **Cookie header** | Semicolon-separated `name=value` pairs on one or more lines | Pasted from devtools |
 
 Place personal alt files in a local `cookies/` folder (gitignored) — **never** commit them.
@@ -96,10 +85,11 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 **A:** Localts tokens and session cookies expire or get revoked. Export a fresh alt from Localts and import again.
 
 **Q:** Will Check Hypixel IP-ban my main?  
-**A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, use LiquidProxy in `config/nfaswitcher/ias.json`:
+**A:** Banned **no-rank** accounts can IP-ban the connecting IP. By default the checker will **not** join unranked/unknown-rank alts from your machine. Ranked (VIP+) alts still do a local join. To check no-rank alts, use a proxy in `config/cookieias/ias.json`:
 
 ```json
-"liquidProxyHost": "dedicated.REGION.liquidproxy.net",
+"hypixelCheckProxy": "",
+"liquidProxyHost": "",
 "liquidProxyPort": 1080,
 "liquidProxyUsername": "",
 "liquidProxyPassword": "",
@@ -108,16 +98,13 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 "hypixelApiKey": ""
 ```
 
-- **Host + user/pass** — Proxy Manager credentials. Ban checks SOCKS5 through LiquidProxy to `mc.hypixel.net`.
-- **Route** — the copy-paste join link from the dashboard. Direct Play rewrites Hypixel joins onto this so you don't connect from your IP.
-
-`hypixelApiKey` is optional and only used to read package rank *before* joining. If Hypixel returns an IP/network block, remaining accounts are not joined.
+`hypixelCheckProxy` is a generic SOCKS5 or HTTP proxy (`socks5://user:pass@host:1080`). The `liquidProxy*` fields are optional LiquidProxy credentials. `hypixelApiKey` is optional and only used to read package rank before joining. If Hypixel returns an IP/network block, remaining accounts are not joined.
 
 **Q:** Can I use normal Microsoft login instead of cookies?  
 **A:** Yes. **Add → Microsoft** still works and lets you choose password or hardware encryption.
 
-**Q:** Where is this repo hosted?  
-**A:** [GitHub — antlmao1337/Account-Switcher-with-Cookies](https://github.com/antlmao1337/Account-Switcher-with-Cookies). Based on CookieIAS / [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher).
+**Q:** Where is this fork hosted?  
+**A:** [GitHub — naczo5/Account-Switcher-with-Cookies](https://github.com/naczo5/Account-Switcher-with-Cookies). Upstream IAS: [Modrinth](https://modrinth.com/mod/in-game-account-switcher), [CurseForge](https://www.curseforge.com/minecraft/mc-mods/in-game-account-switcher).
 
 **Q:** Is this mod open source?  
 **A:** Yes, under [GNU LGPLv3](LICENSE), same as upstream IAS.
@@ -125,6 +112,10 @@ Place personal alt files in a local `cookies/` folder (gitignored) — **never**
 ## Building
 
 ```powershell
+# 26.3 Fabric / Lunar Fabric
+$env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.3-fabric"
+.\gradlew.bat :26.3-fabric:jar
+
 # 26.2 Fabric / Lunar Fabric
 $env:GRADLE_OPTS = "-Dru.vidtu.ias.only=26.2-fabric"
 .\gradlew.bat :26.2-fabric:jar
@@ -145,6 +136,7 @@ Built jars appear in `build\libs\`.
 
 - Originally by **VidTu**, **The_Fireplace**, and IAS contributors.
 - Cookie authentication fork, Localts integration, Hypixel checks, and 1.8.9 Forge backports by **naczo5**.
+- Checker-dump import, live session swap, Hypixel IP-ban protection, and optional LiquidProxy by [**antlmao1337**](https://github.com/antlmao1337/Account-Switcher-with-Cookies).
 - Profile management, skin updating, and multi-file selection features by [**Articuling / xCheezie**](https://github.com/xCheezie).
 - Hypixel ban-check logic adapted from [mcchecker](https://github.com/cooldood-dev/mcchecker) by cooldood-dev.
 

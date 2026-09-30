@@ -59,16 +59,36 @@ final class ConfirmPopupScreen extends Screen {
     private final Runnable handler;
 
     /**
+     * Optional second action, or {@code null}.
+     */
+    @org.jetbrains.annotations.Nullable
+    private final Component alternate;
+
+    /**
+     * Optional second action handler, or {@code null}.
+     */
+    @org.jetbrains.annotations.Nullable
+    private final Runnable alternateHandler;
+
+    /**
      * Confirmation prompt label.
      */
     private MultiLineLabel label;
 
     ConfirmPopupScreen(Screen parent, Component title, Component prompt, Component confirm, Runnable handler) {
+        this(parent, title, prompt, confirm, handler, null, null);
+    }
+
+    ConfirmPopupScreen(Screen parent, Component title, Component prompt, Component confirm, Runnable handler,
+                       @org.jetbrains.annotations.Nullable Component alternate,
+                       @org.jetbrains.annotations.Nullable Runnable alternateHandler) {
         super(title);
         this.parent = parent;
         this.prompt = prompt;
         this.confirm = confirm;
         this.handler = handler;
+        this.alternate = alternate;
+        this.alternateHandler = alternateHandler;
     }
 
     @Override
@@ -82,14 +102,26 @@ final class ConfirmPopupScreen extends Screen {
             /*this.parent.init(this.minecraft, this.width, this.height);*/
         }
 
-        PopupButton confirmButton = new PopupButton(this.width / 2 - 75, this.height / 2 + 58 - 22, 74, 20,
+        boolean twoRow = this.alternate != null && this.alternateHandler != null;
+        // Panel grows when the alternate action is present so the prompt never
+        // draws under the buttons (4+ line prompts previously touched them).
+        int confirmY = this.height / 2 + (twoRow ? 46 : 36);
+        int alternateY = this.height / 2 + 22;
+        if (twoRow) {
+            PopupButton alternateButton = new PopupButton(this.width / 2 - 75, alternateY, 150, 20,
+                    this.alternate, btn -> this.alternateHandler.run(), Supplier::get);
+            alternateButton.color(1.0F, 0.8F, 0.4F, true);
+            this.addRenderableWidget(alternateButton);
+        }
+
+        PopupButton confirmButton = new PopupButton(this.width / 2 - 75, confirmY, 74, 20,
                 this.confirm, btn -> {
             this.handler.run();
         }, Supplier::get);
         confirmButton.color(0.5F, 1.0F, 0.5F, true);
         this.addRenderableWidget(confirmButton);
 
-        this.addRenderableWidget(new PopupButton(this.width / 2 + 1, this.height / 2 + 58 - 22, 74, 20,
+        this.addRenderableWidget(new PopupButton(this.width / 2 + 1, confirmY, 74, 20,
                 CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get));
 
         this.label = MultiLineLabel.create(this.font, this.prompt, 220);
@@ -116,7 +148,7 @@ final class ConfirmPopupScreen extends Screen {
         /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 58 / 2, 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
-        IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - 4);
+        IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, (this.height - this.label.getLineCount() * 9) / 2 - (this.alternate != null ? 10 : 4));
     }
 
     @Override
@@ -144,9 +176,10 @@ final class ConfirmPopupScreen extends Screen {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        graphics.fill(centerX - 125, centerY - 58, centerX + 125, centerY + 58, 0xF8_20_20_30);
+        int halfH = this.alternate != null && this.alternateHandler != null ? 70 : 58;
+        graphics.fill(centerX - 125, centerY - 58, centerX + 125, centerY + halfH, 0xF8_20_20_30);
         graphics.fill(centerX - 124, centerY - 59, centerX + 124, centerY - 58, 0xF8_20_20_30);
-        graphics.fill(centerX - 124, centerY + 58, centerX + 124, centerY + 59, 0xF8_20_20_30);
+        graphics.fill(centerX - 124, centerY + halfH, centerX + 124, centerY + halfH + 1, 0xF8_20_20_30);
     }
 
     @Override

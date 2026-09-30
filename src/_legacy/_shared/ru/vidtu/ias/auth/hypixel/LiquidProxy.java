@@ -99,26 +99,39 @@ public final class LiquidProxy {
         if (raw == null || socksEndpoint(raw) != null) {
             return null;
         }
-        int slash = raw.indexOf('/');
+        // Strip scheme first, then path — otherwise https://host:port/path breaks.
+        String s = raw.trim();
+        int scheme = s.indexOf("://");
+        if (scheme >= 0) {
+            s = s.substring(scheme + 3);
+        }
+        int slash = s.indexOf('/');
         if (slash >= 0) {
-            raw = raw.substring(0, slash);
+            s = s.substring(0, slash);
         }
-        if (raw.contains("://")) {
-            raw = raw.substring(raw.indexOf("://") + 3);
+        s = s.trim();
+        int colon = s.lastIndexOf(':');
+        if (colon > 0 && looksLikePort(s.substring(colon + 1))) {
+            return s.substring(0, colon).trim();
         }
-        int colon = raw.lastIndexOf(':');
-        if (colon > 0 && looksLikePort(raw.substring(colon + 1))) {
-            return raw.substring(0, colon).trim();
-        }
-        return raw.trim();
+        return s;
     }
 
     public static int routePort() {
         String raw = blankToNull(IASConfig.liquidProxyRoute);
         if (raw != null) {
-            int colon = raw.lastIndexOf(':');
-            if (colon > 0 && colon < raw.length() - 1 && looksLikePort(raw.substring(colon + 1))) {
-                return Integer.parseInt(raw.substring(colon + 1).trim());
+            String s = raw.trim();
+            int scheme = s.indexOf("://");
+            if (scheme >= 0) {
+                s = s.substring(scheme + 3);
+            }
+            int slash = s.indexOf('/');
+            if (slash >= 0) {
+                s = s.substring(0, slash);
+            }
+            int colon = s.lastIndexOf(':');
+            if (colon > 0 && colon < s.length() - 1 && looksLikePort(s.substring(colon + 1))) {
+                return Integer.parseInt(s.substring(colon + 1).trim());
             }
         }
         int configured = IASConfig.liquidProxyRoutePort;
@@ -181,7 +194,7 @@ public final class LiquidProxy {
         if (!routeConfigured()) {
             return typed;
         }
-        if (typed == null || typed.isBlank()) {
+        if (typed == null || typed.trim().isEmpty()) {
             return joinAddress();
         }
         String lower = typed.trim().toLowerCase(Locale.ROOT);

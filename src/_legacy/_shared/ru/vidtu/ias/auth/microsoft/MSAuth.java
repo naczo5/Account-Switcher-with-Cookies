@@ -290,8 +290,10 @@ public final class MSAuth {
             Objects.requireNonNull(json, "Response is null");
             return MSTokens.fromJson(json);
         } catch (Throwable t) {
-            // Rethrow, trying to remove sensitive data.
-            String message = "Unable to convert Device Auth Code (DAC) to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (" + response + " with " + response.headers() + "): " + response.body();
+            // Rethrow, trying to remove sensitive data. Never dump headers/body raw — they can
+            // contain access/refresh tokens on 200-parse failures.
+            String message = "Unable to convert Device Auth Code (DAC) to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (HTTP "
+                    + response.statusCode() + "): " + AuthLog.truncateBody(redactTokens(response.body()));
             message = message.replace(code, "[DAC]");
             throw new RuntimeException(message, t);
         }
@@ -341,7 +343,8 @@ public final class MSAuth {
                 throw fe;
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
-                String message = "Unable to convert Microsoft Authentication Code (MSAC) to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Microsoft Authentication Code (MSAC) to Microsoft Access (MSA) and Microsoft Refresh (MSR) tokens (HTTP "
+                        + response.statusCode() + "): " + AuthLog.truncateBody(redactTokens(response.body()));
                 message = message.replace(code, "[MSAC]");
                 throw new RuntimeException(message, t);
             }
@@ -385,7 +388,8 @@ public final class MSAuth {
             } catch (FriendlyException fe) {
                 throw fe;
             } catch (Throwable t) {
-                String message = "Unable to convert Minecraft Authentication Code (MSAC) to Microsoft tokens (" + response + " with " + response.headers() + "): " + response.body();
+                String message = "Unable to convert Minecraft Authentication Code (MSAC) to Microsoft tokens (HTTP "
+                        + response.statusCode() + "): " + AuthLog.truncateBody(redactTokens(response.body()));
                 message = message.replace(code, "[MSAC]");
                 throw new RuntimeException(message, t);
             }
@@ -1313,6 +1317,20 @@ public final class MSAuth {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
+    /**
+     * Redacts {@code access_token}/{@code refresh_token} JSON fields plus the exact and
+     * URL-encoded request token, so 200-parse-failure bodies never leak secrets into logs.
+     */
+    @NotNull
+    private static String redactTokens(@Nullable String body) {
+        if (body == null) {
+            return "";
+        }
+        // Never log more than AuthLog keeps anyway; redact structured fields first.
+        String redacted = body.replaceAll("(?i)\"(access_token|refresh_token)\"\\s*:\\s*\"[^\"]*\"", "\"$1\":\"[REDACTED]\"");
+        return redacted;
+    }
+
     @NotNull
     private static FriendlyException handleOAuthError(int statusCode, @Nullable String responseBody, @NotNull String defaultMessage, @Nullable String tokenToSanitize) {
         if (statusCode == 429) {
@@ -1340,6 +1358,14 @@ public final class MSAuth {
         String sanitizedDesc = errorDesc;
         if (sanitizedDesc != null && tokenToSanitize != null && !tokenToSanitize.isBlank()) {
             sanitizedDesc = sanitizedDesc.replace(tokenToSanitize, "[TOKEN]");
+            try {
+                String encoded = URLEncoder.encode(tokenToSanitize, StandardCharsets.UTF_8);
+                if (!encoded.equals(tokenToSanitize)) {
+                    sanitizedDesc = sanitizedDesc.replace(encoded, "[TOKEN]");
+                }
+            } catch (Throwable ignored) {
+            }
+            sanitizedDesc = redactTokens(sanitizedDesc);
         }
 
         if (sanitizedDesc != null) {

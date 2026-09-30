@@ -42,7 +42,10 @@ import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NullMarked;
-import org.lwjgl.glfw.GLFW;
+//? if >=26.3 {
+//?} else {
+/*import org.lwjgl.glfw.GLFW;*/
+//?}
 import ru.vidtu.ias.IAS;
 import ru.vidtu.ias.IASMinecraft;
 import ru.vidtu.ias.config.IASStorage;
@@ -77,8 +80,13 @@ public final class IFabric implements ClientModInitializer {
     //? if >=1.21.10 {
     public static final KeyMapping OPEN_ACCOUNT_SWITCHER = new KeyMapping(
             "key.ias.open",
-            InputConstants.Type.KEYSYM,
-            GLFW.GLFW_KEY_O,
+            //? if >=26.3 {
+            InputConstants.Type.KEYBOARD,
+            InputConstants.KEY_O,
+            //?} else {
+            /*InputConstants.Type.KEYSYM,
+            GLFW.GLFW_KEY_O,*/
+            //?}
             IAS_CATEGORY
     );
     //?} else {

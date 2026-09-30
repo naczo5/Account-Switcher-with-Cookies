@@ -99,9 +99,23 @@ public class GuiAccountSelector extends GuiScreen {
 		this.buttonList.add(loginoffline = new GuiButton(2, this.width / 2 - 154 - 10, this.height - 28, 110, 20, I18n.format("ias.login")+" "+I18n.format("ias.offline")));
 		this.buttonList.add(new GuiButton(3, this.width / 2 + 4 + 50, this.height - 28, 110, 20, I18n.format("gui.cancel")));
 		this.buttonList.add(delete = new GuiButton(4, this.width / 2 - 50, this.height - 28, 100, 20, I18n.format("ias.delete")));
-		//Direct Play shortcuts (parity with modern AccountScreen)
-		this.buttonList.add(new GuiButton(12, this.width - 104, 8, 100, 20, I18n.format("menu.singleplayer")));
-		this.buttonList.add(new GuiButton(13, this.width - 104, 32, 100, 20, I18n.format("menu.multiplayer")));
+		//Direct Play shortcuts (parity with modern AccountScreen). Hidden on narrow
+		// windows where they would overlap Bulk Import.
+		if (this.width >= 550) {
+			this.buttonList.add(new GuiButton(12, this.width - 104, 8, 100, 20, I18n.format("menu.singleplayer")));
+			this.buttonList.add(new GuiButton(13, this.width - 104, 32, 100, 20, I18n.format("menu.multiplayer")));
+		}
+		ru.vidtu.ias.config.IASConfig.load(this.mc.mcDataDir);
+		int bulkX = this.width / 2 - 162;
+		int openX = this.width / 2 + 84;
+		if (bulkX < 4) {
+			bulkX = 4;
+		}
+		if (openX + 78 > this.width - 4) {
+			openX = Math.max(4, this.width - 4 - 78);
+		}
+		this.buttonList.add(new GuiButton(14, bulkX, 12, 78, 20, I18n.format("ias.accounts.bulkImport")));
+		this.buttonList.add(new GuiButton(15, openX, 12, 78, 20, I18n.format("ias.accounts.openImport")));
 		search  = new GuiTextField(8, this.fontRendererObj, this.width / 2 - 80, 14, 160, 16);
 		search.setText(query);
 		updateButtons();
@@ -207,7 +221,11 @@ public class GuiAccountSelector extends GuiScreen {
 			}else if(button.id == 9){
 				logout();
 			}else if(button.id == 10){
-				checkAllHypixelBans();
+				mc.displayGuiScreen(new GuiHypixelCheck(this));
+			}else if(button.id == 14){
+				bulkImport();
+			}else if(button.id == 15){
+				openImportFolder();
 			}else if(button.id == 11){
 				mc.displayGuiScreen(new GuiManageProfile(this, queriedaccounts.get(selectedAccountIndex)));
 			}else if(button.id == 12){
@@ -611,58 +629,6 @@ public class GuiAccountSelector extends GuiScreen {
 
 	private volatile int hypixelCheckId;
 
-	private void checkAllHypixelBans() {
-		if (hypixelCheckRunning) {
-			return;
-		}
-		hypixelCheckRunning = true;
-		final int myId = ++hypixelCheckId;
-		updateButtons();
-		final ArrayList<ExtendedAccountData> accounts = convertData();
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				for (ExtendedAccountData data : accounts) {
-					if (myId != hypixelCheckId) {
-						break;
-					}
-					final String key = hypixelKey(data);
-					if (!canCheckHypixel(data)) {
-						hypixelPhases.put(key, HypixelBanPhase.NOT_APPLICABLE);
-						hypixelResults.remove(key);
-						scheduleRefresh();
-						continue;
-					}
-					hypixelPhases.put(key, HypixelBanPhase.CHECKING);
-					hypixelResults.remove(key);
-					scheduleRefresh();
-					try {
-						HypixelBanResult result = resolveAndCheck(data);
-						hypixelResults.put(key, result);
-					} catch (Throwable t) {
-						hypixelResults.put(key, HypixelBanResult.error(t.getMessage() != null ? t.getMessage() : "Unknown error"));
-					}
-					hypixelPhases.put(key, HypixelBanPhase.UNKNOWN);
-					scheduleRefresh();
-					try {
-						Thread.sleep(6000L);
-					} catch (InterruptedException ignored) {
-						Thread.currentThread().interrupt();
-						break;
-					}
-				}
-				if (myId == hypixelCheckId) {
-					hypixelCheckRunning = false;
-					try {
-						ru.vidtu.iasfork.checks.ChecksCache.save(hypixelResults);
-					} catch (Throwable ignored) {
-					}
-					scheduleRefresh();
-				}
-			}
-		}, "IAS-HypixelCheck").start();
-	}
-
 	private void scheduleRefresh() {
 		try {
 			Minecraft mc = Minecraft.getMinecraft();
@@ -695,12 +661,126 @@ public class GuiAccountSelector extends GuiScreen {
 		}
 	}
 
-	private HypixelBanResult resolveAndCheck(ExtendedAccountData data) throws Exception {
+	HypixelBanResult resolveAndCheck(ExtendedAccountData data, boolean forceDirect) throws Exception {
 		if (!isCookieAccount(data)) {
 			throw new IllegalStateException(I18n.format("ias.accounts.copyRefreshToken.offline"));
 		}
 		CookieAuth.MinecraftProfile profile = resolveCookieProfile(data);
-		return HypixelBanChecker.checkBan(profile.name, parseUuid(profile.uuid), profile.token);
+		return HypixelBanChecker.checkBan(profile.name, parseUuid(profile.uuid), profile.token, forceDirect);
+	}
+
+	ArrayList<ExtendedAccountData> accountsForHypixelCheck() {
+		return convertData();
+	}
+
+	boolean canCheckHypixelAccount(ExtendedAccountData data) {
+		return canCheckHypixel(data);
+	}
+
+	void setHypixelCheckRunning(boolean running) {
+		hypixelCheckRunning = running;
+	}
+
+	void markHypixelChecking(ExtendedAccountData data) {
+		hypixelPhases.put(hypixelKey(data), HypixelBanPhase.CHECKING);
+		hypixelResults.remove(hypixelKey(data));
+	}
+
+	void markHypixelNotApplicable(ExtendedAccountData data) {
+		hypixelPhases.put(hypixelKey(data), HypixelBanPhase.NOT_APPLICABLE);
+		hypixelResults.remove(hypixelKey(data));
+	}
+
+	void applyHypixelResult(ExtendedAccountData data, HypixelBanResult result) {
+		hypixelResults.put(hypixelKey(data), result);
+		hypixelPhases.put(hypixelKey(data), HypixelBanPhase.UNKNOWN);
+	}
+
+	void saveHypixelResults() {
+		try {
+			ru.vidtu.iasfork.checks.ChecksCache.save(hypixelResults);
+		} catch (Throwable ignored) {
+		}
+	}
+
+	UUID hypixelAccountUuid(ExtendedAccountData data) {
+		String raw = data.cookieUuid;
+		return parseUuid(raw);
+	}
+
+	String hypixelAccountName(ExtendedAccountData data) {
+		if (data.alias != null && !data.alias.trim().isEmpty()) {
+			return data.alias;
+		}
+		return "?";
+	}
+
+	private void bulkImport() {
+		java.io.File dir = importDirectory();
+		java.util.List<String> paths = listImportFiles(dir);
+		GuiCookieImport screen = new GuiCookieImport(this, true);
+		mc.displayGuiScreen(screen);
+		if (!paths.isEmpty()) {
+			screen.beginImport(paths);
+		}
+	}
+
+	private void openImportFolder() {
+		java.io.File dir = importDirectory();
+		try {
+			if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.OPEN)) {
+				java.awt.Desktop.getDesktop().open(dir);
+				return;
+			}
+		} catch (Throwable ignored) {
+		}
+		try {
+			String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+			if (os.contains("win")) {
+				new ProcessBuilder("explorer.exe", dir.getAbsolutePath()).start();
+			} else if (os.contains("mac")) {
+				new ProcessBuilder("open", dir.getAbsolutePath()).start();
+			} else {
+				new ProcessBuilder("xdg-open", dir.getAbsolutePath()).start();
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private java.io.File importDirectory() {
+		java.io.File dir = new java.io.File(mc.mcDataDir, "config/cookieias/import");
+		if (!dir.isDirectory()) {
+			dir.mkdirs();
+		}
+		java.io.File readme = new java.io.File(dir, "README.txt");
+		if (!readme.isFile()) {
+			try {
+				java.nio.file.Files.write(readme.toPath(), "CookieIAS bulk import\nDrop .txt cookie or token files here, then use Bulk Import.\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			} catch (Throwable ignored) {
+			}
+		}
+		return dir;
+	}
+
+	private java.util.List<String> listImportFiles(java.io.File dir) {
+		java.util.List<String> paths = new java.util.ArrayList<String>();
+		java.io.File[] files = dir.listFiles();
+		if (files == null) {
+			return paths;
+		}
+		for (java.io.File file : files) {
+			if (file == null || !file.isFile()) {
+				continue;
+			}
+			String name = file.getName();
+			if ("README.txt".equalsIgnoreCase(name)) {
+				continue;
+			}
+			if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".txt")) {
+				paths.add(file.getAbsolutePath());
+			}
+		}
+		return paths;
 	}
 
 	private CookieAuth.MinecraftProfile resolveCookieProfile(ExtendedAccountData data) throws Exception {

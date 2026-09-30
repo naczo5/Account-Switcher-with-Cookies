@@ -49,7 +49,6 @@ public final class IASConfig {
     @NotNull
     private static final Gson GSON = new GsonBuilder()
             .excludeFieldsWithModifiers(Modifier.TRANSIENT, Modifier.FINAL)
-            .serializeNulls()
             .setPrettyPrinting()
             .create();
 
@@ -285,11 +284,14 @@ public final class IASConfig {
 
             Files.createDirectories(path);
             Path file = path.resolve("ias.json");
-            Path legacy = path.getFileName() != null && "nfaswitcher".equals(path.getFileName().toString())
-                    && path.getParent() != null ? path.getParent().resolve("ias.json") : null;
-            if (!Files.isRegularFile(file) && legacy != null && Files.isRegularFile(legacy)) {
-                LOGGER.info("IAS: Moving config from {} to {}.", legacy, file);
-                Files.copy(legacy, file);
+            // Migrate the pre-fork location into config/cookieias/ias.json.
+            if (!Files.isRegularFile(file) && path.getFileName() != null
+                    && "cookieias".equals(path.getFileName().toString()) && path.getParent() != null) {
+                Path source = path.getParent().resolve("ias.json");
+                if (Files.isRegularFile(source)) {
+                    LOGGER.info("IAS: Moving config from {} to {}.", source, file);
+                    Files.copy(source, file);
+                }
             }
 
             // Skip if it doesn't exist.
@@ -330,7 +332,7 @@ public final class IASConfig {
             if (json.has("liquidProxyRoutePort") && json.get("liquidProxyRoutePort").isJsonPrimitive()) {
                 liquidProxyRoutePort = json.get("liquidProxyRoutePort").getAsInt();
             }
-            LOGGER.info("IAS: LiquidProxy host='{}' user={} route='{}'",
+            LOGGER.debug("IAS: LiquidProxy host='{}' user={} route='{}'",
                     liquidProxyHost,
                     liquidProxyUsername == null || liquidProxyUsername.isBlank() ? "missing" : "set",
                     liquidProxyRoute);
@@ -398,9 +400,7 @@ public final class IASConfig {
     }
 
     /**
-     * Gets whether to use server auth for MS.
-     *
-     * @return Whether to use server auth for MS
+     * Reads an optional string key, falling back when missing/null/non-primitive.
      */
     @Nullable
     private static String readString(@NotNull JsonObject json, @NotNull String key, @Nullable String fallback) {
@@ -410,6 +410,11 @@ public final class IASConfig {
         return json.get(key).getAsString();
     }
 
+    /**
+     * Gets whether to use server auth for MS.
+     *
+     * @return Whether to use server auth for MS
+     */
     public static boolean useServerAuth() {
         if (server == null) return IUtils.canUseSunServer();
         return switch (server) {

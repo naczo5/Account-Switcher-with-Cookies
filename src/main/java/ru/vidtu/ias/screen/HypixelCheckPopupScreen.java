@@ -41,17 +41,21 @@ final class HypixelCheckPopupScreen extends Screen implements AccountList.Hypixe
 
     private final Screen parent;
     private final AccountList list;
+    private final boolean directOverride;
     private MultiLineLabel statusLabel;
     private PopupButton dismissButton;
+    private PopupButton continueButton;
     private int completed;
     private int total;
     private boolean finished;
     private boolean started;
+    private boolean paused;
 
-    HypixelCheckPopupScreen(Screen parent, AccountList list) {
+    HypixelCheckPopupScreen(Screen parent, AccountList list, boolean directOverride) {
         super(Component.translatable("ias.accounts.checkHypixel"));
         this.parent = parent;
         this.list = list;
+        this.directOverride = directOverride;
     }
 
     @Override
@@ -71,13 +75,46 @@ final class HypixelCheckPopupScreen extends Screen implements AccountList.Hypixe
 
         this.dismissButton = new PopupButton(this.width / 2 - 37, this.height / 2 + 50, 74, 20,
                 this.dismissLabel(), btn -> this.onClose(), Supplier::get);
+        this.continueButton = new PopupButton(this.width / 2 - 78, this.height / 2 + 50, 74, 20,
+                Component.translatable("ias.hypixel.progress.continue"), btn -> {
+                    this.paused = false;
+                    this.layoutButtons();
+                    this.list.continueHypixelCheck();
+                }, Supplier::get);
+        this.continueButton.visible = false;
         this.clearWidgets();
+        this.addRenderableWidget(this.continueButton);
         this.addRenderableWidget(this.dismissButton);
+        this.layoutButtons();
 
         if (!this.started) {
             this.started = true;
-            this.list.checkAllHypixelBans(this);
+            this.list.checkAllHypixelBans(this, this.directOverride);
         }
+    }
+
+    private void layoutButtons() {
+        if (this.dismissButton == null || this.continueButton == null) {
+            return;
+        }
+        int y = this.height / 2 + 50;
+        if (this.paused && !this.finished) {
+            this.continueButton.visible = true;
+            this.continueButton.setX(this.width / 2 - 78);
+            this.continueButton.setY(y);
+            this.dismissButton.setX(this.width / 2 + 4);
+            this.dismissButton.setY(y);
+        } else {
+            this.continueButton.visible = false;
+            this.dismissButton.setX(this.width / 2 - 37);
+            this.dismissButton.setY(y);
+        }
+    }
+
+    @Override
+    public void onHypixelPause(boolean waiting) {
+        this.paused = waiting && !this.finished;
+        this.layoutButtons();
     }
 
     private Component dismissLabel() {
@@ -113,6 +150,8 @@ final class HypixelCheckPopupScreen extends Screen implements AccountList.Hypixe
     @Override
     public void onHypixelComplete() {
         this.finished = true;
+        this.paused = false;
+        this.layoutButtons();
         this.completed = this.total;
         this.statusLabel = MultiLineLabel.create(this.font, Component.translatable("ias.hypixel.progress.done"), 220);
         this.updateDismissButton();

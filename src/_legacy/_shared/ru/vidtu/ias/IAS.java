@@ -73,11 +73,11 @@ public final class IAS {
     public static final String USER_AGENT = "IAS/%s (https://github.com/The-Fireplace-Minecraft-Mods/In-Game-Account-Switcher; pig@vidtu.ru)".formatted(IAS.class.getPackage().getImplementationVersion());
 
     /**
-     * README dropped into {@code config/nfaswitcher/import}.
+     * README dropped into {@code config/cookieias/import}.
      */
     @NotNull
     private static final String IMPORT_README = """
-            NFA Switcher bulk import
+            CookieIAS bulk import
             ========================
             Drop cookie dumps and refresh-token lists in this folder, then in-game open
             the account switcher and click Bulk Import (or Cookie / Token -> Import).
@@ -91,7 +91,7 @@ public final class IAS {
             README.txt is ignored.
 
             Hypixel / LiquidProxy settings live next to this folder:
-            config/nfaswitcher/ias.json
+            config/cookieias/ias.json
               liquidProxyHost      dedicated.REGION.liquidproxy.net
               liquidProxyPort      1080
               liquidProxyUsername  (Proxy Manager user)
@@ -153,7 +153,7 @@ public final class IAS {
         try {
             ensureImportDirectory();
         } catch (Throwable t) {
-            LOGGER.error("IAS: Unable to create config/nfaswitcher/import.", t);
+            LOGGER.error("IAS: Unable to create config/cookieias/import.", t);
         }
 
         // Set up IAS.
@@ -331,30 +331,30 @@ public final class IAS {
     }
 
     /**
-     * {@code .minecraft/config/nfaswitcher}
+     * {@code .minecraft/config/cookieias}
      *
-     * @return NFA Switcher config directory
+     * @return CookieIAS config directory
      */
     @Contract(pure = true)
     @NotNull
-    public static Path nfaSwitcherDirectory() {
+    public static Path cookieIasDirectory() {
         Objects.requireNonNull(configDirectory, "IAS config directory is not available.");
-        return configDirectory.resolve("nfaswitcher");
+        return configDirectory.resolve("cookieias");
     }
 
     /**
-     * {@code .minecraft/config/nfaswitcher/import}
+     * {@code .minecraft/config/cookieias/import}
      *
      * @return Bulk cookie/token drop folder
      */
     @Contract(pure = true)
     @NotNull
     public static Path importDirectory() {
-        return nfaSwitcherDirectory().resolve("import");
+        return cookieIasDirectory().resolve("import");
     }
 
     /**
-     * Creates the NFA Switcher import folder and a README if missing.
+     * Creates the CookieIAS import folder and a README if missing.
      */
     public static void ensureImportDirectory() {
         Path dir = importDirectory();
@@ -443,11 +443,11 @@ public final class IAS {
      * @throws RuntimeException If unable to load the config
      */
     public static void loadConfig() {
-        IASConfig.load(nfaSwitcherDirectory());
+        IASConfig.load(cookieIasDirectory());
     }
 
     /**
-     * Re-reads {@code config/nfaswitcher/ias.json} so proxy edits apply without a full restart.
+     * Re-reads {@code config/cookieias/ias.json} so proxy edits apply without a full restart.
      */
     public static void reloadConfig() {
         try {
@@ -463,7 +463,7 @@ public final class IAS {
      * @throws RuntimeException If unable to save the config
      */
     public static void saveConfig() {
-        IASConfig.save(nfaSwitcherDirectory());
+        IASConfig.save(cookieIasDirectory());
     }
 
     /**

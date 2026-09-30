@@ -19,9 +19,12 @@
 
 package ru.vidtu.ias.screen;
 
-import org.lwjgl.PointerBuffer;
+//? if >=26.3 {
+//?} else {
+/*import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.util.tinyfd.TinyFileDialogs;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;*/
+//?}
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.SwingUtilities;
@@ -96,14 +99,20 @@ final class CookieFileDialogs {
 
     private static List<String> pickFiles(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
             @Nullable String filterDescription, boolean multiple) throws Exception {
-        List<String> tiny = pickFilesTiny(title, startPath, filters, filterDescription, multiple);
+        //? if >=26.3 {
+        return pickFilesAwt(title, startPath, filters, multiple);
+        //?} else {
+        /*List<String> tiny = pickFilesTiny(title, startPath, filters, filterDescription, multiple);
         if (tiny != null) {
             return tiny;
         }
-        return pickFilesAwt(title, startPath, filters, multiple);
+        return pickFilesAwt(title, startPath, filters, multiple);*/
+        //?}
     }
 
-    @Nullable
+    //? if >=26.3 {
+    //?} else {
+    /*@Nullable
     private static List<String> pickFilesTiny(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
             @Nullable String filterDescription, boolean multiple) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -134,7 +143,8 @@ final class CookieFileDialogs {
             }
         }
         return files;
-    }
+    }*/
+    //?}
 
     private static List<String> pickFilesAwt(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
             boolean multiple) throws Exception {

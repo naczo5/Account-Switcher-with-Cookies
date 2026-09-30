@@ -89,6 +89,9 @@ public final class HypixelBanChecker {
      * Otherwise a skipped result — do not authenticate or join.
      */
     public static HypixelBanResult skipIfUnsafe(UUID uuid) {
+        if (uuid == null || (uuid.getMostSignificantBits() == 0L && uuid.getLeastSignificantBits() == 0L)) {
+            return HypixelBanResult.skipped("Rank unknown — not joined from this IP.");
+        }
         if (hasProxy()) {
             return null;
         }
@@ -101,7 +104,7 @@ public final class HypixelBanChecker {
             return true;
         }
         String proxy = IASConfig.hypixelCheckProxy;
-        return proxy != null && !proxy.isBlank();
+        return proxy != null && !proxy.trim().isEmpty();
     }
 
     /**
@@ -113,13 +116,22 @@ public final class HypixelBanChecker {
      * @return Ban check result
      */
     public static HypixelBanResult checkBan(String username, UUID uuid, String accessToken) {
+        return checkBan(username, uuid, accessToken, false);
+    }
+
+    /**
+     * @param forceDirect join even when no proxy is configured
+     */
+    public static HypixelBanResult checkBan(String username, UUID uuid, String accessToken, boolean forceDirect) {
         if (username == null || username.trim().isEmpty() || "Unknown".equalsIgnoreCase(username)
-                || accessToken == null || accessToken.trim().isEmpty()) {
+                || uuid == null || accessToken == null || accessToken.trim().isEmpty()) {
             return HypixelBanResult.error("Missing account info");
         }
-        HypixelBanResult skipped = skipIfUnsafe(uuid);
-        if (skipped != null) {
-            return skipped;
+        if (!forceDirect) {
+            HypixelBanResult skipped = skipIfUnsafe(uuid);
+            if (skipped != null) {
+                return skipped;
+            }
         }
         String uuidStr = uuidToUndashed(uuid);
         if (LiquidProxy.routeConfigured() && !LiquidProxy.credentialsConfigured()) {
@@ -136,7 +148,7 @@ public final class HypixelBanChecker {
         for (String host : HYPIXEL_HOSTS) {
             try {
                 return tryHypixelConnect(host, username, uuidStr, accessToken,
-                        viaProxy && !LiquidProxy.credentialsConfigured() && proxy != null && !proxy.isBlank()
+                        viaProxy && !LiquidProxy.credentialsConfigured() && proxy != null && !proxy.trim().isEmpty()
                                 ? proxy.trim() : null);
             } catch (Exception e) {
                 lastError = e;
@@ -150,21 +162,17 @@ public final class HypixelBanChecker {
     }
 
     private static boolean allowDirectJoin(HypixelRankLookup.Kind rank) {
-        return switch (rank) {
-            case RANKED -> IASConfig.hypixelCheckAllowRankedDirect;
-            case UNRANKED -> IASConfig.hypixelCheckAllowUnrankedDirect;
-            case NEVER_JOINED -> IASConfig.hypixelCheckAllowNeverJoinedDirect;
-            case UNKNOWN -> IASConfig.hypixelCheckAllowUnknownDirect;
-        };
+        if (rank == HypixelRankLookup.Kind.RANKED) return IASConfig.hypixelCheckAllowRankedDirect;
+        if (rank == HypixelRankLookup.Kind.UNRANKED) return IASConfig.hypixelCheckAllowUnrankedDirect;
+        if (rank == HypixelRankLookup.Kind.NEVER_JOINED) return IASConfig.hypixelCheckAllowNeverJoinedDirect;
+        return IASConfig.hypixelCheckAllowUnknownDirect;
     }
 
     private static String skipReason(HypixelRankLookup.Kind rank) {
-        return switch (rank) {
-            case UNRANKED -> "No-rank — not joined from this IP.";
-            case UNKNOWN -> "Rank unknown — not joined from this IP.";
-            case RANKED -> "Ranked direct joins disabled.";
-            case NEVER_JOINED -> "Never-joined direct joins disabled.";
-        };
+        if (rank == HypixelRankLookup.Kind.UNRANKED) return "No-rank — not joined from this IP.";
+        if (rank == HypixelRankLookup.Kind.RANKED) return "Ranked direct joins disabled.";
+        if (rank == HypixelRankLookup.Kind.NEVER_JOINED) return "Never-joined direct joins disabled.";
+        return "Rank unknown — not joined from this IP.";
     }
 
     private static HypixelBanResult tryHypixelConnect(
@@ -180,7 +188,7 @@ public final class HypixelBanChecker {
             StreamIO io = new StreamIO(rawIn, rawOut);
 
             String handshakeHost = LiquidProxy.handshakeHost(host);
-            int handshakePort = LiquidProxy.credentialsConfigured() || (proxySpec != null && !proxySpec.isBlank())
+            int handshakePort = LiquidProxy.credentialsConfigured() || (proxySpec != null && !proxySpec.trim().isEmpty())
                     ? HYPIXEL_PORT
                     : (LiquidProxy.routeConfigured() ? LiquidProxy.routePort() : HYPIXEL_PORT);
             io.writePacket(buildHandshake(handshakeHost, handshakePort), 0x00);
@@ -218,7 +226,7 @@ public final class HypixelBanChecker {
         if (LiquidProxy.available()) {
             return LiquidProxy.open(host, HYPIXEL_PORT, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
         }
-        if (proxySpec == null || proxySpec.isBlank()) {
+        if (proxySpec == null || proxySpec.trim().isEmpty()) {
             Socket socket = new Socket();
             socket.connect(new InetSocketAddress(host, HYPIXEL_PORT), CONNECT_TIMEOUT_MS);
             socket.setSoTimeout(READ_TIMEOUT_MS);
@@ -330,18 +338,29 @@ public final class HypixelBanChecker {
                 + "\",\"selectedProfile\":\"" + escapeJson(uuidStr)
                 + "\",\"serverId\":\"" + escapeJson(serverHash) + "\"}";
         HttpURLConnection connection = (HttpURLConnection) new URL("https://sessionserver.mojang.com/session/minecraft/join").openConnection();
-        connection.setRequestMethod("POST");
-        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        connection.setReadTimeout(CONNECT_TIMEOUT_MS);
-        connection.setDoOutput(true);
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestProperty("User-Agent", USER_AGENT);
-        connection.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
-        int status = connection.getResponseCode();
-        if (status != HttpURLConnection.HTTP_NO_CONTENT) {
-            InputStream error = connection.getErrorStream();
-            String response = error != null ? new String(readAll(error), StandardCharsets.UTF_8) : "";
-            throw new IOException("Mojang join failed: " + response);
+        try {
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(CONNECT_TIMEOUT_MS);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(body.getBytes(StandardCharsets.UTF_8));
+            }
+            int status = connection.getResponseCode();
+            if (status != HttpURLConnection.HTTP_NO_CONTENT) {
+                InputStream error = connection.getErrorStream();
+                String response = "";
+                if (error != null) {
+                    try (InputStream in = error) {
+                        response = new String(readAll(in), StandardCharsets.UTF_8);
+                    }
+                }
+                throw new IOException("Mojang join failed: " + response);
+            }
+        } finally {
+            connection.disconnect();
         }
     }
 
@@ -356,7 +375,21 @@ public final class HypixelBanChecker {
     }
 
     private static String escapeJson(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+        // Use a minimal escaper — values are hex/UUID/token, never full JSON.
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\\') {
+                sb.append("\\\\");
+            } else if (c == '"') {
+                sb.append("\\\"");
+            } else if (c < 0x20) {
+                sb.append(String.format("\\u%04x", (int) c));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private static String hypixelAuthDigest(String serverId, byte[] sharedSecret, byte[] publicKey) throws Exception {

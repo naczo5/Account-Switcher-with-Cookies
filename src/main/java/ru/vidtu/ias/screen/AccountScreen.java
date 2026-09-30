@@ -33,7 +33,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import ru.vidtu.ias.platform.IInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.vidtu.ias.IAS;
@@ -47,6 +47,7 @@ import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.utils.DirectPlay;
 
+import java.awt.Desktop;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -224,16 +225,37 @@ public final class AccountScreen extends Screen {
         this.search.setHint(this.search.getMessage().copy().withStyle(ChatFormatting.DARK_GRAY));
         this.addRenderableWidget(this.search);
 
+        // Top-row import buttons flank the search box. On narrow windows they move to a
+        // second row so they never clip off-screen or overlap the Direct Play shortcuts.
+        boolean narrowTop = this.width < 560;
+        int importRowY = narrowTop ? 32 : 11;
+        int openImportX = narrowTop ? this.width / 2 - 152 : this.width / 2 - 179;
+        int bulkImportX = narrowTop ? this.width / 2 + 52 : this.width / 2 + 80;
+        int openImportW = narrowTop ? 96 : 96;
+        int bulkImportW = narrowTop ? 100 : 100;
+        if (openImportX < 4) {
+            openImportX = 4;
+        }
+        if (bulkImportX + bulkImportW > this.width - 4) {
+            bulkImportX = Math.max(4, this.width - 4 - bulkImportW);
+        }
         Button bulkImport = Button.builder(Component.translatable("ias.accounts.bulkImport"), btn -> this.list.importBulk())
-                .bounds(this.width / 2 + 80, 11, 100, 20)
+                .bounds(bulkImportX, importRowY, bulkImportW, 20)
                 .tooltip(Tooltip.create(Component.translatable("ias.accounts.bulkImport.tip")))
                 .build();
         this.addRenderableWidget(bulkImport);
 
+        Button openImport = Button.builder(Component.translatable("ias.accounts.openImport"), btn -> this.openImportFolder())
+                .bounds(openImportX, importRowY, openImportW, 20)
+                .tooltip(Tooltip.create(Component.translatable("ias.accounts.openImport.tip")))
+                .build();
+        this.addRenderableWidget(openImport);
+
         // Direct-play shortcuts: jump straight to the vanilla world list or
         // direct-connect after login, without going back through the
-        // launcher home UI (Lunar bypass).
-        if (IASConfig.directPlayButtons) {
+        // launcher home UI (Lunar bypass). Hidden on narrow windows where they
+        // would overlap Bulk Import (bulkRight > directLeft when width < 568).
+        if (IASConfig.directPlayButtons && this.width >= 568) {
             Button directSingleplayer = Button.builder(Component.translatable("menu.singleplayer"),
                             btn -> DirectPlay.openSingleplayer(this.minecraft, this))
                     .bounds(this.width - 104, 8, 100, 20)
@@ -394,9 +416,10 @@ public final class AccountScreen extends Screen {
 
         // Add account list.
         int listWidth = Math.min(this.width, 260);
-        int listHeight = this.height - 24 - 24 - 24 - 24 - 4 - 34;
+        int listTop = narrowTop ? 56 : 34;
+        int listHeight = Math.max(20, this.height - 24 - 24 - 24 - 24 - 4 - listTop);
         int listX = this.width / 2 - listWidth / 2;
-        int listY = 34;
+        int listY = listTop;
         if (this.list != null) {
             this.list.setRectangle(listWidth, listHeight, listX, listY);
         } else {
@@ -450,8 +473,13 @@ public final class AccountScreen extends Screen {
                 Component.translatable("ias.accounts.checkHypixel.confirm"),
                 Component.translatable("ias.accounts.checkHypixel.confirm.button"),
                 () -> {
-                    //$ set_screen 'this.minecraft' 'new HypixelCheckPopupScreen(this, this.list)'
-                    this.minecraft.gui.setScreen(new HypixelCheckPopupScreen(this, this.list));
+                    //$ set_screen 'this.minecraft' 'new HypixelCheckPopupScreen(this, this.list, false)'
+                    this.minecraft.gui.setScreen(new HypixelCheckPopupScreen(this, this.list, false));
+                },
+                Component.translatable("ias.accounts.checkHypixel.direct"),
+                () -> {
+                    //$ set_screen 'this.minecraft' 'new HypixelCheckPopupScreen(this, this.list, true)'
+                    this.minecraft.gui.setScreen(new HypixelCheckPopupScreen(this, this.list, true));
                 });
         //$ set_screen 'this.minecraft' confirm
         this.minecraft.gui.setScreen(confirm);
@@ -523,8 +551,8 @@ public final class AccountScreen extends Screen {
         }
         int listWidth = Math.min(this.width, 260);
         int left = this.width / 2 - listWidth / 2;
-        int top = 34;
-        int height = this.height - 24 - 24 - 24 - 24 - 4 - 34;
+        int top = this.width < 560 ? 56 : 34;
+        int height = this.height - 24 - 24 - 24 - 24 - 4 - top;
         return new int[]{left, top, listWidth, Math.max(0, height)};
     }
 
@@ -635,6 +663,27 @@ public final class AccountScreen extends Screen {
         if (selected == null) return null;
         Account account = selected.account();
         return account instanceof MicrosoftAccount microsoft ? microsoft : null;
+    }
+
+    private void openImportFolder() {
+        try {
+            IAS.ensureImportDirectory();
+            Path dir = IAS.importDirectory().toAbsolutePath();
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+                Desktop.getDesktop().open(dir.toFile());
+                return;
+            }
+            String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+            if (os.contains("win")) {
+                new ProcessBuilder("explorer.exe", dir.toString()).start();
+            } else if (os.contains("mac")) {
+                new ProcessBuilder("open", dir.toString()).start();
+            } else {
+                new ProcessBuilder("xdg-open", dir.toString()).start();
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("IAS: Unable to open the cookie import folder.", t);
+        }
     }
 
     private void browseSkinPng() {
@@ -759,19 +808,19 @@ public final class AccountScreen extends Screen {
         assert this.minecraft != null;
 
         // Shift+Down or Page Down to swap down.
-        if ((key == GLFW.GLFW_KEY_DOWN && shift) || key == GLFW.GLFW_KEY_PAGE_DOWN) {
+        if ((key == IInput.DOWN && shift) || key == IInput.PAGE_DOWN) {
             this.list.swapDown(this.list.getSelected());
             return true;
         }
 
         // Shift+Up or Page Up to swap up.
-        if ((key == GLFW.GLFW_KEY_UP && shift) || key == GLFW.GLFW_KEY_PAGE_UP) {
+        if ((key == IInput.UP && shift) || key == IInput.PAGE_UP) {
             this.list.swapUp(this.list.getSelected());
             return true;
         }
 
         // Ctrl+C to copy name. (Ctrl+Shift+C to copy UUID) {
-        if (key == GLFW.GLFW_KEY_C && control) {
+        if (key == IInput.C && control) {
             AccountEntry selected = this.list.getSelected();
             if (selected != null) {
                 Account account = selected.account();
@@ -797,20 +846,20 @@ public final class AccountScreen extends Screen {
             return true;
         }
 
-        // Delete or Numpad Minus to delete.
-        if (key == GLFW.GLFW_KEY_DELETE || key == GLFW.GLFW_KEY_KP_SUBTRACT) {
+        // Delete or Numpad Minus (also main '-' for SDL builds) to delete.
+        if (key == IInput.DELETE || key == IInput.SUBTRACT || key == IInput.MINUS) {
             this.list.delete(!shift);
             return true;
         }
 
         // CTRL+N or Numpad Plus to add.
-        if ((key == GLFW.GLFW_KEY_N && control) || key == GLFW.GLFW_KEY_KP_ADD) {
+        if ((key == IInput.N && control) || key == IInput.ADD) {
             this.list.add();
             return true;
         }
 
         // CTRL+R or Numpad Asterisk to edit.
-        if ((key == GLFW.GLFW_KEY_R && control) || key == GLFW.GLFW_KEY_KP_MULTIPLY) {
+        if ((key == IInput.R && control) || key == IInput.MULTIPLY) {
             this.list.edit();
             return true;
         }
