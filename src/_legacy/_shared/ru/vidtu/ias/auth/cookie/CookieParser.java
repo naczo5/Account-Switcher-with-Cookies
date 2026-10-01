@@ -537,7 +537,28 @@ public final class CookieParser {
         if (value.startsWith(MSA_TOKEN_PREFIX) || value.startsWith("M.") || value.startsWith("0.")) {
             return value.length() > 40;
         }
+        // Minecraft access tokens (MCA JWT, eyJ...) are routed to TokenImporter,
+        // never the refresh-token grant — exclude them here so a pasted *_token.txt
+        // falls through to the TokenImporter fallback in CookiePopupScreen instead
+        // of a doomed oauth20_token.srf exchange.
+        if (looksLikeMinecraftAccessToken(value)) {
+            return false;
+        }
         return value.length() >= 80 && value.matches("[A-Za-z0-9._\\-+=/*!$]+");
+    }
+
+    /**
+     * Whether the value is shaped like a Minecraft access-token JWT ({@code eyJ...}).
+     * Mirrors {@code TokenImporter} detection; kept local to avoid a
+     * CookieParser &lt;-&gt; TokenImporter package cycle.
+     */
+    @Contract(pure = true)
+    private static boolean looksLikeMinecraftAccessToken(@NotNull String value) {
+        if (!value.startsWith("eyJ")) {
+            return false;
+        }
+        int firstDot = value.indexOf('.');
+        return firstDot > 3 && value.indexOf('.', firstDot + 1) > firstDot + 1;
     }
 
     /**

@@ -1,0 +1,73 @@
+#!/bin/sh
+#
+# In-Game Account Switcher is a third-party mod for Minecraft Java Edition that
+# allows you to change your logged in account in-game, without restarting it.
+#
+# Copyright (C) 2015-2022 The_Fireplace
+# Copyright (C) 2021-2026 VidTu
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>
+
+# Fail on error, fail on unbound variable, pipefail mode.
+set -euo pipefail
+
+# Repository root (this script lives in tests/).
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+OUT="$ROOT/tests/out"
+SRC="$ROOT/src/_legacy/_shared"
+
+# Resolve a JDK 17+ javac.
+JAVAC=""
+for cand in "${JDK17_HOME:-/nonexistent}/bin/javac" "${JAVA_HOME:-/nonexistent}/bin/javac" \
+    /usr/lib/jvm/*/bin/javac "$HOME"/.jdks/*/bin/javac \
+    /c/Program\ Files/Java/*/bin/javac /c/Program\ Files/Eclipse\ Adoptium/*/bin/javac; do
+    if [ -x "$cand" ] && "$cand" -version 2>&1 | grep -Eq 'javac (1[7-9]|[2-9][0-9])'; then
+        JAVAC="$cand"
+        break
+    fi
+done
+if [ -z "$JAVAC" ] && command -v javac >/dev/null 2>&1 \
+    && javac -version 2>&1 | grep -Eq 'javac (1[7-9]|[2-9][0-9])'; then
+    JAVAC="javac"
+fi
+if [ -z "$JAVAC" ]; then
+    echo "run-parser-tests: JDK 17+ required (set JDK17_HOME)." >&2
+    exit 2
+fi
+
+# Resolve compile-only annotation jars from the Gradle cache.
+GUH="${GRADLE_USER_HOME:-$HOME/.gradle}"
+ANN="$(find "$GUH/caches/modules-2" -name 'annotations-*.jar' ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -n 1)"
+EP="$(find "$GUH/caches/modules-2" -name 'error_prone_annotations-*.jar' ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -n 1)"
+if [ -z "$ANN" ] || [ -z "$EP" ]; then
+    echo "run-parser-tests: annotations jars not found under $GUH (run any Gradle build once)." >&2
+    exit 2
+fi
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*|Windows*) SEP=";" ;;
+    *) SEP=":" ;;
+esac
+
+rm -rf "$OUT"
+mkdir -p "$OUT/classes"
+"$JAVAC" -encoding UTF-8 -d "$OUT/classes" -cp "$ANN$SEP$EP" \
+    "$SRC/ru/vidtu/ias/auth/cookie/CookieParser.java" \
+    "$SRC/ru/vidtu/ias/auth/cookie/CookieEntry.java" \
+    "$SRC/ru/vidtu/ias/utils/exceptions/FriendlyException.java" \
+    "$ROOT/tests/parser/ru/vidtu/ias/tests/CookieParserTest.java"
+
+# Tests resolve .agents/skills examples relative to the repo root.
+cd "$ROOT"
+"$(dirname -- "$JAVAC")/java" -cp "$OUT/classes" ru.vidtu.ias.tests.CookieParserTest

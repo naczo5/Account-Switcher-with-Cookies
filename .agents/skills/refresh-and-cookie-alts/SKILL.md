@@ -1,28 +1,29 @@
 ---
 name: refresh-and-cookie-alts
 description: >-
-  Comprehensive reference and guide for Microsoft refresh tokens (Localts) and Netscape cookie alts
-  in Minecraft and In-Game Account Switcher (IAS). Use this skill when inspecting, parsing, importing,
-  or debugging Minecraft alt accounts, authentication flows (SISU, OAuth2), and cookie file formats.
+  Comprehensive reference and guide for Microsoft refresh tokens (Localts), Netscape cookie alts,
+  and Minecraft access tokens (MCA JWTs) in Minecraft and In-Game Account Switcher (IAS). Use this skill
+  when inspecting, parsing, importing, or debugging Minecraft alt accounts, authentication flows
+  (SISU, OAuth2), and cookie/token file formats.
 ---
 
-# Microsoft Refresh Tokens & Cookie Alts Reference
+# Microsoft Refresh Tokens, Cookie Alts & Minecraft Access Tokens Reference
 
-This skill provides an accurate technical guide to **Refresh Tokens** ("Refresh Alts") and **Cookie Alts** ("Cookie Alts / Netscape Cookies") as used in Minecraft authentication and the In-Game Account Switcher (IAS) mod.
+This skill provides an accurate technical guide to **Refresh Tokens** ("Refresh Alts"), **Cookie Alts** ("Cookie Alts / Netscape Cookies"), and **Minecraft Access Tokens** ("MCA JWT / mcToken") as used in Minecraft authentication and the In-Game Account Switcher (IAS) mod.
 
 ---
 
 ## 1. Quick Comparison
 
-| Feature | Refresh Token ("Refresh Alt" / Localts) | Cookie Alt ("Cookie Alt" / Netscape) |
-| :--- | :--- | :--- |
-| **Origin** | OAuth 2.0 authorization refresh token from Microsoft identity | Browser session export from `login.live.com` / `live.com` |
-| **Format** | Single token string, `<username>:<token>`, or JSON (`{"mcToken": "..."}`) | Tab-delimited (TSV) Netscape 7-column format or HTTP `Cookie:` header |
-| **Key Identifier** | Starts with `M.C` (e.g., `M.C512_BAY...`, `M.C508_BL2...`) | Contains `__Host-MSAAUTHP` and/or `__Host-MSAAUTH` |
-| **Length** | Typically 300–450+ characters | Multi-line file (10–20+ lines, several kilobytes) |
-| **Auth Flow** | Direct OAuth 2.0 `refresh_token` grant to `login.live.com/oauth20_token.srf` | Session cookie emulation via direct OAuth code grant or Xbox Live SISU redirect chain |
-| **Longevity** | High; valid indefinitely until revoked (password change, session revoke) | Medium/Fragile; expires with web session or web logout |
-| **IAS Auto-Upgrade** | Already in optimal refresh token format | IAS attempts direct OAuth on import to extract and save a persistent `M.C` refresh token |
+| Feature | Refresh Token ("Refresh Alt" / Localts) | Cookie Alt ("Cookie Alt" / Netscape) | Minecraft Access Token ("MCA" / mcToken JWT) |
+| :--- | :--- | :--- | :--- |
+| **Origin** | OAuth 2.0 authorization refresh token from Microsoft identity | Browser session export from `login.live.com` / `live.com` | Final `login_with_xbox` Bearer from `api.minecraftservices.com` |
+| **Format** | Single token string, `<username>:<token>`, or JSON (`{"mcToken": "..."}`) | Tab-delimited (TSV) Netscape 7-column format or HTTP `Cookie:` header | 3-part JWT `eyJ.../.../.sig`, bare file, `Bearer eyJ...`, or JSON (`{"mcToken":"eyJ..."}`) |
+| **Key Identifier** | Starts with `M.C` (e.g., `M.C512_BAY...`, `M.C508_BL2...`) | Contains `__Host-MSAAUTHP` and/or `__Host-MSAAUTH` | Starts with `eyJ`, header `kid: 049181 / alg: RS256`, payload `iss: authentication`, `auth: XBOX`, `profiles.mc` + `pfd[type=mc].name/id`, `xuid/xid` |
+| **Length** | Typically 300–450+ characters | Multi-line file (10–20+ lines, several kilobytes) | Single line, typically ~1000–1100 characters |
+| **Auth Flow** | Direct OAuth 2.0 `refresh_token` grant to `login.live.com/oauth20_token.srf` | Session cookie emulation via direct OAuth code grant or Xbox Live SISU redirect chain | Direct `GET minecraft/profile` with `Authorization: Bearer <mca>` (`MSAuth.mcaToMcp`) — no renewal step |
+| **Longevity** | High; valid indefinitely until revoked (password change, session revoke) | Medium/Fragile; expires with web session or web logout | Low; ~24h (`exp - nbf = 86400`), non-renewable |
+| **IAS Auto-Upgrade** | Already in optimal refresh token format | IAS attempts direct OAuth on import to extract and save a persistent `M.C` refresh token | No upgrade possible; import only validates and stores until `exp` |
 
 ---
 
@@ -138,7 +139,7 @@ In IAS (`ru.vidtu.ias.auth.cookie.CookieParser` and `ru.vidtu.ias.screen.CookieP
      - Reads the `accessToken` redirect parameter from the final hop back to `minecraft.net`.
      - Decodes the base64 payload to extract user hash (`uhs`) and XSTS token, then calls `login_with_xbox`.
 
-### 3.5 Example: Cookie Alt (Netscape TSV, placeholder only)
+### 3.5 Example: Cookie Alt (Netscape TSV, full structure, all values fake)
 
 See file: [cookie-alt-netscape.txt](./examples/cookie-alt-netscape.txt).
 
@@ -151,20 +152,50 @@ login.live.com	FALSE	/	TRUE	3784011825	__Host-MSAAUTHP	11-M.C000_EXAMPLE.FAKE-PL
 
 ---
 
-## 4. In-Game Account Switcher (IAS) Handling & Workflows
+## 4. Minecraft Access Tokens (MCA JWT / mcToken)
 
-### 4.1 GUI Import Options
+### 4.1 Overview & Architecture
+A **Minecraft Access Token** is the final Bearer credential minted by `POST api.minecraftservices.com/authentication/login_with_xbox` from `XBL3.0 x=<uhs>;<xsts>`. It is what IAS sends as `Authorization: Bearer <mca>` to `minecraft/profile` (`MSAuth.mcaToMcp`) and what the game injects as the session `accessToken`. Alt sellers sometimes distribute it as a `*_token.txt` single-line file.
+
+Because it embeds the Xbox claims **and** the Minecraft profile, it is directly usable with no further exchange — but it cannot be refreshed. Once `exp` passes (~24h after `iat`), only a fresh `M.C` refresh or `login.live.com` cookies can produce a new one.
+
+### 4.2 Token Structure & Characteristics
+- **Shape**: 3 dot-separated Base64URL parts, starts with `eyJ` (`{"kid":"049181","alg":"RS256"}`).
+- **Payload claims**: `xuid` / `xid` (same value), `agg: Adult`, `sub` (MSA user id), `auth: XBOX`, `iss: authentication`, `flags: ["multiplayer"]`, `platform: PC_LAUNCHER`, `tid: E99B0`, `aid: 00000000-0000-0000-0000-0000402b5328` (Minecraft client ID).
+- **Profile binding**: `profiles.mc: <uuid-dashed>` plus `pfd: [{type: mc, id: <uuid>, name: <username>}]`. The filename often matches (`Sv2Void7vh_token.txt` → `Sv2Void7vh`).
+- **Lifetime**: `exp - nbf = 86400` (24h).
+- **Accepted wrappers**: bare JWT line, `Bearer <jwt>` / `MCToken <jwt>` prefix, `username:<jwt>`, or JSON `{"mcToken": "eyJ..."}` — `TokenImporter.normalizeToken` strips all of them before `looksLikeMinecraftAccessToken`.
+
+### 4.3 How IAS Authenticates MCA Tokens
+In IAS (`TokenImporter`, `MSAccountFactory`, `MSAuth`):
+1. **Routing**: `TokenImporter.looksLikeMinecraftAccessToken()` (`startsWith eyJ` + two dots) is checked **before** any refresh logic in `createAccountFromToken()` — and `CookieParser.looksLikeRefreshToken()` explicitly excludes MCA shapes, so a pasted `*_token.txt` falls through `CookieParser.fromText()` (`ias.error.cookie.invalid`) to the `TokenImporter.importText` fallback in `CookiePopupScreen.startCreateFromSource` instead of a doomed `oauth20_token.srf` exchange.
+2. **Validate**: `MSAccountFactory.createFromMinecraftAccess()` → `MSAuth.mcaToMcp()` → `GET minecraft/profile` with `Bearer`. Success stores `accessToken` with an empty refresh slot (24h, non-renewable); `404` → `ias.error.noProfile`, other non-200 → status error.
+3. **No upgrade**: there is no `Access → Refresh` or `Access → Cookie` path — the JWT is a leaf Bearer with no refresh secret.
+
+### 4.4 Example: MCA JWT (synthetic — signature is fake, structure is realistic)
+
+See file: [minecraft-access-token-jwt.txt](./examples/minecraft-access-token-jwt.txt).
+
+```text
+eyJraWQiOiIwNDkxODEiLCJhbGciOiJSUzI1NiJ9.eyJ4dWlkIjoiMjUzMzI3NDkwOTA4NjQ3MCIsImFnZyI6IkFkdWx0Iiwic3ViIjoiZGEzMDdlYmMtNTU2Zi00YjNhLWIxY2EtODY0ZmZkZWRlNGI2IiwiYXV0aCI6IlhCT1giLCJucyI6ImRlZmF1bHQiLCJyb2xlcyI6W10sImlzcyI6ImF1dGhlbnRpY2F0aW9uIiwiZmxhZ3MiOlsibXVsdGlwbGF5ZXIiXSwicHJvZmlsZXMiOnsibWMiOiJjODEyYTU2NC1hOWRhLTQzN2YtYTMzYy1hMzI3NjBlMzE1NmYifSwicGxhdGZvcm0iOiJQQ19MQVVOQ0hFUiIsInRpZCI6IkU5OUIwIiwicGZkIjpbeyJ0eXBlIjoibWMiLCJpZCI6ImM4MTJhNTY0LWE5ZGEtNDM3Zi1hMzNjLWEzMjc2MGUzMTU2ZiIsIm5hbWUiOiJTYW1wbGVQbGF5ZXIifV0sInhpZCI6IjI1MzMyNzQ5MDkwODY0NzAiLCJuYmYiOjE3OTA4MzExMDUsImV4cCI6MTc5MDkxNzUwNSwiaWF0IjoxNzkwODMxMTA1LCJhaWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwNDAyYjUzMjgifQ.sig
+```
+
+---
+
+## 5. In-Game Account Switcher (IAS) Handling & Workflows
+
+### 5.1 GUI Import Options
 In the IAS GUI (`Cookie / Token` button):
 - **File Mode**: Enter path directly or click `...` to invoke the native file dialog.
 - **Batch Multi-File**: Selecting multiple files automatically queues them.
-- **Paste Mode**: Click `Paste` to paste raw text from clipboard (handles single bare tokens, Localts text, multiple lines of tokens, or Netscape cookie files).
+- **Paste Mode**: Click `Paste` to paste raw text from clipboard (handles single bare tokens, MCA JWTs, Localts text, multiple lines of tokens, or Netscape cookie files).
 
-### 4.2 Rate Limiting & Batch Queue
+### 5.2 Rate Limiting & Batch Queue
 When importing multiple cookie files or tokens:
 - IAS enforces a **6,000 ms (6s) interval** between accounts (`MULTI_COOKIE_IMPORT_DELAY_MS`) to prevent Microsoft/Minecraft API rate-limits.
 - If HTTP `429 Too Many Requests` is encountered, IAS waits **30,000 ms (30s)** (`MULTI_COOKIE_RATE_LIMIT_DELAY_MS`) and retries up to 2 times.
 
-### 4.3 Troubleshooting Common Errors
+### 5.3 Troubleshooting Common Errors
 
 | Error Key | Cause | Resolution |
 | :--- | :--- | :--- |
@@ -174,3 +205,5 @@ When importing multiple cookie files or tokens:
 | `ias.error.rateLimited` | Too many requests to Microsoft or Minecraft auth endpoints in a short time. | Wait 30–60 seconds before retrying import. |
 | `ias.error.noProfile` | Microsoft account authenticated, but has no Minecraft license/profile. | Ensure Minecraft Java Edition has been purchased and an in-game name chosen. |
 | `ias.error.xboxAdult` | Microsoft account is registered as child without parental consent. | Adjust Microsoft family / age settings for Xbox Live. |
+| `ias.error.token.exchange` on a pasted `eyJ...` file | MCA JWT sent to the refresh-token grant (pre-fix routing: generic refresh matcher swallowed the JWT). | Update to a build with the `looksLikeMinecraftAccessToken` guard in `CookieParser.looksLikeRefreshToken`; MCA must reach `TokenImporter.createAccountFromToken`. |
+| Expired `eyJ...` token / profile `401` | MCA JWT past `exp` (~24h after `iat`). | Re-export a fresh token — MCA cannot be refreshed; prefer `M.C` or cookies for longevity. |

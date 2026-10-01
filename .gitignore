@@ -17,6 +17,7 @@ fun.txt
 dev/.env
 out/
 run/
+tests/out/
 versions/
 !/.idea/codeStyles
 !/.idea/codeStyles/**
