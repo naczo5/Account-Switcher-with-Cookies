@@ -2,6 +2,8 @@
 
 # Account Switcher with Cookies (Forge / Fabric / Lunar / Localts)
 
+**English** | [简体中文](README.zh-CN.md)
+
 [![Release](https://img.shields.io/github/v/release/naczo5/Account-Switcher-with-Cookies?include_prereleases&color=238636&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
 [![Downloads](https://img.shields.io/github/downloads/naczo5/Account-Switcher-with-Cookies/total?color=1f6feb&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
 [![Stars](https://img.shields.io/github/stars/naczo5/Account-Switcher-with-Cookies?color=e3b341&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/stargazers)
