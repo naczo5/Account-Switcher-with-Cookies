@@ -20,13 +20,26 @@ public final class CookieAuth {
     private static final String COOKIE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0";
     private static final String MINECRAFT_OAUTH_CLIENT_ID = "00000000402b5328";
     private static final String MINECRAFT_OAUTH_SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
+    private static final String IAS_OAUTH_CLIENT_ID = "54fd49e4-2103-4044-9603-2b028c814ec3";
+    private static final String IAS_OAUTH_SCOPE = "XboxLive.signin XboxLive.offline_access";
 
     private CookieAuth() {
     }
 
     public static MinecraftProfile authenticate(CookieParser.ParsedCookies cookies) throws Exception {
+        Throwable refreshFailed = null;
         if (cookies.refreshToken() != null && !cookies.refreshToken().trim().isEmpty()) {
-            return profileFromRefreshToken(cookies.refreshToken().trim());
+            try {
+                return profileFromRefreshToken(cookies.refreshToken().trim());
+            } catch (Throwable t) {
+                // The M.C artifact embedded in the cookies may belong to a different OAuth
+                // client (e.g. the login.live.com web session). The cookies themselves may
+                // still be a live session, so fall back to the cookie (OAuth/SISU) flow.
+                if (cookies.cookies().isEmpty()) {
+                    throw t;
+                }
+                refreshFailed = t;
+            }
         }
         // Send only login.live.com-scoped cookies (browser parity). The old
         // toCookieHeader() leaked unrelated domains and broke auth.
@@ -41,17 +54,45 @@ public final class CookieAuth {
             MinecraftProfile profile = profileFromMsa(tokens.access, "t=");
             return new MinecraftProfile(profile.name, profile.uuid, profile.token, tokens.refresh);
         } catch (Throwable oauthFailed) {
-            String mca = cookiesToMcaViaSisu(sisuHeader);
-            MinecraftProfile profile = profileFromMca(mca);
-            // SISU path yields no refresh token; preserve empty (callers fall back).
-            return new MinecraftProfile(profile.name, profile.uuid, profile.token, "");
+            if (refreshFailed != null) {
+                oauthFailed.addSuppressed(refreshFailed);
+            }
+            try {
+                String mca = cookiesToMcaViaSisu(sisuHeader);
+                MinecraftProfile profile = profileFromMca(mca);
+                // SISU path yields no refresh token; preserve empty (callers fall back).
+                return new MinecraftProfile(profile.name, profile.uuid, profile.token, "");
+            } catch (Throwable sisuFailed) {
+                if (refreshFailed != null) {
+                    sisuFailed.addSuppressed(refreshFailed);
+                }
+                throw sisuFailed;
+            }
         }
     }
 
     /** Refreshes a Localts-backed account and preserves Microsoft's rotated refresh token. */
     public static MinecraftProfile profileFromRefreshToken(String refresh) throws Exception {
-        MsaTokens tokens = localtsRefreshToMsa(refresh);
-        MinecraftProfile profile = profileFromMsa(tokens.access, "t=");
+        MsaTokens tokens;
+        String ticketPrefix;
+        try {
+            tokens = refreshToMsa(refresh, MINECRAFT_OAUTH_CLIENT_ID, MINECRAFT_OAUTH_SCOPE,
+                    "https://login.live.com/oauth20_desktop.srf");
+            ticketPrefix = "t=";
+        } catch (Throwable launcherFailed) {
+            // A refresh token is bound to the OAuth client that issued it. Tokens copied from
+            // an account added via the IAS Microsoft login belong to the IAS client and are
+            // rejected by the launcher client with "different client id" (400); retry with the
+            // IAS client and use the delegated ("d=") RPS ticket prefix.
+            try {
+                tokens = refreshToMsa(refresh, IAS_OAUTH_CLIENT_ID, IAS_OAUTH_SCOPE, null);
+                ticketPrefix = "d=";
+            } catch (Throwable iasFailed) {
+                iasFailed.addSuppressed(launcherFailed);
+                throw iasFailed;
+            }
+        }
+        MinecraftProfile profile = profileFromMsa(tokens.access, ticketPrefix);
         return new MinecraftProfile(profile.name, profile.uuid, profile.token, tokens.refresh);
     }
 
@@ -134,19 +175,21 @@ public final class CookieAuth {
         }
     }
 
-    private static MsaTokens localtsRefreshToMsa(String refresh) throws Exception {
+    private static MsaTokens refreshToMsa(String refresh, String clientId, String scope, String redirectUri) throws Exception {
         PostRequest pr = new PostRequest("https://login.live.com/oauth20_token.srf")
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .header("Accept", "application/json");
         Map<Object, Object> data = new HashMap<>();
-        data.put("client_id", MINECRAFT_OAUTH_CLIENT_ID);
+        data.put("client_id", clientId);
         data.put("refresh_token", refresh);
         data.put("grant_type", "refresh_token");
-        data.put("redirect_uri", "https://login.live.com/oauth20_desktop.srf");
-        data.put("scope", MINECRAFT_OAUTH_SCOPE);
+        if (redirectUri != null && !redirectUri.isEmpty()) {
+            data.put("redirect_uri", redirectUri);
+        }
+        data.put("scope", scope);
         pr.post(data);
         if (pr.response() != 200) {
-            throw new CookieAuthException("Localts refresh token exchange failed.", "ias.error.cookie.expired");
+            throw new CookieAuthException("Refresh token exchange failed (HTTP " + pr.response() + ").", "ias.error.cookie.expired");
         }
         JsonObject jo = AuthSys.gson().fromJson(pr.body(), JsonObject.class);
         String rotated = jo.has("refresh_token") ? jo.get("refresh_token").getAsString() : refresh;

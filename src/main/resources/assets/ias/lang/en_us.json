@@ -138,7 +138,7 @@
   "ias.error.token.expired": "Microsoft token exchange failed: Refresh token is expired (%s).",
   "ias.error.token.revoked": "Microsoft token exchange failed: Refresh token has been revoked (%s).",
   "ias.error.token.invalidGrant": "Microsoft token exchange failed: Invalid grant or expired credentials (%s).",
-  "ias.error.token.clientMismatch": "Microsoft token exchange failed: Client mismatch (%s).",
+  "ias.error.token.clientMismatch": "Microsoft token exchange failed: this token was issued to a different app/OAuth client (%s). Tokens from other launchers or token generators cannot be imported; use cookies or add the account via Microsoft login.",
   "ias.token": "Paste Token",
   "ias.token.input": "Minecraft access token",
   "ias.token.hint": "Paste token",

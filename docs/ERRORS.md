@@ -22,6 +22,14 @@ If this didn't help, try a different browser.
 You've closed the authentication page. Try again.
 If you didn't do this, possibly you're being restricted by your family control.
 
+### Microsoft token exchange failed: this token was issued to a different app/OAuth client...
+
+Refresh tokens are bound to the OAuth client (app) that created them. A token exported from another launcher, alt
+generator, or browser session cannot be redeemed by this mod, even if the token itself is still valid. Tokens copied
+with **Copy Refresh Token** in this mod or exported from the official Minecraft launcher work, and the mod retries
+both OAuth clients automatically. If you still get this error, add the account through **Add → Microsoft** or import
+the original cookie file instead.
+
 ### Unable to decrypt local account data...
 
 You've entered the wrong decryption password or your hardware has been changed.

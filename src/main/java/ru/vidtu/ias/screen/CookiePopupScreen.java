@@ -42,7 +42,6 @@ import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.auth.TokenImporter;
 import ru.vidtu.ias.auth.cookie.CookieParser;
 import ru.vidtu.ias.auth.handlers.CreateHandler;
-import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.auth.microsoft.MSAccountFactory;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.config.IASStorage;
@@ -705,12 +704,46 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 }
 
                 if (!cookies.refreshToken().isBlank()) {
-                    MSAuth.minecraftRefreshToMsaMsr(cookies.refreshToken())
-                            .thenComposeAsync(ms -> MSAccountFactory.createFromMinecraftRefresh(this.crypt, ms, createHandler), IAS.executor())
-                            .exceptionallyAsync(t -> {
-                                createHandler.error(t);
-                                return null;
-                            }, IAS.executor());
+                    // Route through TokenImporter so tokens minted for the IAS OAuth client (for
+                    // example, a refresh token copied from an account added via Microsoft login)
+                    // are retried with the launcher client, and vice versa. A launcher-only
+                    // exchange rejects IAS-bound tokens with "Client mismatch" (400).
+                    boolean hasCookies = !cookies.cookies().isEmpty();
+                    TokenImporter.createAccountFromToken(this.crypt, cookies.refreshToken(), new CreateHandler() {
+                        @Override
+                        public boolean cancelled() {
+                            return createHandler.cancelled();
+                        }
+
+                        @Override
+                        public void stage(String stage, Object... args) {
+                            createHandler.stage(stage, args);
+                        }
+
+                        @Override
+                        public void success(MicrosoftAccount account) {
+                            createHandler.success(account);
+                        }
+
+                        @Override
+                        public void error(Throwable error) {
+                            if (!hasCookies || createHandler.cancelled()) {
+                                createHandler.error(error);
+                                return;
+                            }
+
+                            // The M.C artifact embedded in the cookies may belong to a different
+                            // OAuth client (e.g. the login.live.com web session), in which case it
+                            // cannot be redeemed here. The cookies themselves may still be a live
+                            // session, so retry through the regular cookie (OAuth/SISU) flow.
+                            AuthLog.expected(LOGGER, "Embedded refresh token failed, falling back to cookie auth", error);
+                            MSAccountFactory.createFromCookies(CookiePopupScreen.this.crypt, cookies.toCookieHeader(), createHandler)
+                                    .exceptionallyAsync(t -> {
+                                        createHandler.error(t);
+                                        return null;
+                                    }, IAS.executor());
+                        }
+                    });
                     return;
                 }
 
