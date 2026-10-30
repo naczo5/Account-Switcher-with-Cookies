@@ -59,6 +59,12 @@ public class GuiProviders extends GuiScreen {
     }
 
     @Override
+    public void onGuiClosed() {
+        Keyboard.enableRepeatEvents(false);
+        super.onGuiClosed();
+    }
+
+    @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         if (this.parent != null) {
             this.parent.drawScreen(0, 0, partialTicks);

@@ -11,6 +11,7 @@ import net.minecraft.util.EnumChatFormatting;
 import org.lwjgl.Sys;
 import org.lwjgl.input.Keyboard;
 import ru.vidtu.ias.auth.localts.LocaltsClient;
+import ru.vidtu.ias.auth.localts.LocaltsException;
 import ru.vidtu.ias.auth.localts.LocaltsMe;
 import ru.vidtu.ias.auth.localts.LocaltsOrder;
 import ru.vidtu.ias.auth.localts.LocaltsOrderSummary;
@@ -28,7 +29,6 @@ import java.awt.Desktop;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -42,6 +42,7 @@ public class GuiLocalts extends GuiScreen {
     private boolean loading;
     private boolean importing;
     private boolean purchasing;
+    private boolean initialRefreshTriggered;
     private volatile boolean closed;
 
     private GuiTextField apiKeyField;
@@ -122,7 +123,8 @@ public class GuiLocalts extends GuiScreen {
             // Back button
             this.buttonList.add(new GuiButton(15, centerX - 50, centerY + 50, 100, 20, I18n.format("gui.back")));
 
-            if (this.user == null && !this.loading) {
+            if (!this.initialRefreshTriggered && this.user == null && !this.loading) {
+                this.initialRefreshTriggered = true;
                 refreshData();
             }
         }
@@ -131,7 +133,8 @@ public class GuiLocalts extends GuiScreen {
     private boolean canPurchaseSelected() {
         if (this.products.isEmpty() || this.selectedProductIndex >= this.products.size()) return false;
         LocaltsProduct prod = this.products.get(this.selectedProductIndex);
-        if (prod.stock() < this.purchaseQty || this.purchaseQty < 1) return false;
+        if (prod.stock() >= 0 && prod.stock() < this.purchaseQty) return false;
+        if (this.purchaseQty < 1) return false;
         if (this.user == null) return false;
         long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
         return this.user.balance() >= totalCost;
@@ -376,7 +379,7 @@ public class GuiLocalts extends GuiScreen {
     }
 
     private void confirmPurchase() {
-        if (!canPurchaseSelected() || this.purchasing) return;
+        if (!canPurchaseSelected() || this.purchasing || this.importing) return;
         final LocaltsProduct prod = this.products.get(this.selectedProductIndex);
         final int qty = this.purchaseQty;
 
@@ -388,58 +391,71 @@ public class GuiLocalts extends GuiScreen {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                LocaltsPurchaseResult purchaseResult = null;
                 try {
                     LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
-                    LocaltsPurchaseResult purchaseResult = client.purchase(prod.id(), qty);
+                    purchaseResult = client.purchase(prod.id(), qty);
                     LocaltsOrder order = client.getOrder(purchaseResult.orderId());
                     List<String> rawAccounts = LocaltsClient.extractOrderAccounts(order);
 
-                    int imported = 0;
+                    final List<CookieAuth.MinecraftProfile> profiles = new ArrayList<CookieAuth.MinecraftProfile>();
                     for (String payload : rawAccounts) {
                         try {
                             List<String> tokens = TokenImporter.extractValues(payload);
                             if (!tokens.isEmpty()) {
-                                CookieAuth.MinecraftProfile profile = TokenImporter.importSingleToken(tokens.get(0));
-                                ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
-                                data.premium = EnumBool.TRUE;
-                                ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
-                                imported++;
+                                profiles.add(TokenImporter.importSingleToken(tokens.get(0)));
                             } else {
                                 CookieParser.ParsedCookies parsed = CookieParser.fromText(payload);
-                                CookieAuth.MinecraftProfile profile = CookieAuth.authenticate(parsed);
-                                ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
-                                data.premium = EnumBool.TRUE;
-                                ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
-                                imported++;
+                                profiles.add(CookieAuth.authenticate(parsed));
                             }
-                        } catch (Throwable ignored) {
+                        } catch (Throwable t) {
+                            t.printStackTrace();
                         }
                     }
 
-                    Config.save();
-                    final int count = imported;
-                    final LocaltsMe updatedMe = client.getMe();
+                    LocaltsMe updatedMe = null;
+                    try {
+                        updatedMe = client.getMe();
+                    } catch (Throwable ignored) {
+                    }
+                    final LocaltsMe finalMe = updatedMe;
 
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
                             if (closed) return;
-                            user = updatedMe;
+                            if (finalMe != null) {
+                                user = finalMe;
+                            }
+                            int count = 0;
+                            for (CookieAuth.MinecraftProfile profile : profiles) {
+                                saveAccount(profile);
+                                count++;
+                            }
+                            if (count > 0) {
+                                Config.save();
+                            }
                             purchasing = false;
+                            buyingMode = false;
                             statusText = I18n.format("ias.localts.buy.success", count);
                             statusColor = 0x55FF55;
-                            buyingMode = false;
                             initGui();
                         }
                     });
                 } catch (final Throwable t) {
+                    final LocaltsPurchaseResult res = purchaseResult;
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
                             if (closed) return;
                             purchasing = false;
-                            statusText = formatError(t);
-                            statusColor = 0xFF5555;
+                            if (res != null && res.orderId() != null && !res.orderId().isEmpty()) {
+                                statusText = "Order " + res.orderId() + " created, delivery failed: " + formatError(t) + ". Click Refresh to retrieve.";
+                                statusColor = 0xFFAA00;
+                            } else {
+                                statusText = formatError(t);
+                                statusColor = 0xFF5555;
+                            }
                             initGui();
                         }
                     });
@@ -449,7 +465,7 @@ public class GuiLocalts extends GuiScreen {
     }
 
     private void importPackagedAccounts() {
-        if (this.packagedAccounts.isEmpty() || this.importing) return;
+        if (this.packagedAccounts.isEmpty() || this.importing || this.purchasing) return;
         this.importing = true;
         this.statusText = I18n.format("ias.login.cookiesToMsaMsr");
         this.statusColor = 0xFFFF55;
@@ -459,37 +475,36 @@ public class GuiLocalts extends GuiScreen {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                int count = 0;
+                final List<CookieAuth.MinecraftProfile> profiles = new ArrayList<CookieAuth.MinecraftProfile>();
                 for (String payload : toImport) {
                     if (closed) return;
                     try {
                         List<String> tokens = TokenImporter.extractValues(payload);
                         if (!tokens.isEmpty()) {
-                            CookieAuth.MinecraftProfile profile = TokenImporter.importSingleToken(tokens.get(0));
-                            ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
-                            data.premium = EnumBool.TRUE;
-                            ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
-                            count++;
+                            profiles.add(TokenImporter.importSingleToken(tokens.get(0)));
                         } else {
                             CookieParser.ParsedCookies parsed = CookieParser.fromText(payload);
-                            CookieAuth.MinecraftProfile profile = CookieAuth.authenticate(parsed);
-                            ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
-                            data.premium = EnumBool.TRUE;
-                            ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
-                            count++;
+                            profiles.add(CookieAuth.authenticate(parsed));
                         }
-                    } catch (Throwable ignored) {
+                    } catch (Throwable t) {
+                        t.printStackTrace();
                     }
                 }
 
-                Config.save();
-                final int finalCount = count;
                 Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                     @Override
                     public void run() {
                         if (closed) return;
+                        int count = 0;
+                        for (CookieAuth.MinecraftProfile profile : profiles) {
+                            saveAccount(profile);
+                            count++;
+                        }
+                        if (count > 0) {
+                            Config.save();
+                        }
                         importing = false;
-                        statusText = I18n.format("ias.localts.imported", finalCount);
+                        statusText = I18n.format("ias.localts.imported", count);
                         statusColor = 0x55FF55;
                         initGui();
                     }
@@ -498,8 +513,23 @@ public class GuiLocalts extends GuiScreen {
         }, "IAS-Localts-Import").start();
     }
 
+    private static boolean saveAccount(CookieAuth.MinecraftProfile profile) {
+        ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
+        data.premium = EnumBool.TRUE;
+        return ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
+    }
+
     private static String formatError(Throwable t) {
         if (t == null) return "Unknown error";
+        if (t instanceof LocaltsException) {
+            LocaltsException le = (LocaltsException) t;
+            if (le.translationKey() != null && !le.translationKey().isEmpty()) {
+                try {
+                    return I18n.format(le.translationKey(), le.args());
+                } catch (Throwable ignored) {
+                }
+            }
+        }
         String msg = t.getMessage();
         return (msg != null && !msg.isEmpty()) ? msg : t.toString();
     }
@@ -536,8 +566,7 @@ public class GuiLocalts extends GuiScreen {
         } else if (this.buyingMode) {
             this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.title"), centerX, centerY - 64, 0xFFFFFF);
 
-            String balanceStr = this.user != null ? (this.user.balance() + " credits") : "---";
-            this.drawCenteredString(this.fontRendererObj, EnumChatFormatting.GRAY + "Balance: " + EnumChatFormatting.GOLD + balanceStr, centerX, centerY - 48, 0xFFFFFF);
+            String balanceStr = this.user != null ? String.valueOf(this.user.balance()) : "---";
 
             if (this.products.isEmpty()) {
                 String msg = this.loading ? I18n.format("ias.localts.loading") : I18n.format("ias.localts.buy.noProducts");
@@ -545,11 +574,9 @@ public class GuiLocalts extends GuiScreen {
             } else if (this.selectedProductIndex < this.products.size()) {
                 LocaltsProduct prod = this.products.get(this.selectedProductIndex);
 
-                String prodLine = prod.name() + " (" + prod.priceInCredits() + " credits)";
+                String stockStr = prod.stock() >= 0 ? String.valueOf(prod.stock()) : "∞";
+                String prodLine = I18n.format("ias.localts.buy.product", prod.name(), prod.priceInCredits(), stockStr);
                 this.drawCenteredString(this.fontRendererObj, prodLine, centerX, centerY - 25, 0xFFFFAA);
-
-                String stockLine = EnumChatFormatting.GRAY + "Stock: " + (prod.stock() > 0 ? (EnumChatFormatting.GREEN + String.valueOf(prod.stock())) : (EnumChatFormatting.RED + "0"));
-                this.drawCenteredString(this.fontRendererObj, stockLine, centerX, centerY - 12, 0xFFFFFF);
 
                 this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.qty", this.purchaseQty), centerX, centerY + 8, 0xFFFFFF);
 
@@ -562,8 +589,8 @@ public class GuiLocalts extends GuiScreen {
             this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.title"), centerX, centerY - 64, 0xFFFFFF);
 
             if (this.user != null) {
-                String userHeader = EnumChatFormatting.GREEN + "@" + this.user.username() + EnumChatFormatting.GRAY + " | " + EnumChatFormatting.GOLD + this.user.balance() + " credits";
-                this.drawCenteredString(this.fontRendererObj, userHeader, centerX, centerY - 48, 0xFFFFFF);
+                String userHeader = I18n.format("ias.localts.connected", this.user.username(), this.user.balance());
+                this.drawCenteredString(this.fontRendererObj, EnumChatFormatting.GREEN + userHeader, centerX, centerY - 48, 0xFFFFFF);
             } else if (this.loading) {
                 this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.connecting"), centerX, centerY - 48, 0xFFFF55);
             }

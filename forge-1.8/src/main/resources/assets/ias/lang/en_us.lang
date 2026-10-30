@@ -127,3 +127,4 @@ ias.error.localts.http=Localts returned error status HTTP %s
 ias.error.localts.failed=Localts API error: %s
 ias.error.localts.purchase=Localts purchase failed: %s
 ias.error.localts.network=Failed to connect to Localts: %s
+ias.localts.imported=%s account(s) imported from Localts.

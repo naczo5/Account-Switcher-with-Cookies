@@ -28,6 +28,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import org.joml.Matrix3x2fStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,11 +42,13 @@ import ru.vidtu.ias.auth.localts.LocaltsOrdersPage;
 import ru.vidtu.ias.auth.localts.LocaltsProduct;
 import ru.vidtu.ias.auth.localts.LocaltsPurchaseResult;
 import ru.vidtu.ias.config.IASConfig;
+import ru.vidtu.ias.auth.localts.LocaltsException;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.platform.IStonecutter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -85,7 +88,7 @@ final class LocaltsPopupScreen extends Screen {
     private boolean buyingMode;
     private boolean loading;
     private boolean purchasing;
-    private boolean closed;
+    private volatile boolean closed;
     private boolean initialRefreshTriggered;
     private Component statusText = Component.empty();
     private LocaltsMe user;
@@ -261,7 +264,8 @@ final class LocaltsPopupScreen extends Screen {
     private boolean canPurchaseSelected() {
         if (this.products.isEmpty() || this.selectedProductIndex >= this.products.size()) return false;
         LocaltsProduct prod = this.products.get(this.selectedProductIndex);
-        if (prod.stock() < this.purchaseQty || this.purchaseQty < 1) return false;
+        if (prod.stock() >= 0 && prod.stock() < this.purchaseQty) return false;
+        if (this.purchaseQty < 1) return false;
         if (this.user == null) return false;
         long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
         return this.user.balance() >= totalCost;
@@ -350,7 +354,7 @@ final class LocaltsPopupScreen extends Screen {
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
                     this.loading = false;
-                    this.statusText = Component.literal(t.getMessage()).withStyle(ChatFormatting.RED);
+                    this.statusText = formatError(t).withStyle(ChatFormatting.RED);
                     this.reInit();
                 });
             }
@@ -377,7 +381,7 @@ final class LocaltsPopupScreen extends Screen {
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
                     this.loading = false;
-                    this.statusText = Component.literal(t.getMessage()).withStyle(ChatFormatting.RED);
+                    this.statusText = formatError(t).withStyle(ChatFormatting.RED);
                     this.reInit();
                 });
             }
@@ -394,16 +398,24 @@ final class LocaltsPopupScreen extends Screen {
         this.reInit();
 
         EXECUTOR.execute(() -> {
+            LocaltsPurchaseResult purchaseResult = null;
             try {
                 LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
-                LocaltsPurchaseResult purchaseResult = client.purchase(prod.id(), qty);
+                purchaseResult = client.purchase(prod.id(), qty);
                 LocaltsOrder order = client.getOrder(purchaseResult.orderId());
                 List<String> rawAccounts = LocaltsClient.extractOrderAccounts(order);
 
-                final LocaltsMe updatedMe = client.getMe();
+                LocaltsMe updatedMe = null;
+                try {
+                    updatedMe = client.getMe();
+                } catch (Throwable ignored) {
+                }
+                final LocaltsMe finalMe = updatedMe;
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
-                    this.user = updatedMe;
+                    if (finalMe != null) {
+                        this.user = finalMe;
+                    }
                     this.purchasing = false;
                     this.buyingMode = false;
                     if (!rawAccounts.isEmpty()) {
@@ -417,14 +429,31 @@ final class LocaltsPopupScreen extends Screen {
                 });
             } catch (Throwable t) {
                 LOGGER.error("IAS: Localts purchase failed.", t);
+                final LocaltsPurchaseResult res = purchaseResult;
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
                     this.purchasing = false;
-                    this.statusText = Component.literal(t.getMessage()).withStyle(ChatFormatting.RED);
+                    if (res != null && res.orderId() != null && !res.orderId().isEmpty()) {
+                        this.statusText = Component.literal("Purchased (Order " + res.orderId() + "), but delivery failed: " + formatError(t).getString() + ". Click Refresh to retrieve.").withStyle(ChatFormatting.GOLD);
+                    } else {
+                        this.statusText = formatError(t).withStyle(ChatFormatting.RED);
+                    }
                     this.reInit();
                 });
             }
         });
+    }
+
+    private static MutableComponent formatError(Throwable t) {
+        if (t == null) return Component.literal("Unknown error");
+        if (t instanceof LocaltsException) {
+            LocaltsException le = (LocaltsException) t;
+            if (le.translationKey() != null && !le.translationKey().isEmpty()) {
+                return Component.translatable(le.translationKey(), (Object[]) le.args());
+            }
+        }
+        String msg = t.getMessage();
+        return Component.literal((msg != null && !msg.isEmpty()) ? msg : t.toString());
     }
 
     private void importPackagedAccounts() {
@@ -465,8 +494,7 @@ final class LocaltsPopupScreen extends Screen {
             //?} else
             /*graphics.drawCenteredString(this.font, Component.translatable("ias.localts.enterKey"), centerX, centerY - 38, 0xFF_AA_AA_AA);*/
         } else if (this.buyingMode) {
-            String balText = this.user != null ? (this.user.balance() + " credits") : "---";
-            Component balComp = Component.translatable("ias.localts.buy.total", "", balText).withStyle(ChatFormatting.GOLD);
+            Component balComp = this.user != null ? Component.translatable("ias.localts.connected", this.user.username(), this.user.balance()).withStyle(ChatFormatting.GOLD) : Component.empty();
             //? if >=26.1 {
             graphics.centeredText(this.font, balComp, centerX, centerY - 52, 0xFF_FF_AA_00);
             //?} else
@@ -480,26 +508,25 @@ final class LocaltsPopupScreen extends Screen {
                 /*graphics.drawCenteredString(this.font, msg, centerX, centerY - 10, 0xFF_AA_AA_AA);*/
             } else if (this.selectedProductIndex < this.products.size()) {
                 LocaltsProduct prod = this.products.get(this.selectedProductIndex);
-                Component prodLine = Component.literal(prod.name() + " (" + prod.priceInCredits() + "c)").withStyle(ChatFormatting.YELLOW);
-                Component stockLine = Component.literal("Stock: " + prod.stock()).withStyle(prod.stock() > 0 ? ChatFormatting.GREEN : ChatFormatting.RED);
+                String stockStr = prod.stock() >= 0 ? String.valueOf(prod.stock()) : "∞";
+                Component prodLine = Component.translatable("ias.localts.buy.product", prod.name(), prod.priceInCredits(), stockStr).withStyle(ChatFormatting.YELLOW);
                 Component qtyLine = Component.translatable("ias.localts.buy.qty", this.purchaseQty);
 
                 long total = (long) prod.priceInCredits() * this.purchaseQty;
-                Component totalLine = Component.literal("Total: " + total + " credits").withStyle(this.user != null && this.user.balance() >= total ? ChatFormatting.GREEN : ChatFormatting.RED);
+                Component totalLine = Component.translatable("ias.localts.buy.total", total, this.user != null ? this.user.balance() : "---")
+                        .withStyle(this.user != null && this.user.balance() >= total ? ChatFormatting.GREEN : ChatFormatting.RED);
 
                 //? if >=26.1 {
                 graphics.centeredText(this.font, prodLine, centerX, centerY - 24, 0xFF_FF_FF_55);
-                graphics.centeredText(this.font, stockLine, centerX, centerY - 12, 0xFF_AA_AA_AA);
                 graphics.centeredText(this.font, qtyLine, centerX, centerY + 10, 0xFF_FF_FF_FF);
                 graphics.centeredText(this.font, totalLine, centerX, centerY + 20, 0xFF_FF_FF_FF);
                 //?} else
                 /*graphics.drawCenteredString(this.font, prodLine, centerX, centerY - 24, 0xFF_FF_FF_55);
-                graphics.drawCenteredString(this.font, stockLine, centerX, centerY - 12, 0xFF_AA_AA_AA);
                 graphics.drawCenteredString(this.font, qtyLine, centerX, centerY + 10, 0xFF_FF_FF_FF);
                 graphics.drawCenteredString(this.font, totalLine, centerX, centerY + 20, 0xFF_FF_FF_FF);*/
             }
         } else if (this.user != null) {
-            Component userInfo = Component.translatable("ias.localts.userInfo", this.user.username(), this.user.balance(), String.format("%.2f", this.user.balance() / 100.0));
+            Component userInfo = Component.translatable("ias.localts.userInfo", this.user.username(), this.user.balance(), String.format(Locale.ROOT, "%.2f", this.user.balance() / 100.0));
             //? if >=26.1 {
             graphics.centeredText(this.font, userInfo, centerX, centerY - 44, 0xFF_55_FF_55);
             //?} else

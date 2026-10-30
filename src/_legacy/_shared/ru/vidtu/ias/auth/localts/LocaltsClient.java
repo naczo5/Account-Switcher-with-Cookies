@@ -159,7 +159,7 @@ public final class LocaltsClient {
             throw new IllegalArgumentException("Amount must be at least 1: " + amount);
         }
         String path = this.baseUrl + "/products/" + urlEncode(productId) + "/purchase?amount=" + amount;
-        JsonObject json = sendJson("POST", path, new byte[0], "application/json", "POST /v1/products/.../purchase");
+        JsonObject json = sendJson("POST", path, null, null, "POST /v1/products/.../purchase");
         try {
             return parsePurchaseResult(json);
         } catch (Throwable t) {
@@ -283,41 +283,30 @@ public final class LocaltsClient {
                     conn.setRequestProperty("Content-Type", contentType);
                 }
                 conn.setFixedLengthStreamingMode(body.length);
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(body);
-                    os.flush();
+                try {
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(body);
+                        os.flush();
+                    }
+                } catch (IOException e) {
+                    // If the server rejected early (e.g. 401/403/429), check response code
+                    try {
+                        int earlyCode = conn.getResponseCode();
+                        if (earlyCode >= 400) {
+                            handleHttpError(conn, earlyCode);
+                        }
+                    } catch (LocaltsException le) {
+                        throw le;
+                    } catch (Throwable ignored) {
+                    }
+                    throw e;
                 }
             }
 
             int code = conn.getResponseCode();
 
-            if (code == 401) {
-                throw new LocaltsException("Invalid or missing Localts API key (HTTP 401).", "ias.error.localts.unauthorized");
-            }
-            if (code == 403) {
-                throw new LocaltsException("Access forbidden to Localts resource (HTTP 403).", "ias.error.localts.forbidden");
-            }
-            if (code == 404) {
-                throw new LocaltsException("Localts resource not found (HTTP 404).", "ias.error.localts.notFound");
-            }
-            if (code == 429) {
-                throw new LocaltsException("Rate limited by Localts (HTTP 429).", "ias.error.rateLimited");
-            }
             if (code < 200 || code >= 300) {
-                String errText = readStream(conn.getErrorStream());
-                String extractedMsg = null;
-                try {
-                    JsonElement elem = new JsonParser().parse(errText);
-                    if (elem.isJsonObject()) {
-                        JsonObject obj = elem.getAsJsonObject();
-                        extractedMsg = optString(obj, "error", optString(obj, "message", null));
-                    }
-                } catch (Throwable ignored) {
-                }
-                if (extractedMsg != null) {
-                    throw new LocaltsException(extractedMsg, "ias.error.localts.failed", extractedMsg);
-                }
-                throw new LocaltsException("Localts server returned HTTP " + code, "ias.error.localts.http", code);
+                handleHttpError(conn, code);
             }
 
             String respBody = readStream(conn.getInputStream());
@@ -338,14 +327,41 @@ public final class LocaltsClient {
             }
             return obj;
         } catch (LocaltsException e) {
+            if (conn != null) conn.disconnect();
             throw e;
         } catch (Throwable t) {
+            if (conn != null) conn.disconnect();
             throw new LocaltsException("Localts request failed: " + t.getMessage(), t, "ias.error.localts.network", t.getMessage());
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
         }
+    }
+
+    private static void handleHttpError(HttpURLConnection conn, int code) throws IOException {
+        if (code == 401) {
+            throw new LocaltsException("Invalid or missing Localts API key (HTTP 401).", "ias.error.localts.unauthorized");
+        }
+        if (code == 403) {
+            throw new LocaltsException("Access forbidden to Localts resource (HTTP 403).", "ias.error.localts.forbidden");
+        }
+        if (code == 404) {
+            throw new LocaltsException("Localts resource not found (HTTP 404).", "ias.error.localts.notFound");
+        }
+        if (code == 429) {
+            throw new LocaltsException("Rate limited by Localts (HTTP 429).", "ias.error.rateLimited");
+        }
+        String errText = readStream(conn.getErrorStream());
+        String extractedMsg = null;
+        try {
+            JsonElement elem = new JsonParser().parse(errText);
+            if (elem.isJsonObject()) {
+                JsonObject obj = elem.getAsJsonObject();
+                extractedMsg = optString(obj, "error", optString(obj, "message", null));
+            }
+        } catch (Throwable ignored) {
+        }
+        if (extractedMsg != null) {
+            throw new LocaltsException(extractedMsg, "ias.error.localts.failed", extractedMsg);
+        }
+        throw new LocaltsException("Localts server returned HTTP " + code, "ias.error.localts.http", code);
     }
 
     private static String readStream(InputStream is) throws IOException {
@@ -445,7 +461,7 @@ public final class LocaltsClient {
             String description = optString(p, "description", "");
             String category = optString(p, "category", "");
             int price = optInt(p, "priceInCredits", 0);
-            int stock = optInt(p, "stock", 0);
+            int stock = optInt(p, "stock", -1);
             String type = optString(p, "type", "text");
             String logoUrl = optNullableString(p, "logoUrl");
 
@@ -476,7 +492,7 @@ public final class LocaltsClient {
 
     public static LocaltsPurchaseResult parsePurchaseResult(JsonObject obj) {
         boolean success = optBoolean(obj, "success", true);
-        String orderId = optString(obj, "orderId", "");
+        String orderId = optString(obj, "orderId", optString(obj, "order-id", ""));
         return new LocaltsPurchaseResult(success, orderId);
     }
 
@@ -543,7 +559,7 @@ public final class LocaltsClient {
 
     public static LocaltsReplacementResult parseReplacementResult(JsonObject obj) {
         boolean success = optBoolean(obj, "success", true);
-        String replacementId = optString(obj, "replacementId", "");
+        String replacementId = optString(obj, "replacementId", optString(obj, "replacement-id", ""));
         String redirect = optNullableString(obj, "redirect");
         return new LocaltsReplacementResult(success, replacementId, redirect);
     }

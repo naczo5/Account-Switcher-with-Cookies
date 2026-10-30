@@ -106,18 +106,33 @@ public class GuiAccountSelector extends GuiScreen {
 			this.buttonList.add(new GuiButton(13, this.width - 104, 32, 100, 20, I18n.format("menu.multiplayer")));
 		}
 		ru.vidtu.ias.config.IASConfig.load(this.mc.mcDataDir);
+		int provW = 68;
+		int bulkW = 78;
+		int openW = 78;
+		int provX = 8;
 		int bulkX = this.width / 2 - 162;
 		int openX = this.width / 2 + 84;
-		if (bulkX < 4) {
-			bulkX = 4;
+		int searchW = 160;
+		if (this.width < 480) {
+			provW = 60;
+			bulkW = 64;
+			openW = 64;
+			searchW = Math.max(90, this.width - 270);
+			provX = 4;
+			bulkX = provX + provW + 4;
+			openX = this.width - 4 - openW;
+		} else {
+			if (bulkX < provX + provW + 4) {
+				bulkX = provX + provW + 4;
+			}
+			if (openX + openW > this.width - 4) {
+				openX = Math.max(4, this.width - 4 - openW);
+			}
 		}
-		if (openX + 78 > this.width - 4) {
-			openX = Math.max(4, this.width - 4 - 78);
-		}
-		this.buttonList.add(new GuiButton(14, bulkX, 12, 78, 20, I18n.format("ias.accounts.bulkImport")));
-		this.buttonList.add(new GuiButton(15, openX, 12, 78, 20, I18n.format("ias.accounts.openImport")));
-		this.buttonList.add(new GuiButton(16, 8, 12, 68, 20, I18n.format("ias.providers")));
-		search  = new GuiTextField(8, this.fontRendererObj, this.width / 2 - 80, 14, 160, 16);
+		this.buttonList.add(new GuiButton(16, provX, 12, provW, 20, I18n.format("ias.providers")));
+		this.buttonList.add(new GuiButton(14, bulkX, 12, bulkW, 20, I18n.format("ias.accounts.bulkImport")));
+		this.buttonList.add(new GuiButton(15, openX, 12, openW, 20, I18n.format("ias.accounts.openImport")));
+		search  = new GuiTextField(8, this.fontRendererObj, this.width / 2 - searchW / 2, 14, searchW, 16);
 		search.setText(query);
 		updateButtons();
 		if(!queriedaccounts.isEmpty())
