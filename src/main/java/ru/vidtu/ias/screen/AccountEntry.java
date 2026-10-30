@@ -290,7 +290,7 @@ final class AccountEntry extends ObjectSelectionList.Entry<AccountEntry> {
         // Set time for double click.
         this.clicked = IStonecutter.internalMillisClock();
         //? if >=1.21.10 {
-        if (event.button() == 0) {
+        if (AccountList.isPrimaryButton(event)) {
             this.list.startDragging(this);
         }
         //?}

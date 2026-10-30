@@ -1623,9 +1623,23 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         this.setDragging(true);
     }
 
+    /**
+     * Whether the event is a primary (left) mouse press for this Minecraft version.
+     *
+     * @param event Mouse event
+     * @return Whether the event uses the primary button
+     */
+    static boolean isPrimaryButton(net.minecraft.client.input.MouseButtonEvent event) {
+        //? if >=26.3 {
+        return event.button() == 1;
+        //?} else {
+        /*return event.button() == 0;*/
+        //?}
+    }
+
     @Override
     public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent event, double dragX, double dragY) {
-        if (this.draggedEntry != null && event.button() == 0) {
+        if (this.draggedEntry != null && isPrimaryButton(event)) {
             this.autoScrollWhileDragging(event.y());
             AccountEntry target = this.getEntryAtPosition(event.x(), event.y());
             if (target != null && !target.equals(this.draggedEntry)) {
@@ -1638,7 +1652,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
 
     @Override
     public boolean mouseReleased(net.minecraft.client.input.MouseButtonEvent event) {
-        if (this.draggedEntry != null && event.button() == 0) {
+        if (this.draggedEntry != null && isPrimaryButton(event)) {
             this.finishDragging();
             return true;
         }
