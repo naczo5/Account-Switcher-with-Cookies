@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # In-Game Account Switcher is a third-party mod for Minecraft Java Edition that
 # allows you to change your logged in account in-game, without restarting it.
