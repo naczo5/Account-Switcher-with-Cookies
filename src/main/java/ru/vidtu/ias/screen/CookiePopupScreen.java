@@ -550,6 +550,14 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.importCookieFiles(files);
     }
 
+    @Override
+    public void onFilesDrop(List<Path> paths) {
+        if (this.crypt == null || this.importing || paths == null || paths.isEmpty()) {
+            return;
+        }
+        this.importFromDrop(paths);
+    }
+
     void importRawSources(List<String> sources) {
         assert this.minecraft != null;
         if (this.crypt == null || this.importing || sources == null || sources.isEmpty()) return;

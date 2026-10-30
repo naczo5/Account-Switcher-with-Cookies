@@ -1616,6 +1616,8 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         }
         this.clearMultiSelection();
         this.setSelected(entry);
+        this.screen.setFocused(this);
+        this.screen.setDragging(true);
         this.draggedEntry = entry;
         this.draggedMoved = false;
         this.setDragging(true);
@@ -1687,6 +1689,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         this.draggedEntry = null;
         this.draggedMoved = false;
         this.setDragging(false);
+        this.screen.setDragging(false);
         if (save) {
             this.saveStorage();
         }

@@ -26,8 +26,12 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.tinyfd.TinyFileDialogs;*/
 //?}
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.swing.JFileChooser;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.FileDialog;
 import java.awt.Frame;
 import java.io.File;
@@ -42,6 +46,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author VidTu
  */
 final class CookieFileDialogs {
+    /**
+     * Logger for this class.
+     */
+    private static final Logger LOGGER = LoggerFactory.getLogger("IAS/CookieFileDialogs");
+
     /**
      * An instance of this class cannot be created.
      */
@@ -100,13 +109,13 @@ final class CookieFileDialogs {
     private static List<String> pickFiles(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
             @Nullable String filterDescription, boolean multiple) throws Exception {
         //? if >=26.3 {
-        return pickFilesAwt(title, startPath, filters, multiple);
+        return pickFilesAwt(title, startPath, filters, filterDescription, multiple);
         //?} else {
         /*List<String> tiny = pickFilesTiny(title, startPath, filters, filterDescription, multiple);
         if (tiny != null) {
             return tiny;
         }
-        return pickFilesAwt(title, startPath, filters, multiple);*/
+        return pickFilesAwt(title, startPath, filters, filterDescription, multiple);*/
         //?}
     }
 
@@ -147,56 +156,132 @@ final class CookieFileDialogs {
     //?}
 
     private static List<String> pickFilesAwt(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
-            boolean multiple) throws Exception {
+            @Nullable String filterDescription, boolean multiple) throws Exception {
         AtomicReference<List<String>> result = new AtomicReference<>(List.of());
+        AtomicReference<Throwable> failure = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
-            Frame frame = new Frame();
-            frame.setAlwaysOnTop(true);
-            FileDialog dialog = new FileDialog(frame, title, FileDialog.LOAD);
             try {
-                dialog.setAlwaysOnTop(true);
-                dialog.setMultipleMode(multiple);
-                if (filters != null && filters.length > 0) {
-                    dialog.setFilenameFilter(filenameFilter(filters));
-                    dialog.setFile(filters[0]);
+                result.set(pickFilesAwtDialog(title, startPath, filters, multiple));
+            } catch (Throwable t) {
+                LOGGER.warn("IAS: Native file dialog failed; falling back to Swing file chooser.", t);
+                try {
+                    result.set(pickFilesSwing(title, startPath, filters, filterDescription, multiple));
+                } catch (Throwable fallbackFailure) {
+                    fallbackFailure.addSuppressed(t);
+                    failure.set(fallbackFailure);
                 }
-
-                String normalized = defaultPath(startPath);
-                if (normalized != null && !normalized.isBlank()) {
-                    File file = new File(normalized);
-                    File parent = file.isDirectory() ? file : file.getParentFile();
-                    if (parent != null && parent.isDirectory()) {
-                        dialog.setDirectory(parent.getAbsolutePath());
-                    }
-                    if (file.isFile()) {
-                        dialog.setFile(file.getName());
-                    }
-                }
-                dialog.setVisible(true);
-
-                if (multiple) {
-                    File[] files = dialog.getFiles();
-                    List<String> selected = new ArrayList<>(files.length);
-                    for (File file : files) {
-                        if (file != null) {
-                            selected.add(file.getAbsolutePath());
-                        }
-                    }
-                    result.set(selected);
-                    return;
-                }
-
-                String directory = dialog.getDirectory();
-                String name = dialog.getFile();
-                if (directory != null && name != null) {
-                    result.set(List.of(new File(directory, name).getAbsolutePath()));
-                }
-            } finally {
-                dialog.dispose();
-                frame.dispose();
             }
         });
+        if (failure.get() != null) {
+            throw new Exception("Unable to open file browser.", failure.get());
+        }
         return result.get();
+    }
+
+    private static List<String> pickFilesAwtDialog(@Nullable String title, @Nullable String startPath,
+            @Nullable String[] filters, boolean multiple) {
+        Frame frame = new Frame();
+        frame.setAlwaysOnTop(true);
+        FileDialog dialog = new FileDialog(frame, title, FileDialog.LOAD);
+        try {
+            dialog.setAlwaysOnTop(true);
+            dialog.setMultipleMode(multiple);
+            if (filters != null && filters.length > 0) {
+                dialog.setFilenameFilter(filenameFilter(filters));
+                dialog.setFile(filters[0]);
+            }
+
+            String normalized = defaultPath(startPath);
+            if (normalized != null && !normalized.isBlank()) {
+                File file = new File(normalized);
+                File parent = file.isDirectory() ? file : file.getParentFile();
+                if (parent != null && parent.isDirectory()) {
+                    dialog.setDirectory(parent.getAbsolutePath());
+                }
+                if (file.isFile()) {
+                    dialog.setFile(file.getName());
+                }
+            }
+            dialog.setVisible(true);
+
+            if (multiple) {
+                File[] files = dialog.getFiles();
+                List<String> selected = new ArrayList<>(files.length);
+                for (File file : files) {
+                    if (file != null) {
+                        selected.add(file.getAbsolutePath());
+                    }
+                }
+                return selected;
+            }
+
+            String directory = dialog.getDirectory();
+            String name = dialog.getFile();
+            if (directory != null && name != null) {
+                return List.of(new File(directory, name).getAbsolutePath());
+            }
+            return List.of();
+        } finally {
+            try {
+                dialog.dispose();
+            } catch (Throwable ignored) {
+            }
+            try {
+                frame.dispose();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static List<String> pickFilesSwing(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
+            @Nullable String filterDescription, boolean multiple) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(title != null ? title : "Open");
+        chooser.setMultiSelectionEnabled(multiple);
+        if (filters != null && filters.length > 0) {
+            List<String> extensions = new ArrayList<>(filters.length);
+            for (String filter : filters) {
+                if (filter.startsWith("*.")) {
+                    extensions.add(filter.substring(2));
+                }
+            }
+            if (!extensions.isEmpty()) {
+                chooser.setFileFilter(new FileNameExtensionFilter(
+                        filterDescription != null ? filterDescription : "Files",
+                        extensions.toArray(new String[0])));
+            }
+        }
+
+        String normalized = defaultPath(startPath);
+        if (normalized != null && !normalized.isBlank()) {
+            File file = new File(normalized);
+            File parent = file.isDirectory() ? file : file.getParentFile();
+            if (parent != null && parent.isDirectory()) {
+                chooser.setCurrentDirectory(parent);
+            }
+            if (file.isFile()) {
+                chooser.setSelectedFile(file);
+            }
+        }
+
+        if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) {
+            return List.of();
+        }
+        if (multiple) {
+            File[] files = chooser.getSelectedFiles();
+            List<String> selected = new ArrayList<>(files.length);
+            for (File file : files) {
+                if (file != null) {
+                    selected.add(file.getAbsolutePath());
+                }
+            }
+            if (selected.isEmpty() && chooser.getSelectedFile() != null) {
+                selected.add(chooser.getSelectedFile().getAbsolutePath());
+            }
+            return selected;
+        }
+        File selected = chooser.getSelectedFile();
+        return selected != null ? List.of(selected.getAbsolutePath()) : List.of();
     }
 
     @Nullable
