@@ -1,79 +1,73 @@
-# In-Game Account Switcher is a third-party mod for Minecraft Java Edition that
-# allows you to change your logged in account in-game, without restarting it.
-#
-# Copyright (C) 2015-2022 The_Fireplace
-# Copyright (C) 2021-2026 VidTu
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>
-
 name: 'Build (Main)'
 permissions: { }
 concurrency:
   group: 'main'
+  cancel-in-progress: true
 on:
   push:
     branches: [ 'main' ]
   workflow_dispatch:
 jobs:
   main:
-    name: 'Build (Main)'
+    name: 'Build & Test (Main)'
     runs-on: 'ubuntu-24.04'
     timeout-minutes: 60
     permissions:
-      contents: 'write'
+      contents: 'read'
     env:
       GRADLE_OPTS: '-Dorg.gradle.java.installations.auto-download=false'
     steps:
       - name: 'Checkout'
-        timeout-minutes: 1
-        uses: 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' # v7.0.0
+        timeout-minutes: 2
+        uses: 'actions/checkout@v4'
         with:
           persist-credentials: false
-      - name: 'Setup JDK (17)'
-        timeout-minutes: 1
-        uses: 'actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520' # v5.4.0
+
+      - name: 'Setup JDK (8 for Forge 1.8.9)'
+        timeout-minutes: 2
+        uses: 'actions/setup-java@v4'
         with:
           distribution: 'temurin'
-          java-version: '17.0.19+10'
-      - name: 'Setup JDK (21)'
-        timeout-minutes: 1
-        uses: 'actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520' # v5.4.0
+          java-version: '8'
+
+      - name: 'Setup JDK (21 for Modern Fabric)'
+        timeout-minutes: 2
+        uses: 'actions/setup-java@v4'
         with:
           distribution: 'temurin'
-          java-version: '21.0.11+10'
-      - name: 'Setup JDK (25)'
-        timeout-minutes: 1
-        uses: 'actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520' # v5.4.0
-        with:
-          distribution: 'temurin'
-          java-version: '25.0.3+9'
+          java-version: '21'
+
       - name: 'Setup Gradle'
         timeout-minutes: 10
-        uses: 'gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92' # v6.2.0
-        with:
-          # Generate with either:
-          # 1. Linux/macOS/Unix (OpenSSL): openssl rand -base64 32
-          # 2. Linux/macOS/Unix: cat /dev/random | head -c32 | base64
-          # 3. Windows (PowerShell): $bytes=New-Object byte[] 32;[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes);[Convert]::ToBase64String($bytes)
-          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-          dependency-graph: 'generate-and-submit'
-      - name: 'Build (Main)'
-        timeout-minutes: 60
+        uses: 'gradle/actions/setup-gradle@v3'
+
+      - name: 'Run Parser Tests'
+        timeout-minutes: 5
+        run: |
+          chmod +x tests/run-parser-tests
+          ./tests/run-parser-tests
+
+      - name: 'Build Modern Fabric (26.3, 26.2, 1.21.11)'
+        timeout-minutes: 20
         run: './gradlew assemble'
-      - name: 'Upload'
-        timeout-minutes: 10
-        uses: 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' # v7.0.1
+
+      - name: 'Build Forge 1.8.9'
+        timeout-minutes: 20
+        run: |
+          cd forge-1.8
+          chmod +x gradlew
+          ./gradlew build -Dorg.gradle.java.home="$JAVA_HOME_8_X64"
+
+      - name: 'Collect Artifacts'
+        run: |
+          mkdir -p build-artifacts
+          cp -v build/libs/CookieIAS-*.jar build-artifacts/
+          cp -v forge-1.8/build/libs/CookieIAS-*.jar build-artifacts/
+
+      - name: 'Upload Artifacts'
+        timeout-minutes: 5
+        uses: 'actions/upload-artifact@v4'
         with:
-          name: 'Artifacts'
-          path: 'build/libs/'
+          name: 'CookieIAS-Build-Jars'
+          path: 'build-artifacts/'
+          retention-days: 7
