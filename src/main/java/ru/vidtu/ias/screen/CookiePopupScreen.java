@@ -1013,6 +1013,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         }
         final String startPath = initial;
         final String dialogTitle = Component.translatable("ias.cookie.browse").getString();
+        if (isHeadless()) {
+            this.openInGameBrowser(startPath);
+            return;
+        }
         IAS.executor().execute(() -> {
             try {
                 List<String> paths = CookieFileDialogs.pickCookieFiles(dialogTitle, startPath);
@@ -1024,29 +1028,52 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     if (this.closed || this != this.currentScreen()) {
                         return;
                     }
-                    this.selectedCookieFiles = List.copyOf(paths);
-                    this.savedPath = paths.size() == 1
-                            ? paths.get(0)
-                            : Component.translatable("ias.cookie.selected", paths.size()).getString();
-                    if (this.pathInput != null) {
-                        this.pathInput.setValue(this.savedPath);
-                    }
+                    this.applySelectedFiles(paths);
                 });
             } catch (Throwable t) {
                 LOGGER.warn("IAS: Cookie file browse failed.", t);
-                this.minecraft.execute(() -> this.showBrowseError());
+                this.minecraft.execute(() -> {
+                    if (this.closed || this != this.currentScreen()) {
+                        return;
+                    }
+                    this.openInGameBrowser(startPath);
+                });
             }
         });
     }
 
-    private void showBrowseError() {
+    private static boolean isHeadless() {
+        try {
+            return java.awt.GraphicsEnvironment.isHeadless();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private void openInGameBrowser(String startPath) {
         if (this.closed) {
             return;
         }
-        synchronized (this.lock) {
-            this.stage = Component.translatable("ias.cookie.browse.failed").withStyle(ChatFormatting.RED);
-            this.label = null;
-            this.error = 0.0F;
+        assert this.minecraft != null;
+        Screen browser = new FileBrowserPopupScreen(this,
+                Component.translatable("ias.cookie.browse"),
+                startPath,
+                null,
+                this::applySelectedFiles);
+        //$set_screen 'this.minecraft' 'browser'
+        this.minecraft.gui.setScreen(browser);
+    }
+
+    private void applySelectedFiles(List<String> paths) {
+        if (paths == null || paths.isEmpty() || this.closed) {
+            return;
+        }
+        this.selectedCookieFiles = List.copyOf(paths);
+        this.savedPath = paths.size() == 1
+                ? paths.get(0)
+                : Component.translatable("ias.cookie.selected", paths.size()).getString();
+        if (this.pathInput != null) {
+            this.pathInput.setValue(this.savedPath);
         }
     }
 
