@@ -51,6 +51,7 @@ import java.awt.Desktop;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -507,6 +508,14 @@ public final class AccountScreen extends Screen {
     }
 
     @Override
+    public void onFilesDrop(List<Path> paths) {
+        if (this.list == null || paths == null || paths.isEmpty()) {
+            return;
+        }
+        this.list.importDropped(paths);
+    }
+
+    @Override
     //? if >=26.1 {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
     //?} else
@@ -528,6 +537,15 @@ public final class AccountScreen extends Screen {
             graphics.text(this.font, this.profileStatus, 4, this.height / 2 + 158, 0xFF_FF_FF_FF);
             //?} else
             /*graphics.drawString(this.font, this.profileStatus, 4, this.height / 2 + 158, 0xFF_FF_FF_FF);*/
+        }
+
+        // Tell users about drag-and-drop import when the account list is empty.
+        if (IASStorage.ACCOUNTS.isEmpty()) {
+            Component dropHint = Component.translatable("ias.accounts.dropHint");
+            //? if >=26.1 {
+            graphics.centeredText(this.font, dropHint, this.width / 2, this.height / 2, 0xFF_AA_AA_AA);
+            //?} else
+            /*graphics.drawCenteredString(this.font, dropHint, this.width / 2, this.height / 2, 0xFF_AA_AA_AA);*/
         }
     }
 

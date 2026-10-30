@@ -39,9 +39,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -414,6 +416,30 @@ public final class IAS {
             throw new RuntimeException("Unable to list " + dir, e);
         }
         return files;
+    }
+
+    /**
+     * Cookie/token files from dropped files and folders. Folders are scanned one level deep,
+     * matching the bulk import folder behavior.
+     *
+     * @param paths Dropped files and folders
+     * @return Absolute file paths
+     */
+    @NotNull
+    public static List<String> listImportFiles(@NotNull Iterable<Path> paths) {
+        Set<String> files = new LinkedHashSet<>();
+        for (Path path : paths) {
+            try {
+                if (Files.isDirectory(path)) {
+                    files.addAll(listImportFiles(path));
+                } else if (Files.isRegularFile(path) && isImportFile(path)) {
+                    files.add(path.toAbsolutePath().toString());
+                }
+            } catch (Throwable ignored) {
+                // Ignore paths that disappear or cannot be inspected.
+            }
+        }
+        return new ArrayList<>(files);
     }
 
     @Contract(pure = true)

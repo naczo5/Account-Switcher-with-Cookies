@@ -17,7 +17,7 @@
 - **Localts 导入** — 自动识别单行 `M.C…` Microsoft 刷新令牌（Localts 导出格式），并将其兑换为完整的 Minecraft 会话。
 - **Netscape cookie 导入** — 包含 `__Host-MSAAUTH` / `__Host-MSAAUTHP` 的制表符分隔浏览器 cookie 导出文件仍可通过 Xbox SISU 正常使用。
 - **Checker 转储导入** — 一个包含多个 `Source:` / Netscape / `--------` 块的 `.txt` 文件会按块解析为多个账号，失效的小号只会单独导入失败。
-- **批量导入** — 将文件放入 `.minecraft/config/cookieias/import`，然后在账号管理器中一键导入。
+- **批量导入** — 将 cookie/令牌文件拖放到账号管理器，或放入 `.minecraft/config/cookieias/import` 后一键导入。
 - **实时会话切换** — 登录 cookie 小号后会真正切换到该账号。
 - **HttpOnly Netscape cookie** — 保留 `#HttpOnly_` 开头的行（`__Host-MSAAUTH`、`MSPAuth`、`WLSSID` 等）。
 - **令牌登录** — 从文件导入或直接粘贴 Minecraft 访问令牌。
@@ -33,7 +33,7 @@
 | **26.3** | Fabric / Lunar Fabric | `.\gradlew.bat :26.3-fabric:jar` | `build\libs\CookieIAS-*+26.3-fabric.jar` |
 | **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\CookieIAS-*+26.2-fabric.jar` |
 | **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
-| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build`（需要 **JDK 8**） | `forge-1.8\build\libs\CookieIAS-3.3.1-pre1+1.8.9-forge.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build`（需要 **JDK 8**） | `forge-1.8\build\libs\CookieIAS-3.3.1-pre2+1.8.9-forge.jar` |
 
 如果你需要在 Lunar Client 1.8.9 上使用 cookie 小号，可以看看我的注入工具：https://github.com/naczo5/lunar-cookies
 
@@ -46,7 +46,7 @@
 ### 1.8.9 (Forge)
 
 1. 为 **1.8.9** 安装 Forge。
-2. 将 `forge-1.8\build\libs\CookieIAS-3.3.1-pre1+1.8.9-forge.jar` 复制到整合包的 **mods** 文件夹。
+2. 将 `forge-1.8\build\libs\CookieIAS-3.3.1-pre2+1.8.9-forge.jar` 复制到整合包的 **mods** 文件夹。
 3. 通过标题界面按钮或按 **`O`** 打开账号切换器。
 
 ### 26.3 / 26.2 / 1.21.11（Fabric 或 Lunar Fabric）
@@ -60,8 +60,8 @@ Lunar Fabric 的设置与疑难解答请参见 [docs/LUNAR.md](docs/LUNAR.md)。
 ## 导入 Localts 或 cookie 小号文件
 
 1. 打开账号切换器 — 在主菜单按 **`O`**（默认为快捷键，可在 **控制 → In-Game Account Switcher** 中修改），或打开 **Mod Menu → In-Game Account Switcher**。
-2. **添加（Add）** → **导入 Cookie（Import Cookie）**。
-3. 选择提供文件的方式：
+2. **添加（Add）** → **导入 Cookie（Import Cookie）**，或将一个或多个 `.txt`、`.json`、`.cookies`、`.cookie` 文件（或文件夹）拖放到账号管理器上直接导入。
+3. 在导入界面中选择提供文件的方式：
    - **文件路径（File Path）** — 你的 `.txt` 小号文件路径，例如 `C:\alts\myaccount.txt`，或点击 **...** 打开系统文件选择器（允许选择多个文件）
    - **粘贴（Paste）** — 将完整的 cookie 文件粘贴到多行文本框，或留空后点击 **导入（Import）** 以使用剪贴板内容
 

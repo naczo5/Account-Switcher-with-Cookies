@@ -47,6 +47,7 @@ import ru.vidtu.ias.crypt.DummyCrypt;
 import ru.vidtu.ias.utils.AuthLog;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.LinkedHashMap;
@@ -670,7 +671,37 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         } catch (Throwable t) {
             LOGGER.error("IAS: Unable to create import folder.", t);
         }
-        CookiePopupScreen screen = new CookiePopupScreen(this.screen, account -> {
+        CookiePopupScreen screen = this.importScreen();
+        //$ set_screen 'this.minecraft' screen
+        this.minecraft.gui.setScreen(screen);
+        List<String> files = IAS.listImportFiles();
+        if (!files.isEmpty()) {
+            screen.importFromFolder(IAS.importDirectory());
+        }
+    }
+
+    /**
+     * Imports cookie/token files and folders dropped onto the account screen.
+     *
+     * @param paths Dropped files and folders
+     */
+    void importDropped(List<Path> paths) {
+        if (paths.isEmpty()) {
+            return;
+        }
+        CookiePopupScreen screen = this.importScreen();
+        //$ set_screen 'this.minecraft' screen
+        this.minecraft.gui.setScreen(screen);
+        screen.importFromDrop(paths);
+    }
+
+    /**
+     * Creates the unencrypted cookie/token import screen used by bulk and drag-and-drop imports.
+     *
+     * @return Import screen
+     */
+    private CookiePopupScreen importScreen() {
+        return new CookiePopupScreen(this.screen, account -> {
             //$ set_screen 'this.minecraft' 'this.screen'
             this.minecraft.gui.setScreen(this.screen);
             IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
@@ -683,12 +714,6 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             }
             this.update(this.screen.search().getValue());
         }, DummyCrypt.INSTANCE);
-        //$ set_screen 'this.minecraft' screen
-        this.minecraft.gui.setScreen(screen);
-        List<String> files = IAS.listImportFiles();
-        if (!files.isEmpty()) {
-            screen.importFromFolder(IAS.importDirectory());
-        }
     }
 
     /**

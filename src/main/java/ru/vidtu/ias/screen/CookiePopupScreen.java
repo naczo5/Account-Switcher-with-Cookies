@@ -469,6 +469,26 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.importCookieFiles(files);
     }
 
+    /**
+     * Imports cookie/token files (and the contents of folders) dropped onto the account screen.
+     *
+     * @param paths Dropped files and folders
+     */
+    void importFromDrop(List<Path> paths) {
+        List<String> files;
+        try {
+            files = IAS.listImportFiles(paths);
+        } catch (Throwable t) {
+            this.error(new FriendlyException("Unable to read dropped files.", t, "ias.error.cookie.file"));
+            return;
+        }
+        if (files.isEmpty()) {
+            this.error(new FriendlyException("No cookie or token files found in the drop.", "ias.error.cookie.drop"));
+            return;
+        }
+        this.importCookieFiles(files);
+    }
+
     private void importCookieFiles(List<String> sources) {
         assert this.minecraft != null;
         if (this.crypt == null || this.importing || sources.isEmpty()) return;
