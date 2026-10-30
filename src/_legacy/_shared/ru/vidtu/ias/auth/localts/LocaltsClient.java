@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -322,6 +323,9 @@ public final class LocaltsClient {
                 JsonElement successElem = obj.get("success");
                 if (successElem != null && !successElem.isJsonNull() && successElem.isJsonPrimitive() && !successElem.getAsBoolean()) {
                     String error = optString(obj, "error", "Operation failed");
+                    if (isOutOfStock(error)) {
+                        throw new LocaltsException(error, "ias.localts.buy.outOfStock");
+                    }
                     throw new LocaltsException(error, "ias.error.localts.failed", error);
                 }
             }
@@ -359,9 +363,28 @@ public final class LocaltsClient {
         } catch (Throwable ignored) {
         }
         if (extractedMsg != null) {
+            if (isOutOfStock(extractedMsg)) {
+                throw new LocaltsException(extractedMsg, "ias.localts.buy.outOfStock");
+            }
             throw new LocaltsException(extractedMsg, "ias.error.localts.failed", extractedMsg);
         }
         throw new LocaltsException("Localts server returned HTTP " + code, "ias.error.localts.http", code);
+    }
+
+    /**
+     * Detects the common out-of-stock error wording used by the store API.
+     *
+     * @param message Server error message
+     * @return Whether the message describes an out-of-stock condition
+     */
+    private static boolean isOutOfStock(String message) {
+        if (message == null) return false;
+        String lower = message.toLowerCase(Locale.ROOT);
+        return lower.contains("out of stock")
+                || lower.contains("sold out")
+                || lower.contains("no stock")
+                || lower.contains("not enough stock")
+                || lower.contains("insufficient stock");
     }
 
     private static String readStream(InputStream is) throws IOException {

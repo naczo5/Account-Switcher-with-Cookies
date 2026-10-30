@@ -6,6 +6,7 @@ import net.minecraft.client.resources.I18n;
 import org.lwjgl.input.Keyboard;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Account providers selection hub for 1.8.9.
@@ -27,15 +28,15 @@ public class GuiProviders extends GuiScreen {
         int centerY = this.height / 2;
 
         // Localts Store provider
-        this.buttonList.add(new GuiButton(0, centerX - 100, centerY - 24, 200, 20, I18n.format("ias.providers.localts")));
+        this.buttonList.add(new GuiButton(0, centerX - 100, centerY - 28, 200, 24, I18n.format("ias.providers.localts")));
 
         // Future providers placeholder
-        GuiButton moreBtn = new GuiButton(1, centerX - 100, centerY + 2, 200, 20, I18n.format("ias.providers.more"));
+        GuiButton moreBtn = new GuiButton(1, centerX - 100, centerY, 200, 24, I18n.format("ias.providers.more"));
         moreBtn.enabled = false;
         this.buttonList.add(moreBtn);
 
         // Back
-        this.buttonList.add(new GuiButton(2, centerX - 100, centerY + 36, 200, 20, I18n.format("gui.back")));
+        this.buttonList.add(new GuiButton(2, centerX - 50, centerY + 40, 100, 20, I18n.format("gui.back")));
     }
 
     @Override
@@ -74,8 +75,13 @@ public class GuiProviders extends GuiScreen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
 
-        this.drawCenteredString(this.fontRendererObj, I18n.format("ias.providers.title"), centerX, centerY - 64, 0xFFFFFF);
-        this.drawCenteredString(this.fontRendererObj, I18n.format("ias.providers.subtitle"), centerX, centerY - 46, 0xAAAAAA);
+        this.drawCenteredString(this.fontRendererObj, I18n.format("ias.providers.title"), centerX, centerY - 74, 0xFFFFFF);
+        List<String> subtitleLines = this.fontRendererObj.listFormattedStringToWidth(I18n.format("ias.providers.subtitle"), this.width - 40);
+        int subtitleY = centerY - 54;
+        for (String line : subtitleLines) {
+            this.drawCenteredString(this.fontRendererObj, line, centerX, subtitleY, 0xAAAAAA);
+            subtitleY += 9;
+        }
 
         super.drawScreen(mouseX, mouseY, partialTicks);
     }

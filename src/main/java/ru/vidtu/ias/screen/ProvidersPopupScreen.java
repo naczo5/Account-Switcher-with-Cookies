@@ -23,6 +23,7 @@ package ru.vidtu.ias.screen;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 //?} else
 /*import net.minecraft.client.gui.GuiGraphics;*/
+import net.minecraft.client.gui.components.MultiLineLabel;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -31,6 +32,7 @@ import org.joml.Matrix3x2fStack;
 import ru.vidtu.ias.account.Account;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.crypt.DummyCrypt;
+import ru.vidtu.ias.platform.IStonecutter;
 
 import java.time.Duration;
 import java.util.function.Consumer;
@@ -43,9 +45,13 @@ import java.util.function.Supplier;
  * @author VidTu
  */
 final class ProvidersPopupScreen extends Screen {
+    private static final int PANEL_HALF_W = 115;
+    private static final int PANEL_HALF_H = 84;
+
     private final Screen parent;
     private final Consumer<Account> handler;
     private final Crypt crypt;
+    private MultiLineLabel subtitleLabel;
 
     ProvidersPopupScreen(Screen parent, Consumer<Account> handler, Crypt crypt) {
         super(Component.translatable("ias.providers.title"));
@@ -68,8 +74,10 @@ final class ProvidersPopupScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
 
+        this.subtitleLabel = MultiLineLabel.create(this.font, Component.translatable("ias.providers.subtitle"), PANEL_HALF_W * 2 - 20);
+
         // Localts Store provider button
-        PopupButton localtsBtn = new PopupButton(centerX - 100, centerY - 32, 200, 24,
+        PopupButton localtsBtn = new PopupButton(centerX - 100, centerY - 28, 200, 24,
                 Component.translatable("ias.providers.localts"), btn -> {
             //$set_screen 'this.minecraft' 'new LocaltsPopupScreen(this, this.handler, this.crypt)'
             this.minecraft.gui.setScreen(new LocaltsPopupScreen(this, this.handler, this.crypt));
@@ -88,7 +96,7 @@ final class ProvidersPopupScreen extends Screen {
         this.addRenderableWidget(moreBtn);
 
         // Back button
-        PopupButton backBtn = new PopupButton(centerX - 50, centerY + 36, 100, 20,
+        PopupButton backBtn = new PopupButton(centerX - 50, centerY + 40, 100, 20,
                 CommonComponents.GUI_BACK, btn -> this.onClose(), Supplier::get);
         this.addRenderableWidget(backBtn);
     }
@@ -109,16 +117,14 @@ final class ProvidersPopupScreen extends Screen {
         pose.pushMatrix();
         pose.scale(1.5F, 1.5F);
         //? if >=26.1 {
-        graphics.centeredText(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 62) / 1.5F), 0xFF_FF_FF_FF);
+        graphics.centeredText(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 74) / 1.5F), 0xFF_FF_FF_FF);
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 62) / 1.5F), 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 74) / 1.5F), 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
-        Component subtitle = Component.translatable("ias.providers.subtitle");
-        //? if >=26.1 {
-        graphics.centeredText(this.font, subtitle, this.width / 2, this.height / 2 - 44, 0xFF_AA_AA_AA);
-        //?} else
-        /*graphics.drawCenteredString(this.font, subtitle, this.width / 2, this.height / 2 - 44, 0xFF_AA_AA_AA);*/
+        if (this.subtitleLabel != null) {
+            IStonecutter.renderMultilineLabelCentered(this.subtitleLabel, graphics, this.width / 2, this.height / 2 - 54);
+        }
     }
 
     @Override
@@ -146,9 +152,9 @@ final class ProvidersPopupScreen extends Screen {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        graphics.fill(centerX - 115, centerY - 68, centerX + 115, centerY + 68, 0xF8_20_20_30);
-        graphics.fill(centerX - 114, centerY - 69, centerX + 114, centerY - 68, 0xF8_20_20_30);
-        graphics.fill(centerX - 114, centerY + 68, centerX + 114, centerY + 69, 0xF8_20_20_30);
+        graphics.fill(centerX - PANEL_HALF_W, centerY - PANEL_HALF_H, centerX + PANEL_HALF_W, centerY + PANEL_HALF_H, 0xF8_20_20_30);
+        graphics.fill(centerX - PANEL_HALF_W + 1, centerY - PANEL_HALF_H - 1, centerX + PANEL_HALF_W - 1, centerY - PANEL_HALF_H, 0xF8_20_20_30);
+        graphics.fill(centerX - PANEL_HALF_W + 1, centerY + PANEL_HALF_H, centerX + PANEL_HALF_W - 1, centerY + PANEL_HALF_H + 1, 0xF8_20_20_30);
     }
 
     @Override

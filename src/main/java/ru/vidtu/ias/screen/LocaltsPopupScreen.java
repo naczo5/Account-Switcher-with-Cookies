@@ -29,6 +29,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.util.FormattedCharSequence;
 import org.joml.Matrix3x2fStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,7 +72,9 @@ final class LocaltsPopupScreen extends Screen {
     });
 
     private static final int PANEL_HALF_W = 125;
-    private static final int PANEL_HALF_H = 80;
+    private static final int PANEL_HALF_KEY = 80;
+    private static final int PANEL_HALF_NORMAL = 92;
+    private static final int PANEL_HALF_BUY = 96;
 
     private final Screen parent;
     private final Consumer<Account> handler;
@@ -150,7 +153,7 @@ final class LocaltsPopupScreen extends Screen {
         } else if (this.buyingMode) {
             this.apiKeyBox = null;
 
-            int prodY = centerY - 28;
+            int prodY = centerY - 56;
             PopupButton prevBtn = new PopupButton(centerX - 100, prodY, 20, 20, Component.literal("<"), btn -> {
                 if (!this.products.isEmpty()) {
                     this.selectedProductIndex = (this.selectedProductIndex - 1 + this.products.size()) % this.products.size();
@@ -169,7 +172,7 @@ final class LocaltsPopupScreen extends Screen {
             }, Supplier::get);
             this.addRenderableWidget(nextBtn);
 
-            int qtyY = centerY + 4;
+            int qtyY = centerY + 2;
             PopupButton decBtn = new PopupButton(centerX - 45, qtyY, 20, 20, Component.literal("-"), btn -> {
                 if (this.purchaseQty > 1) {
                     this.purchaseQty--;
@@ -181,7 +184,7 @@ final class LocaltsPopupScreen extends Screen {
             PopupButton incBtn = new PopupButton(centerX + 25, qtyY, 20, 20, Component.literal("+"), btn -> {
                 if (!this.products.isEmpty() && this.selectedProductIndex < this.products.size()) {
                     LocaltsProduct prod = this.products.get(this.selectedProductIndex);
-                    if (this.purchaseQty < prod.stock()) {
+                    if (prod.stock() < 0 || this.purchaseQty < prod.stock()) {
                         this.purchaseQty++;
                         this.reInit();
                     }
@@ -189,14 +192,14 @@ final class LocaltsPopupScreen extends Screen {
             }, Supplier::get);
             this.addRenderableWidget(incBtn);
 
-            PopupButton confirmBuyBtn = new PopupButton(centerX - 80, centerY + 28, 160, 20,
+            PopupButton confirmBuyBtn = new PopupButton(centerX - 80, centerY + 40, 160, 20,
                     Component.translatable("ias.localts.buy.confirm"), btn -> this.confirmPurchase(), Supplier::get);
             boolean canBuy = canPurchaseSelected();
             confirmBuyBtn.active = canBuy && !this.loading && !this.purchasing;
             confirmBuyBtn.color(0.5F, 1.0F, 0.5F, true);
             this.addRenderableWidget(confirmBuyBtn);
 
-            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 52, 100, 20,
+            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 66, 100, 20,
                     CommonComponents.GUI_BACK, btn -> {
                 this.buyingMode = false;
                 this.reInit();
@@ -206,44 +209,44 @@ final class LocaltsPopupScreen extends Screen {
             this.apiKeyBox = null;
             int btnW = 150;
 
-            this.buyAltsBtn = new PopupButton(centerX - btnW / 2, centerY - 24, btnW, 20,
+            this.buyAltsBtn = new PopupButton(centerX - btnW / 2, centerY - 28, btnW, 20,
                     Component.translatable("ias.localts.buy"), btn -> {
                 this.buyingMode = true;
                 this.purchaseQty = 1;
                 this.reInit();
-                if (this.products.isEmpty() && !this.loading) {
-                    this.fetchProducts();
-                }
+                // Always re-fetch on entry so stale stock values cannot enable a purchase
+                // that the server will reject as out of stock.
+                this.fetchProducts(false);
             }, Supplier::get);
             this.buyAltsBtn.color(0.5F, 1.0F, 0.5F, true);
             this.buyAltsBtn.active = !this.loading;
             this.addRenderableWidget(this.buyAltsBtn);
 
-            this.importBtn = new PopupButton(centerX - btnW / 2, centerY, btnW, 20,
+            this.importBtn = new PopupButton(centerX - btnW / 2, centerY - 4, btnW, 20,
                     Component.translatable("ias.localts.importAccounts", this.packagedAccounts.size()),
                     btn -> this.importPackagedAccounts(), Supplier::get);
             this.importBtn.active = !this.packagedAccounts.isEmpty() && !this.loading;
             this.importBtn.color(0.5F, 0.75F, 1.0F, true);
             this.addRenderableWidget(this.importBtn);
 
-            this.refreshBtn = new PopupButton(centerX - 100, centerY + 24, 64, 20,
+            this.refreshBtn = new PopupButton(centerX - 100, centerY + 22, 64, 20,
                     Component.translatable("ias.localts.refresh"), btn -> this.refreshData(), Supplier::get);
             this.refreshBtn.active = !this.loading;
             this.addRenderableWidget(this.refreshBtn);
 
-            PopupButton browseStoreBtn = new PopupButton(centerX - 32, centerY + 24, 64, 20,
+            PopupButton browseStoreBtn = new PopupButton(centerX - 32, centerY + 22, 64, 20,
                     Component.translatable("ias.localts.store"), btn -> IStonecutter.openUrl("https://localts.store/store"), Supplier::get);
             browseStoreBtn.color(0.5F, 0.75F, 1.0F, true);
             this.addRenderableWidget(browseStoreBtn);
 
-            this.changeKeyBtn = new PopupButton(centerX + 36, centerY + 24, 64, 20,
+            this.changeKeyBtn = new PopupButton(centerX + 36, centerY + 22, 64, 20,
                     Component.translatable("ias.localts.keyBtn"), btn -> {
                 this.editingKey = true;
                 this.reInit();
             }, Supplier::get);
             this.addRenderableWidget(this.changeKeyBtn);
 
-            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 50, 100, 20,
+            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 54, 100, 20,
                     CommonComponents.GUI_BACK, btn -> this.onClose(), Supplier::get);
             this.addRenderableWidget(backBtn);
 
@@ -344,6 +347,7 @@ final class LocaltsPopupScreen extends Screen {
                     this.packagedAccounts.clear();
                     this.packagedAccounts.addAll(accounts);
                     this.packagedOrdersCount = finalPackagedOrders;
+                    this.clampSelection();
                     this.loading = false;
                     this.statusText = Component.translatable("ias.localts.ready", this.packagedAccounts.size(), this.packagedOrdersCount)
                             .withStyle(ChatFormatting.GREEN);
@@ -361,35 +365,82 @@ final class LocaltsPopupScreen extends Screen {
         });
     }
 
-    private void fetchProducts() {
+    /**
+     * Refreshes products (and the balance) in the background.
+     *
+     * @param preserveStatus Whether to keep the current status text (for example, a purchase error)
+     */
+    private void fetchProducts(boolean preserveStatus) {
+        if (this.closed || this.loading) return;
         this.loading = true;
-        this.statusText = Component.translatable("ias.localts.loading").withStyle(ChatFormatting.YELLOW);
+        if (!preserveStatus) {
+            this.statusText = Component.translatable("ias.localts.loading").withStyle(ChatFormatting.YELLOW);
+        }
+        this.reInit();
 
         EXECUTOR.execute(() -> {
             try {
                 LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
                 List<LocaltsProduct> prods = client.getProducts();
+                LocaltsMe updatedMe = null;
+                try {
+                    updatedMe = client.getMe();
+                } catch (Throwable ignored) {
+                }
+                final LocaltsMe finalMe = updatedMe;
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
                     this.products.clear();
                     this.products.addAll(prods);
+                    if (finalMe != null) {
+                        this.user = finalMe;
+                    }
+                    this.clampSelection();
                     this.loading = false;
-                    this.statusText = Component.empty();
+                    if (!preserveStatus) {
+                        this.statusText = Component.empty();
+                    }
                     this.reInit();
                 });
             } catch (Throwable t) {
+                LOGGER.error("IAS: Failed to refresh Localts products.", t);
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
                     this.loading = false;
-                    this.statusText = formatError(t).withStyle(ChatFormatting.RED);
+                    if (!preserveStatus) {
+                        this.statusText = formatError(t).withStyle(ChatFormatting.RED);
+                    }
                     this.reInit();
                 });
             }
         });
     }
 
+    /**
+     * Keeps the selected product and quantity inside the currently available range.
+     */
+    private void clampSelection() {
+        if (this.products.isEmpty()) {
+            this.selectedProductIndex = 0;
+            this.purchaseQty = 1;
+            return;
+        }
+        if (this.selectedProductIndex < 0 || this.selectedProductIndex >= this.products.size()) {
+            this.selectedProductIndex = 0;
+        }
+        LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+        if (prod.stock() == 0) {
+            this.purchaseQty = 1;
+        } else if (prod.stock() > 0 && this.purchaseQty > prod.stock()) {
+            this.purchaseQty = prod.stock();
+        }
+        if (this.purchaseQty < 1) {
+            this.purchaseQty = 1;
+        }
+    }
+
     private void confirmPurchase() {
-        if (!canPurchaseSelected() || this.purchasing) return;
+        if (this.loading || !canPurchaseSelected() || this.purchasing) return;
         LocaltsProduct prod = this.products.get(this.selectedProductIndex);
         int qty = this.purchaseQty;
 
@@ -423,8 +474,9 @@ final class LocaltsPopupScreen extends Screen {
                         //$set_screen 'this.minecraft' 'cookieScreen'
                         this.minecraft.gui.setScreen(cookieScreen);
                     } else {
-                        this.statusText = Component.translatable("ias.localts.buy.success", qty).withStyle(ChatFormatting.GREEN);
+                        this.statusText = Component.translatable("ias.localts.buy.pending").withStyle(ChatFormatting.GOLD);
                         this.reInit();
+                        this.fetchProducts(true);
                     }
                 });
             } catch (Throwable t) {
@@ -439,6 +491,9 @@ final class LocaltsPopupScreen extends Screen {
                         this.statusText = formatError(t).withStyle(ChatFormatting.RED);
                     }
                     this.reInit();
+                    // Refresh stock/balance right away, especially after an out-of-stock
+                    // rejection, so the buy screen reflects reality without leaving it.
+                    this.fetchProducts(true);
                 });
             }
         });
@@ -477,72 +532,85 @@ final class LocaltsPopupScreen extends Screen {
         //?} else
         /*super.render(graphics, mouseX, mouseY, delta);*/
 
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+        int titleY = this.editingKey ? centerY - 72 : this.buyingMode ? centerY - 88 : centerY - 84;
+
         pose.pushMatrix();
         pose.scale(1.5F, 1.5F);
         //? if >=26.1 {
-        graphics.centeredText(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 72) / 1.5F), 0xFF_FF_FF_FF);
+        graphics.centeredText(this.font, this.title, (int) (this.width / 3.0F), (int) (titleY / 1.5F), 0xFF_FF_FF_FF);
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 72) / 1.5F), 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, (int) (this.width / 3.0F), (int) (titleY / 1.5F), 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
-        int centerX = this.width / 2;
-        int centerY = this.height / 2;
-
         if (this.editingKey) {
-            //? if >=26.1 {
-            graphics.centeredText(this.font, Component.translatable("ias.localts.enterKey"), centerX, centerY - 38, 0xFF_AA_AA_AA);
-            //?} else
-            /*graphics.drawCenteredString(this.font, Component.translatable("ias.localts.enterKey"), centerX, centerY - 38, 0xFF_AA_AA_AA);*/
+            this.renderCenteredText(graphics, Component.translatable("ias.localts.enterKey"),
+                    centerX, centerY - 42, 220, 1, 0xFF_AA_AA_AA);
         } else if (this.buyingMode) {
-            Component balComp = this.user != null ? Component.translatable("ias.localts.connected", this.user.username(), this.user.balance()).withStyle(ChatFormatting.GOLD) : Component.empty();
-            //? if >=26.1 {
-            graphics.centeredText(this.font, balComp, centerX, centerY - 52, 0xFF_FF_AA_00);
-            //?} else
-            /*graphics.drawCenteredString(this.font, balComp, centerX, centerY - 52, 0xFF_FF_AA_00);*/
+            Component balComp = this.user != null
+                    ? Component.translatable("ias.localts.connected", this.user.username(), this.user.balance()).withStyle(ChatFormatting.GOLD)
+                    : Component.empty();
+            this.renderCenteredText(graphics, balComp, centerX, centerY - 70, 230, 1, 0xFF_FF_AA_00);
 
             if (this.products.isEmpty()) {
-                Component msg = this.loading ? Component.translatable("ias.localts.loading") : Component.translatable("ias.localts.buy.noProducts");
-                //? if >=26.1 {
-                graphics.centeredText(this.font, msg, centerX, centerY - 10, 0xFF_AA_AA_AA);
-                //?} else
-                /*graphics.drawCenteredString(this.font, msg, centerX, centerY - 10, 0xFF_AA_AA_AA);*/
+                if (this.statusText == null || this.statusText.getString().isBlank()) {
+                    Component msg = this.loading ? Component.translatable("ias.localts.loading") : Component.translatable("ias.localts.buy.noProducts");
+                    this.renderCenteredText(graphics, msg, centerX, centerY - 30, 230, 1, 0xFF_AA_AA_AA);
+                }
             } else if (this.selectedProductIndex < this.products.size()) {
                 LocaltsProduct prod = this.products.get(this.selectedProductIndex);
                 String stockStr = prod.stock() >= 0 ? String.valueOf(prod.stock()) : "∞";
-                Component prodLine = Component.translatable("ias.localts.buy.product", prod.name(), prod.priceInCredits(), stockStr).withStyle(ChatFormatting.YELLOW);
+                Component nameLine = Component.literal(prod.name()).withStyle(ChatFormatting.YELLOW);
+                Component priceLine = Component.translatable("ias.localts.buy.price", prod.priceInCredits(), stockStr).withStyle(ChatFormatting.YELLOW);
                 Component qtyLine = Component.translatable("ias.localts.buy.qty", this.purchaseQty);
 
                 long total = (long) prod.priceInCredits() * this.purchaseQty;
                 Component totalLine = Component.translatable("ias.localts.buy.total", total, this.user != null ? this.user.balance() : "---")
                         .withStyle(this.user != null && this.user.balance() >= total ? ChatFormatting.GREEN : ChatFormatting.RED);
 
-                //? if >=26.1 {
-                graphics.centeredText(this.font, prodLine, centerX, centerY - 24, 0xFF_FF_FF_55);
-                graphics.centeredText(this.font, qtyLine, centerX, centerY + 10, 0xFF_FF_FF_FF);
-                graphics.centeredText(this.font, totalLine, centerX, centerY + 20, 0xFF_FF_FF_FF);
-                //?} else
-                /*graphics.drawCenteredString(this.font, prodLine, centerX, centerY - 24, 0xFF_FF_FF_55);
-                graphics.drawCenteredString(this.font, qtyLine, centerX, centerY + 10, 0xFF_FF_FF_FF);
-                graphics.drawCenteredString(this.font, totalLine, centerX, centerY + 20, 0xFF_FF_FF_FF);*/
+                // Keep the product name between the navigation arrows, and put the
+                // price/stock on its own line so neither can overlap the buttons.
+                this.renderCenteredText(graphics, nameLine, centerX, centerY - 54, 150, 1, 0xFF_FF_AA_00);
+                this.renderCenteredText(graphics, priceLine, centerX, centerY - 34, 220, 1, 0xFF_FF_AA_00);
+                this.renderCenteredText(graphics, qtyLine, centerX, centerY + 8, 120, 1, 0xFF_FF_FF_FF);
+                this.renderCenteredText(graphics, totalLine, centerX, centerY + 26, 220, 1, 0xFF_FF_FF_FF);
             }
+
+            // Purchase errors and progress must be visible without leaving the buy screen.
+            this.renderCenteredText(graphics, this.statusText, centerX, centerY - 22, 230, 2, 0xFF_FF_FF_FF);
         } else if (this.user != null) {
             Component userInfo = Component.translatable("ias.localts.userInfo", this.user.username(), this.user.balance(), String.format(Locale.ROOT, "%.2f", this.user.balance() / 100.0));
-            //? if >=26.1 {
-            graphics.centeredText(this.font, userInfo, centerX, centerY - 44, 0xFF_55_FF_55);
-            //?} else
-            /*graphics.drawCenteredString(this.font, userInfo, centerX, centerY - 44, 0xFF_55_FF_55);*/
+            this.renderCenteredText(graphics, userInfo, centerX, centerY - 62, 230, 1, 0xFF_55_FF_55);
+            this.renderCenteredText(graphics, this.statusText, centerX, centerY - 50, 230, 2, 0xFF_FF_FF_FF);
+        } else {
+            this.renderCenteredText(graphics, this.statusText, centerX, centerY - 50, 230, 2, 0xFF_FF_FF_FF);
+        }
+    }
 
-            if (this.statusText != null && !this.statusText.getString().isBlank()) {
-                //? if >=26.1 {
-                graphics.centeredText(this.font, this.statusText, centerX, centerY - 32, 0xFF_FF_FF_FF);
-                //?} else
-                /*graphics.drawCenteredString(this.font, this.statusText, centerX, centerY - 32, 0xFF_FF_FF_FF);*/
-            }
-        } else if (this.statusText != null && !this.statusText.getString().isBlank()) {
+    /**
+     * Draws centered, word-wrapped text, clipping it to the requested width and line count.
+     *
+     * @param graphics  Graphics context
+     * @param text      Text to draw
+     * @param centerX   Center X coordinate
+     * @param y         Top Y coordinate
+     * @param maxWidth  Maximum line width
+     * @param maxLines  Maximum number of lines
+     * @param color     Fallback text color
+     */
+    //? if >=26.1 {
+    private void renderCenteredText(GuiGraphicsExtractor graphics, Component text, int centerX, int y, int maxWidth, int maxLines, int color) {
+    //?} else
+    /*private void renderCenteredText(GuiGraphics graphics, Component text, int centerX, int y, int maxWidth, int maxLines, int color) {*/
+        if (text == null || text.getString().isBlank()) return;
+        List<FormattedCharSequence> lines = this.font.split(text, maxWidth);
+        int count = Math.min(maxLines, lines.size());
+        for (int i = 0; i < count; i++) {
             //? if >=26.1 {
-            graphics.centeredText(this.font, this.statusText, centerX, centerY - 36, 0xFF_FF_FF_FF);
+            graphics.centeredText(this.font, lines.get(i), centerX, y + i * 9, color);
             //?} else
-            /*graphics.drawCenteredString(this.font, this.statusText, centerX, centerY - 36, 0xFF_FF_FF_FF);*/
+            /*graphics.drawCenteredString(this.font, lines.get(i), centerX, y + i * 9, color);*/
         }
     }
 
@@ -571,9 +639,10 @@ final class LocaltsPopupScreen extends Screen {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        graphics.fill(centerX - PANEL_HALF_W, centerY - PANEL_HALF_H, centerX + PANEL_HALF_W, centerY + PANEL_HALF_H, 0xF8_20_20_30);
-        graphics.fill(centerX - PANEL_HALF_W + 1, centerY - PANEL_HALF_H - 1, centerX + PANEL_HALF_W - 1, centerY - PANEL_HALF_H, 0xF8_20_20_30);
-        graphics.fill(centerX - PANEL_HALF_W + 1, centerY + PANEL_HALF_H, centerX + PANEL_HALF_W - 1, centerY + PANEL_HALF_H + 1, 0xF8_20_20_30);
+        int panelHalfHeight = this.editingKey ? PANEL_HALF_KEY : this.buyingMode ? PANEL_HALF_BUY : PANEL_HALF_NORMAL;
+        graphics.fill(centerX - PANEL_HALF_W, centerY - panelHalfHeight, centerX + PANEL_HALF_W, centerY + panelHalfHeight, 0xF8_20_20_30);
+        graphics.fill(centerX - PANEL_HALF_W + 1, centerY - panelHalfHeight - 1, centerX + PANEL_HALF_W - 1, centerY - panelHalfHeight, 0xF8_20_20_30);
+        graphics.fill(centerX - PANEL_HALF_W + 1, centerY + panelHalfHeight, centerX + PANEL_HALF_W - 1, centerY + panelHalfHeight + 1, 0xF8_20_20_30);
     }
 
     @Override

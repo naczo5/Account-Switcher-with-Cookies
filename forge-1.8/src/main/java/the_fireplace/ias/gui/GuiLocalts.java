@@ -85,7 +85,7 @@ public class GuiLocalts extends GuiScreen {
         } else if (this.buyingMode) {
             this.apiKeyField = null;
 
-            int prodY = centerY - 30;
+            int prodY = centerY - 50;
             this.buttonList.add(new GuiButton(20, centerX - 110, prodY, 20, 20, "<"));
             this.buttonList.add(new GuiButton(21, centerX + 90, prodY, 20, 20, ">"));
 
@@ -93,12 +93,12 @@ public class GuiLocalts extends GuiScreen {
             this.buttonList.add(new GuiButton(22, centerX - 45, qtyY, 20, 20, "-"));
             this.buttonList.add(new GuiButton(23, centerX + 25, qtyY, 20, 20, "+"));
 
-            GuiButton buyBtn = new GuiButton(24, centerX - 80, centerY + 28, 160, 20, I18n.format("ias.localts.buy.confirm"));
+            GuiButton buyBtn = new GuiButton(24, centerX - 80, centerY + 32, 160, 20, I18n.format("ias.localts.buy.confirm"));
             boolean canBuy = canPurchaseSelected();
             buyBtn.enabled = canBuy && !this.loading && !this.purchasing;
             this.buttonList.add(buyBtn);
 
-            this.buttonList.add(new GuiButton(25, centerX - 50, centerY + 52, 100, 20, I18n.format("gui.back")));
+            this.buttonList.add(new GuiButton(25, centerX - 50, centerY + 58, 100, 20, I18n.format("gui.back")));
         } else {
             this.apiKeyField = null;
 
@@ -207,9 +207,9 @@ public class GuiLocalts extends GuiScreen {
             this.buyingMode = true;
             this.purchaseQty = 1;
             initGui();
-            if (this.products.isEmpty() && !this.loading) {
-                fetchProducts();
-            }
+            // Always re-fetch on entry so stale stock values cannot enable a purchase
+            // that the server will reject as out of stock.
+            fetchProducts(false);
         } else if (button.id == 11) { // Import Accounts
             importPackagedAccounts();
         } else if (button.id == 12) { // Refresh
@@ -241,7 +241,7 @@ public class GuiLocalts extends GuiScreen {
         } else if (button.id == 23) { // Qty +
             if (!this.products.isEmpty() && this.selectedProductIndex < this.products.size()) {
                 LocaltsProduct prod = this.products.get(this.selectedProductIndex);
-                if (this.purchaseQty < prod.stock()) {
+                if (prod.stock() < 0 || this.purchaseQty < prod.stock()) {
                     this.purchaseQty++;
                     initGui();
                 }
@@ -340,10 +340,14 @@ public class GuiLocalts extends GuiScreen {
         }, "IAS-Localts-Refresh").start();
     }
 
-    private void fetchProducts() {
+    private void fetchProducts(final boolean preserveStatus) {
+        if (this.loading) return;
         this.loading = true;
-        this.statusText = I18n.format("ias.localts.loading");
-        this.statusColor = 0xFFFF55;
+        if (!preserveStatus) {
+            this.statusText = I18n.format("ias.localts.loading");
+            this.statusColor = 0xFFFF55;
+        }
+        initGui();
 
         new Thread(new Runnable() {
             @Override
@@ -351,14 +355,26 @@ public class GuiLocalts extends GuiScreen {
                 try {
                     LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
                     final List<LocaltsProduct> prods = client.getProducts();
+                    LocaltsMe updatedMe = null;
+                    try {
+                        updatedMe = client.getMe();
+                    } catch (Throwable ignored) {
+                    }
+                    final LocaltsMe finalMe = updatedMe;
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
                             if (closed) return;
                             products.clear();
                             products.addAll(prods);
+                            if (finalMe != null) {
+                                user = finalMe;
+                            }
+                            clampSelection();
                             loading = false;
-                            statusText = "";
+                            if (!preserveStatus) {
+                                statusText = "";
+                            }
                             initGui();
                         }
                     });
@@ -368,8 +384,10 @@ public class GuiLocalts extends GuiScreen {
                         public void run() {
                             if (closed) return;
                             loading = false;
-                            statusText = formatError(t);
-                            statusColor = 0xFF5555;
+                            if (!preserveStatus) {
+                                statusText = formatError(t);
+                                statusColor = 0xFF5555;
+                            }
                             initGui();
                         }
                     });
@@ -378,8 +396,28 @@ public class GuiLocalts extends GuiScreen {
         }, "IAS-Localts-Products").start();
     }
 
+    private void clampSelection() {
+        if (this.products.isEmpty()) {
+            this.selectedProductIndex = 0;
+            this.purchaseQty = 1;
+            return;
+        }
+        if (this.selectedProductIndex < 0 || this.selectedProductIndex >= this.products.size()) {
+            this.selectedProductIndex = 0;
+        }
+        LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+        if (prod.stock() == 0) {
+            this.purchaseQty = 1;
+        } else if (prod.stock() > 0 && this.purchaseQty > prod.stock()) {
+            this.purchaseQty = prod.stock();
+        }
+        if (this.purchaseQty < 1) {
+            this.purchaseQty = 1;
+        }
+    }
+
     private void confirmPurchase() {
-        if (!canPurchaseSelected() || this.purchasing || this.importing) return;
+        if (this.loading || !canPurchaseSelected() || this.purchasing || this.importing) return;
         final LocaltsProduct prod = this.products.get(this.selectedProductIndex);
         final int qty = this.purchaseQty;
 
@@ -437,9 +475,15 @@ public class GuiLocalts extends GuiScreen {
                             }
                             purchasing = false;
                             buyingMode = false;
-                            statusText = I18n.format("ias.localts.buy.success", count);
-                            statusColor = 0x55FF55;
+                            if (count > 0) {
+                                statusText = I18n.format("ias.localts.buy.success", count);
+                                statusColor = 0x55FF55;
+                            } else {
+                                statusText = I18n.format("ias.localts.buy.pending");
+                                statusColor = 0xFFAA00;
+                            }
                             initGui();
+                            fetchProducts(true);
                         }
                     });
                 } catch (final Throwable t) {
@@ -457,6 +501,9 @@ public class GuiLocalts extends GuiScreen {
                                 statusColor = 0xFF5555;
                             }
                             initGui();
+                            // Refresh stock/balance right away, especially after an out-of-stock
+                            // rejection, so the buy screen reflects reality without leaving it.
+                            fetchProducts(true);
                         }
                     });
                 }
@@ -570,26 +617,28 @@ public class GuiLocalts extends GuiScreen {
 
             if (this.products.isEmpty()) {
                 String msg = this.loading ? I18n.format("ias.localts.loading") : I18n.format("ias.localts.buy.noProducts");
-                this.drawCenteredString(this.fontRendererObj, msg, centerX, centerY - 10, 0xAAAAAA);
+                this.drawCenteredString(this.fontRendererObj, msg, centerX, centerY - 30, 0xAAAAAA);
             } else if (this.selectedProductIndex < this.products.size()) {
                 LocaltsProduct prod = this.products.get(this.selectedProductIndex);
 
                 String stockStr = prod.stock() >= 0 ? String.valueOf(prod.stock()) : "∞";
-                String prodLine = I18n.format("ias.localts.buy.product", prod.name(), prod.priceInCredits(), stockStr);
-                this.drawCenteredString(this.fontRendererObj, prodLine, centerX, centerY - 25, 0xFFFFAA);
+                String nameLine = this.fontRendererObj.trimStringToWidth(prod.name(), 150);
+                String priceLine = this.fontRendererObj.trimStringToWidth(I18n.format("ias.localts.buy.price", prod.priceInCredits(), stockStr), 220);
+                this.drawCenteredString(this.fontRendererObj, nameLine, centerX, centerY - 48, 0xFFFFAA);
+                this.drawCenteredString(this.fontRendererObj, priceLine, centerX, centerY - 28, 0xFFFFAA);
 
                 this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.qty", this.purchaseQty), centerX, centerY + 8, 0xFFFFFF);
 
                 long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
                 boolean affordable = this.user != null && this.user.balance() >= totalCost;
                 String totalLine = I18n.format("ias.localts.buy.total", totalCost, balanceStr);
-                this.drawCenteredString(this.fontRendererObj, (affordable ? EnumChatFormatting.YELLOW : EnumChatFormatting.RED) + totalLine, centerX, centerY + 18, 0xFFFFFF);
+                this.drawCenteredString(this.fontRendererObj, (affordable ? EnumChatFormatting.YELLOW : EnumChatFormatting.RED) + totalLine, centerX, centerY + 20, 0xFFFFFF);
             }
         } else {
             this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.title"), centerX, centerY - 64, 0xFFFFFF);
 
             if (this.user != null) {
-                String userHeader = I18n.format("ias.localts.connected", this.user.username(), this.user.balance());
+                String userHeader = this.fontRendererObj.trimStringToWidth(I18n.format("ias.localts.connected", this.user.username(), this.user.balance()), this.width - 40);
                 this.drawCenteredString(this.fontRendererObj, EnumChatFormatting.GREEN + userHeader, centerX, centerY - 48, 0xFFFFFF);
             } else if (this.loading) {
                 this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.connecting"), centerX, centerY - 48, 0xFFFF55);
@@ -597,7 +646,8 @@ public class GuiLocalts extends GuiScreen {
         }
 
         if (this.statusText != null && !this.statusText.isEmpty()) {
-            this.drawCenteredString(this.fontRendererObj, this.statusText, centerX, this.height - 24, this.statusColor);
+            String statusLine = this.fontRendererObj.trimStringToWidth(this.statusText, this.width - 40);
+            this.drawCenteredString(this.fontRendererObj, statusLine, centerX, this.height - 24, this.statusColor);
         }
 
         super.drawScreen(mouseX, mouseY, partialTicks);
