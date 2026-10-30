@@ -249,6 +249,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private int failureScroll;
 
     /**
+     * Initial raw sources to import immediately on open, if any.
+     */
+    private List<String> initialRawSources;
+
+    /**
      * Creates a new cookie import screen.
      *
      * @param parent  Parent screen
@@ -256,10 +261,23 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * @param crypt   Crypt method, {@code null} to use password
      */
     CookiePopupScreen(Screen parent, Consumer<Account> handler, Crypt crypt) {
+        this(parent, handler, crypt, null);
+    }
+
+    /**
+     * Creates a new cookie/token import screen pre-populated with raw sources (e.g. from Localts).
+     *
+     * @param parent     Parent screen
+     * @param handler    Account handler
+     * @param crypt      Crypt method, {@code null} to use password
+     * @param rawSources Raw account source texts to import immediately
+     */
+    CookiePopupScreen(Screen parent, Consumer<Account> handler, Crypt crypt, List<String> rawSources) {
         super(Component.translatable("ias.cookie"));
         this.parent = parent;
         this.handler = handler;
         this.crypt = crypt;
+        this.initialRawSources = rawSources != null && !rawSources.isEmpty() ? List.copyOf(rawSources) : null;
     }
 
     @Override
@@ -306,6 +324,13 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.addRenderableWidget(enterPassword);
             this.password.setResponder(value -> enterPassword.active = !value.isBlank());
             this.cryptPasswordTip = MultiLineLabel.create(this.font, Component.translatable("ias.password.tip"), 320);
+            return;
+        }
+
+        if (this.initialRawSources != null && !this.initialRawSources.isEmpty()) {
+            List<String> toImport = this.initialRawSources;
+            this.initialRawSources = null;
+            this.importRawSources(toImport);
             return;
         }
 
@@ -523,6 +548,34 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             return;
         }
         this.importCookieFiles(files);
+    }
+
+    void importRawSources(List<String> sources) {
+        assert this.minecraft != null;
+        if (this.crypt == null || this.importing || sources == null || sources.isEmpty()) return;
+
+        this.importing = true;
+        this.errored = false;
+        this.error = Float.NaN;
+        this.errorNote = null;
+        this.showFailures = false;
+        this.failureScroll = 0;
+        this.failures.clear();
+        this.selectedCookieFiles = List.of();
+        this.stage(Component.translatable("ias.cookie.multi.progress", 1, sources.size()).withStyle(ChatFormatting.YELLOW));
+
+        //? if >=1.21.11 {
+        this.init(this.width, this.height);
+        //?} else
+        /*this.init(this.minecraft, this.width, this.height);*/
+
+        IAS.executor().execute(() -> {
+            List<ImportJob> records = new ArrayList<>();
+            for (int i = 0; i < sources.size(); i++) {
+                records.add(new ImportJob("Localts #" + (i + 1), sources.get(i)));
+            }
+            this.importTextRecords(records, 0, 0, 0, 0, 0, records.size(), this);
+        });
     }
 
     private void importCookieFiles(List<String> sources) {

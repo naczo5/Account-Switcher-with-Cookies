@@ -33,7 +33,7 @@
 | **26.3** | Fabric / Lunar Fabric | `.\gradlew.bat :26.3-fabric:jar` | `build\libs\CookieIAS-*+26.3-fabric.jar` |
 | **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\CookieIAS-*+26.2-fabric.jar` |
 | **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
-| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build`（需要 **JDK 8**） | `forge-1.8\build\libs\CookieIAS-3.3.1-pre4+1.8.9-forge.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build`（需要 **JDK 8**） | `forge-1.8\build\libs\CookieIAS-3.4.0-pre1+1.8.9-forge.jar` |
 
 如果你需要在 Lunar Client 1.8.9 上使用 cookie 小号，可以看看我的注入工具：https://github.com/naczo5/lunar-cookies
 
@@ -46,7 +46,7 @@
 ### 1.8.9 (Forge)
 
 1. 为 **1.8.9** 安装 Forge。
-2. 将 `forge-1.8\build\libs\CookieIAS-3.3.1-pre4+1.8.9-forge.jar` 复制到整合包的 **mods** 文件夹。
+2. 将 `forge-1.8\build\libs\CookieIAS-3.4.0-pre1+1.8.9-forge.jar` 复制到整合包的 **mods** 文件夹。
 3. 通过标题界面按钮或按 **`O`** 打开账号切换器。
 
 ### 26.3 / 26.2 / 1.21.11（Fabric 或 Lunar Fabric）

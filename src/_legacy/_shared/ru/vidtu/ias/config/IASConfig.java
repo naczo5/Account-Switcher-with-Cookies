@@ -264,6 +264,13 @@ public final class IASConfig {
     public static boolean hypixelCheckAllowNeverJoinedDirect = true;
 
     /**
+     * Optional Localts API key ({@code https://localts.store/user/settings#api-keys})
+     * used to fetch order history, purchase accounts, and import accounts directly into IAS.
+     */
+    @Nullable
+    public static String localtsApiKey = "";
+
+    /**
      * Creates a new config for GSON.
      */
     @Contract(pure = true)
@@ -321,6 +328,7 @@ public final class IASConfig {
 
             // Hacky JSON reading.
             GSON.fromJson(json, IASConfig.class);
+            localtsApiKey = readString(json, "localtsApiKey", localtsApiKey);
             liquidProxyHost = readString(json, "liquidProxyHost", liquidProxyHost);
             liquidProxyUsername = readString(json, "liquidProxyUsername", liquidProxyUsername);
             liquidProxyPassword = readString(json, "liquidProxyPassword", liquidProxyPassword);
@@ -339,7 +347,8 @@ public final class IASConfig {
 
             // Rewrite so new keys (proxy, API key, etc.) show up in the file.
             if (!json.has("hypixelCheckProxy") || !json.has("hypixelApiKey")
-                    || !json.has("liquidProxyHost") || !json.has("liquidProxyRoute")) {
+                    || !json.has("liquidProxyHost") || !json.has("liquidProxyRoute")
+                    || !json.has("localtsApiKey")) {
                 save(path);
             }
 

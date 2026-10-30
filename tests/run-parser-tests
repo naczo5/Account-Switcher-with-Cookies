@@ -50,6 +50,8 @@ fi
 GUH="${GRADLE_USER_HOME:-$HOME/.gradle}"
 ANN="$(find "$GUH/caches/modules-2" -name 'annotations-*.jar' ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -n 1)"
 EP="$(find "$GUH/caches/modules-2" -name 'error_prone_annotations-*.jar' ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -n 1)"
+GSON="$(find "$GUH/caches/modules-2" -name 'gson-2.1*.jar' ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -n 1)"
+SLF4J="$(find "$GUH/caches/modules-2" -name 'slf4j-api-*.jar' ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -n 1)"
 if [ -z "$ANN" ] || [ -z "$EP" ]; then
     echo "run-parser-tests: annotations jars not found under $GUH (run any Gradle build once)." >&2
     exit 2
@@ -60,14 +62,41 @@ case "$(uname -s)" in
     *) SEP=":" ;;
 esac
 
+CP="$ANN$SEP$EP"
+if [ -n "$GSON" ]; then
+    CP="$CP$SEP$GSON"
+fi
+if [ -n "$SLF4J" ]; then
+    CP="$CP$SEP$SLF4J"
+fi
+
 rm -rf "$OUT"
 mkdir -p "$OUT/classes"
-"$JAVAC" -encoding UTF-8 -d "$OUT/classes" -cp "$ANN$SEP$EP" \
+"$JAVAC" -encoding UTF-8 -d "$OUT/classes" -cp "$CP" \
     "$SRC/ru/vidtu/ias/auth/cookie/CookieParser.java" \
     "$SRC/ru/vidtu/ias/auth/cookie/CookieEntry.java" \
     "$SRC/ru/vidtu/ias/utils/exceptions/FriendlyException.java" \
     "$ROOT/tests/parser/ru/vidtu/ias/tests/CookieParserTest.java"
 
+if [ -n "$GSON" ] && [ -n "$SLF4J" ]; then
+    "$JAVAC" -encoding UTF-8 -d "$OUT/classes" -cp "$OUT/classes$SEP$CP" \
+        "$SRC/ru/vidtu/ias/utils/GSONUtils.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsMe.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsProduct.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsOrderSummary.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsOrdersPage.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsOrderItem.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsOrderReplacement.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsOrder.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsPurchaseResult.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsReplacementResult.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsClient.java" \
+        "$ROOT/tests/parser/ru/vidtu/ias/tests/LocaltsClientTest.java"
+fi
+
 # Tests resolve .agents/skills examples relative to the repo root.
 cd "$ROOT"
 "$(dirname -- "$JAVAC")/java" -cp "$OUT/classes" ru.vidtu.ias.tests.CookieParserTest
+if [ -n "$GSON" ] && [ -n "$SLF4J" ]; then
+    "$(dirname -- "$JAVAC")/java" -cp "$OUT/classes$SEP$CP" ru.vidtu.ias.tests.LocaltsClientTest
+fi
