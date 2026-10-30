@@ -345,6 +345,9 @@ public final class CookieAuth {
         if (gr.response() == 429) {
             throw new CookieAuthException("Minecraft is rate-limiting authentication.", "ias.error.rateLimited");
         }
+        if (gr.response() == 401 || gr.response() == 403) {
+            throw new CookieAuthException("Minecraft profile lookup rejected the access token.", "ias.error.mca.invalid");
+        }
         if (gr.response() != 200) {
             throw new CookieAuthException("Minecraft profile lookup failed.", "ias.error.cookie.expired");
         }

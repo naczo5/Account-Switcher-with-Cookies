@@ -111,6 +111,7 @@
   "ias.error.token.revoked": "Microsoft token exchange failed: Refresh token has been revoked (%s).",
   "ias.error.token.invalidGrant": "Microsoft token exchange failed: Invalid grant or expired credentials (%s).",
   "ias.error.token.clientMismatch": "Microsoft token exchange failed: this token was issued to a different app/OAuth client (%s). Tokens from other launchers or token generators cannot be imported; use cookies or add the account via Microsoft login.",
+  "ias.error.mca.invalid": "Minecraft access token is invalid or expired. Re-export the account or token and try again.",
   "ias.error.rateLimited": "Minecraft is rate-limiting authentication. Wait a bit and try again.",
   "ias.error.noRefreshToken": "No refresh token is available for this account.",
   "ias.offline": "Offline",

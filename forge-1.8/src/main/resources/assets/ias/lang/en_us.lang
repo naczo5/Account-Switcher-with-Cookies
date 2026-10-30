@@ -81,6 +81,7 @@ ias.login.cookiesToMsaMsr=Converting cookies to MSA/MSR...
 ias.error.cookie.invalid=The cookie file is invalid or missing required Microsoft session cookies.
 ias.error.cookie.expired=Unable to authenticate with these cookies. They may be expired or revoked.
 ias.error.cookie.file=Unable to read the cookie file. Check that the path exists and is readable.
+ias.error.mca.invalid=Minecraft access token is invalid or expired. Re-export the account or token and try again.
 ias.error.rateLimited=Minecraft is rate-limiting authentication. Wait a bit and try again.
 ias.error.noRefreshToken=No refresh token is available for this account.
 key.ias.open=Open Account Switcher

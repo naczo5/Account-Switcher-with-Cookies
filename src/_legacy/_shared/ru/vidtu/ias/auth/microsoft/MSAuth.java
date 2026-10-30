@@ -730,6 +730,15 @@ public final class MSAuth {
                     throw new FriendlyException("Profile 404", "ias.error.noProfile");
                 }
 
+                // Expired/revoked Minecraft access token. The profile endpoint returns 401
+                // with an empty-ish body for these, so a friendly message must be added here.
+                if (status == 429) {
+                    throw new FriendlyException("Minecraft profile lookup is rate-limited.", "ias.error.rateLimited");
+                }
+                if (status == HttpURLConnection.HTTP_UNAUTHORIZED || status == HttpURLConnection.HTTP_FORBIDDEN) {
+                    throw new FriendlyException("Minecraft access token is invalid or expired.", "ias.error.mca.invalid");
+                }
+
                 // Other errors.
                 if (status != HttpURLConnection.HTTP_OK) {
                     throw new IllegalArgumentException("Invalid status code: " + status);
@@ -739,6 +748,8 @@ public final class MSAuth {
                 JsonObject json = GSONUtils.GSON.fromJson(response.body(), JsonObject.class);
                 Objects.requireNonNull(json, "Response is null");
                 return MCProfile.fromJson(json);
+            } catch (FriendlyException fe) {
+                throw fe;
             } catch (Throwable t) {
                 // Rethrow, trying to remove sensitive data.
                 String message = "Unable to convert Minecraft Access (MCA) token to Minecraft Profile (MCP) (HTTP " + response.statusCode() + "): " + AuthLog.truncateBody(response.body());
