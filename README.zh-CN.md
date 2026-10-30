@@ -14,6 +14,8 @@
 
 ## 本分支新增的功能
 
+- **Localts 商店** — 使用 Localts API 密钥连接后，可查看余额与订单、在游戏内用积分购买小号，并直接导入已交付的账号。
+- **账号提供商** — 在 Fabric 和 1.8.9 Forge 中提供统一的提供商页面，目前支持 Localts，后续将加入更多商店。
 - **Localts 导入** — 自动识别单行 `M.C…` Microsoft 刷新令牌（Localts 导出格式），并将其兑换为完整的 Minecraft 会话。
 - **Netscape cookie 导入** — 包含 `__Host-MSAAUTH` / `__Host-MSAAUTHP` 的制表符分隔浏览器 cookie 导出文件仍可通过 Xbox SISU 正常使用。
 - **Checker 转储导入** — 一个包含多个 `Source:` / Netscape / `--------` 块的 `.txt` 文件会按块解析为多个账号，失效的小号只会单独导入失败。
@@ -33,7 +35,7 @@
 | **26.3** | Fabric / Lunar Fabric | `.\gradlew.bat :26.3-fabric:jar` | `build\libs\CookieIAS-*+26.3-fabric.jar` |
 | **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\CookieIAS-*+26.2-fabric.jar` |
 | **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
-| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build`（需要 **JDK 8**） | `forge-1.8\build\libs\CookieIAS-3.4.0-pre1+1.8.9-forge.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build`（需要 **JDK 8**） | `forge-1.8\build\libs\CookieIAS-3.4+1.8.9-forge.jar` |
 
 如果你需要在 Lunar Client 1.8.9 上使用 cookie 小号，可以看看我的注入工具：https://github.com/naczo5/lunar-cookies
 
@@ -46,7 +48,7 @@
 ### 1.8.9 (Forge)
 
 1. 为 **1.8.9** 安装 Forge。
-2. 将 `forge-1.8\build\libs\CookieIAS-3.4.0-pre1+1.8.9-forge.jar` 复制到整合包的 **mods** 文件夹。
+2. 将 `forge-1.8\build\libs\CookieIAS-3.4+1.8.9-forge.jar` 复制到整合包的 **mods** 文件夹。
 3. 通过标题界面按钮或按 **`O`** 打开账号切换器。
 
 ### 26.3 / 26.2 / 1.21.11（Fabric 或 Lunar Fabric）
