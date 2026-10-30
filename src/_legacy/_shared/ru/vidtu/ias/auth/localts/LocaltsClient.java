@@ -67,7 +67,7 @@ public final class LocaltsClient {
     /**
      * Browser-like User-Agent to avoid generic automated client blocks.
      */
-    public static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 CookieIAS/3.4";
+    public static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 CookieIAS/3.4.0";
 
     private final String apiKey;
     private final String baseUrl;

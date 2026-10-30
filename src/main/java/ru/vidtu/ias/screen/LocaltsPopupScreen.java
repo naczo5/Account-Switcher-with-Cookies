@@ -193,7 +193,7 @@ final class LocaltsPopupScreen extends Screen {
             this.addRenderableWidget(incBtn);
 
             PopupButton confirmBuyBtn = new PopupButton(centerX - 80, centerY + 40, 160, 20,
-                    Component.translatable("ias.localts.buy.confirm"), btn -> this.confirmPurchase(), Supplier::get);
+                    Component.translatable("ias.localts.buy.confirm"), btn -> this.openPurchaseConfirmation(), Supplier::get);
             boolean canBuy = canPurchaseSelected();
             confirmBuyBtn.active = canBuy && !this.loading && !this.purchasing;
             confirmBuyBtn.color(0.5F, 1.0F, 0.5F, true);
@@ -439,7 +439,32 @@ final class LocaltsPopupScreen extends Screen {
         }
     }
 
-    private void confirmPurchase() {
+    /**
+     * Opens a confirmation popup before spending Localts credits.
+     */
+    private void openPurchaseConfirmation() {
+        if (this.loading || this.purchasing || !canPurchaseSelected()) return;
+        assert this.minecraft != null;
+
+        LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+        int qty = this.purchaseQty;
+        long total = (long) prod.priceInCredits() * qty;
+        long balance = this.user != null ? this.user.balance() : 0L;
+
+        ConfirmPopupScreen confirm = new ConfirmPopupScreen(this,
+                Component.translatable("ias.localts.buy.confirm.title"),
+                Component.translatable("ias.localts.buy.confirm.prompt", qty, prod.name(), total, balance),
+                Component.translatable("ias.localts.buy.confirm.button"),
+                () -> {
+                    //$set_screen 'this.minecraft' 'this'
+                    this.minecraft.gui.setScreen(this);
+                    this.executePurchase();
+                });
+        //$set_screen 'this.minecraft' 'confirm'
+        this.minecraft.gui.setScreen(confirm);
+    }
+
+    private void executePurchase() {
         if (this.loading || !canPurchaseSelected() || this.purchasing) return;
         LocaltsProduct prod = this.products.get(this.selectedProductIndex);
         int qty = this.purchaseQty;

@@ -42,6 +42,7 @@ public class GuiLocalts extends GuiScreen {
     private boolean loading;
     private boolean importing;
     private boolean purchasing;
+    private boolean confirmingPurchase;
     private boolean initialRefreshTriggered;
     private volatile boolean closed;
 
@@ -85,20 +86,30 @@ public class GuiLocalts extends GuiScreen {
         } else if (this.buyingMode) {
             this.apiKeyField = null;
 
-            int prodY = centerY - 50;
-            this.buttonList.add(new GuiButton(20, centerX - 110, prodY, 20, 20, "<"));
-            this.buttonList.add(new GuiButton(21, centerX + 90, prodY, 20, 20, ">"));
+            if (this.confirmingPurchase) {
+                GuiButton buyBtn = new GuiButton(26, centerX - 80, centerY + 32, 160, 20,
+                        I18n.format("ias.localts.buy.confirm.button"));
+                boolean canBuy = canPurchaseSelected();
+                buyBtn.enabled = canBuy && !this.loading && !this.purchasing;
+                this.buttonList.add(buyBtn);
+                this.buttonList.add(new GuiButton(27, centerX - 50, centerY + 58, 100, 20, I18n.format("gui.cancel")));
+            } else {
+                int prodY = centerY - 50;
+                this.buttonList.add(new GuiButton(20, centerX - 110, prodY, 20, 20, "<"));
+                this.buttonList.add(new GuiButton(21, centerX + 90, prodY, 20, 20, ">"));
 
-            int qtyY = centerY + 2;
-            this.buttonList.add(new GuiButton(22, centerX - 45, qtyY, 20, 20, "-"));
-            this.buttonList.add(new GuiButton(23, centerX + 25, qtyY, 20, 20, "+"));
+                int qtyY = centerY + 2;
+                this.buttonList.add(new GuiButton(22, centerX - 45, qtyY, 20, 20, "-"));
+                this.buttonList.add(new GuiButton(23, centerX + 25, qtyY, 20, 20, "+"));
 
-            GuiButton buyBtn = new GuiButton(24, centerX - 80, centerY + 32, 160, 20, I18n.format("ias.localts.buy.confirm"));
-            boolean canBuy = canPurchaseSelected();
-            buyBtn.enabled = canBuy && !this.loading && !this.purchasing;
-            this.buttonList.add(buyBtn);
+                GuiButton buyBtn = new GuiButton(24, centerX - 80, centerY + 32, 160, 20,
+                        I18n.format("ias.localts.buy.confirm"));
+                boolean canBuy = canPurchaseSelected();
+                buyBtn.enabled = canBuy && !this.loading && !this.purchasing;
+                this.buttonList.add(buyBtn);
 
-            this.buttonList.add(new GuiButton(25, centerX - 50, centerY + 58, 100, 20, I18n.format("gui.back")));
+                this.buttonList.add(new GuiButton(25, centerX - 50, centerY + 58, 100, 20, I18n.format("gui.back")));
+            }
         } else {
             this.apiKeyField = null;
 
@@ -157,6 +168,11 @@ public class GuiLocalts extends GuiScreen {
             }
         }
         if (keyCode == Keyboard.KEY_ESCAPE) {
+            if (this.confirmingPurchase) {
+                this.confirmingPurchase = false;
+                initGui();
+                return;
+            }
             if (this.buyingMode) {
                 this.buyingMode = false;
                 initGui();
@@ -205,6 +221,7 @@ public class GuiLocalts extends GuiScreen {
             }
         } else if (button.id == 10) { // Buy Alts
             this.buyingMode = true;
+            this.confirmingPurchase = false;
             this.purchaseQty = 1;
             initGui();
             // Always re-fetch on entry so stale stock values cannot enable a purchase
@@ -246,10 +263,17 @@ public class GuiLocalts extends GuiScreen {
                     initGui();
                 }
             }
-        } else if (button.id == 24) { // Confirm Buy
-            confirmPurchase();
+        } else if (button.id == 24) { // Ask for confirmation before buying
+            this.confirmingPurchase = true;
+            initGui();
         } else if (button.id == 25) { // Back from buy
             this.buyingMode = false;
+            this.confirmingPurchase = false;
+            initGui();
+        } else if (button.id == 26) { // Confirm purchase
+            executePurchase();
+        } else if (button.id == 27) { // Cancel purchase confirmation
+            this.confirmingPurchase = false;
             initGui();
         }
     }
@@ -416,12 +440,13 @@ public class GuiLocalts extends GuiScreen {
         }
     }
 
-    private void confirmPurchase() {
+    private void executePurchase() {
         if (this.loading || !canPurchaseSelected() || this.purchasing || this.importing) return;
         final LocaltsProduct prod = this.products.get(this.selectedProductIndex);
         final int qty = this.purchaseQty;
 
         this.purchasing = true;
+        this.confirmingPurchase = false;
         this.statusText = I18n.format("ias.localts.buy.purchasing");
         this.statusColor = 0xFFFF55;
         initGui();
@@ -594,6 +619,14 @@ public class GuiLocalts extends GuiScreen {
         }
     }
 
+    private void drawWrappedCentered(String text, int centerX, int y, int color) {
+        List<String> lines = this.fontRendererObj.listFormattedStringToWidth(text, this.width - 80);
+        for (String line : lines) {
+            this.drawCenteredString(this.fontRendererObj, line, centerX, y, color);
+            y += 10;
+        }
+    }
+
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         if (this.parent != null) {
@@ -611,28 +644,41 @@ public class GuiLocalts extends GuiScreen {
                 this.apiKeyField.drawTextBox();
             }
         } else if (this.buyingMode) {
-            this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.title"), centerX, centerY - 64, 0xFFFFFF);
-
             String balanceStr = this.user != null ? String.valueOf(this.user.balance()) : "---";
 
-            if (this.products.isEmpty()) {
-                String msg = this.loading ? I18n.format("ias.localts.loading") : I18n.format("ias.localts.buy.noProducts");
-                this.drawCenteredString(this.fontRendererObj, msg, centerX, centerY - 30, 0xAAAAAA);
-            } else if (this.selectedProductIndex < this.products.size()) {
-                LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+            if (this.confirmingPurchase) {
+                this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.confirm.title"),
+                        centerX, centerY - 64, 0xFFFFFF);
+                if (!this.products.isEmpty() && this.selectedProductIndex < this.products.size()) {
+                    LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+                    long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
+                    String prompt = I18n.format("ias.localts.buy.confirm.prompt", this.purchaseQty,
+                            prod.name(), totalCost, balanceStr);
+                    this.drawWrappedCentered(prompt, centerX, centerY - 40, 0xFFFFFF);
+                }
+            } else {
+                this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.title"),
+                        centerX, centerY - 64, 0xFFFFFF);
 
-                String stockStr = prod.stock() >= 0 ? String.valueOf(prod.stock()) : "∞";
-                String nameLine = this.fontRendererObj.trimStringToWidth(prod.name(), 150);
-                String priceLine = this.fontRendererObj.trimStringToWidth(I18n.format("ias.localts.buy.price", prod.priceInCredits(), stockStr), 220);
-                this.drawCenteredString(this.fontRendererObj, nameLine, centerX, centerY - 48, 0xFFFFAA);
-                this.drawCenteredString(this.fontRendererObj, priceLine, centerX, centerY - 28, 0xFFFFAA);
+                if (this.products.isEmpty()) {
+                    String msg = this.loading ? I18n.format("ias.localts.loading") : I18n.format("ias.localts.buy.noProducts");
+                    this.drawCenteredString(this.fontRendererObj, msg, centerX, centerY - 30, 0xAAAAAA);
+                } else if (this.selectedProductIndex < this.products.size()) {
+                    LocaltsProduct prod = this.products.get(this.selectedProductIndex);
 
-                this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.qty", this.purchaseQty), centerX, centerY + 8, 0xFFFFFF);
+                    String stockStr = prod.stock() >= 0 ? String.valueOf(prod.stock()) : "∞";
+                    String nameLine = this.fontRendererObj.trimStringToWidth(prod.name(), 150);
+                    String priceLine = this.fontRendererObj.trimStringToWidth(I18n.format("ias.localts.buy.price", prod.priceInCredits(), stockStr), 220);
+                    this.drawCenteredString(this.fontRendererObj, nameLine, centerX, centerY - 48, 0xFFFFAA);
+                    this.drawCenteredString(this.fontRendererObj, priceLine, centerX, centerY - 28, 0xFFFFAA);
 
-                long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
-                boolean affordable = this.user != null && this.user.balance() >= totalCost;
-                String totalLine = I18n.format("ias.localts.buy.total", totalCost, balanceStr);
-                this.drawCenteredString(this.fontRendererObj, (affordable ? EnumChatFormatting.YELLOW : EnumChatFormatting.RED) + totalLine, centerX, centerY + 20, 0xFFFFFF);
+                    this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.buy.qty", this.purchaseQty), centerX, centerY + 8, 0xFFFFFF);
+
+                    long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
+                    boolean affordable = this.user != null && this.user.balance() >= totalCost;
+                    String totalLine = I18n.format("ias.localts.buy.total", totalCost, balanceStr);
+                    this.drawCenteredString(this.fontRendererObj, (affordable ? EnumChatFormatting.YELLOW : EnumChatFormatting.RED) + totalLine, centerX, centerY + 20, 0xFFFFFF);
+                }
             }
         } else {
             this.drawCenteredString(this.fontRendererObj, I18n.format("ias.localts.title"), centerX, centerY - 64, 0xFFFFFF);
