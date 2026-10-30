@@ -58,6 +58,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -114,6 +115,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Maximum number of rate-limit retries for one cookie file before moving on.
      */
     private static final int MULTI_COOKIE_RATE_LIMIT_RETRIES = 2;
+
+    /**
+     * Width of the failed-import list.
+     */
+    private static final int FAILURE_LIST_WIDTH = 230;
+
+    /**
+     * Height of one failed-import line.
+     */
+    private static final int FAILURE_LINE_HEIGHT = 9;
 
     /**
      * Parent screen.
@@ -223,6 +234,21 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private int pasteBoxY;
 
     /**
+     * Failed imports, shown after a batch finishes.
+     */
+    private final List<ImportFailure> failures = new CopyOnWriteArrayList<>();
+
+    /**
+     * Whether the completion screen should show the failure list.
+     */
+    private boolean showFailures;
+
+    /**
+     * Scroll offset of the failure list, in lines.
+     */
+    private int failureScroll;
+
+    /**
      * Creates a new cookie import screen.
      *
      * @param parent  Parent screen
@@ -284,6 +310,12 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         }
 
         if (this.importing) {
+            return;
+        }
+
+        if (this.showFailures) {
+            this.pathInput = null;
+            this.pasteInput = null;
             return;
         }
 
@@ -406,6 +438,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         assert this.minecraft != null;
         if (this.crypt == null || this.importing) return;
 
+        this.showFailures = false;
+        this.failureScroll = 0;
+        this.failures.clear();
+
         String raw;
         if (this.pasteMode) {
             raw = this.resolvePasteSource();
@@ -497,6 +533,9 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.errored = false;
         this.error = Float.NaN;
         this.errorNote = null;
+        this.showFailures = false;
+        this.failureScroll = 0;
+        this.failures.clear();
         this.selectedCookieFiles = List.copyOf(sources);
         this.stage(Component.translatable("ias.cookie.multi.progress", 1, sources.size()).withStyle(ChatFormatting.YELLOW));
 
@@ -506,37 +545,47 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         /*this.init(this.minecraft, this.width, this.height);*/
 
         IAS.executor().execute(() -> {
-            List<String> records = new ArrayList<>();
+            List<ImportJob> records = new ArrayList<>();
             int readFailed = 0;
             for (String source : sources) {
+                String label = sourceName(source);
                 try {
-                    records.addAll(CookieParser.splitRecords(CookieParser.readText(Path.of(unwrapPath(source)))));
+                    List<String> split = CookieParser.splitRecords(CookieParser.readText(Path.of(unwrapPath(source))));
+                    for (int i = 0; i < split.size(); i++) {
+                        records.add(new ImportJob(split.size() == 1 ? label : label + " #" + (i + 1), split.get(i)));
+                    }
                 } catch (Throwable t) {
                     readFailed++;
+                    this.recordFailure(label, new FriendlyException("Unable to read " + source, t, "ias.error.cookie.file"));
                     AuthLog.expected(LOGGER, "Unable to read " + source, t);
                 }
             }
             if (records.isEmpty()) {
-                this.error(new FriendlyException("No cookie accounts found in the selected files.", "ias.error.cookie.invalid"));
+                if (readFailed > 0) {
+                    this.finishCookieFileImport(0, readFailed, 0, readFailed);
+                } else {
+                    this.error(new FriendlyException("No cookie accounts found in the selected files.", "ias.error.cookie.invalid"));
+                }
                 return;
             }
-            this.importTextRecords(records, 0, 0, readFailed, 0, 0, this);
+            this.importTextRecords(records, 0, 0, readFailed, 0, 0, records.size() + readFailed, this);
         });
     }
 
-    private void importTextRecords(List<String> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, CreateHandler handler) {
+    private void importTextRecords(List<ImportJob> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, int total, CreateHandler handler) {
         if (this.closed) {
             return;
         }
         if (index >= records.size()) {
-            this.finishCookieFileImport(imported, failed, duplicate, records.size());
+            this.finishCookieFileImport(imported, failed, duplicate, total);
             return;
         }
 
         int number = index + 1;
+        ImportJob job = records.get(index);
         this.stage(Component.translatable("ias.cookie.multi.progress", number, records.size()).withStyle(ChatFormatting.YELLOW));
         CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
-        this.startCreateFromSource(records.get(index), false, new CreateHandler() {
+        this.startCreateFromSource(job.source(), false, new CreateHandler() {
             @Override
             public boolean cancelled() {
                 return CookiePopupScreen.this.closed || handler.cancelled();
@@ -566,22 +615,36 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
                     int attempt = rateLimitRetries + 1;
                     this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + records.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
-                    this.scheduleTextRecordImport(records, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+                    this.scheduleTextRecordImport(records, index, imported, failed, duplicate, attempt, total, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
                     return;
                 }
                 AuthLog.expected(LOGGER, "Cookie account " + number + "/" + records.size() + " failed", error);
-                this.scheduleTextRecordImport(records, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                this.recordFailure(job.label(), error);
+                this.scheduleTextRecordImport(records, index + 1, imported, failed + 1, duplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
                 return;
             }
 
             boolean wasDuplicate = this.storeImportedAccount(account);
-            this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+            this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
         }, IAS.executor());
     }
 
-    private void scheduleTextRecordImport(List<String> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs, CreateHandler handler) {
+    private void scheduleTextRecordImport(List<ImportJob> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, int total, long delayMs, CreateHandler handler) {
+        if (index >= records.size()) {
+            this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler);
+            return;
+        }
         CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
-                .execute(() -> this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, handler));
+                .execute(() -> this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler));
+    }
+
+    private static String sourceName(String source) {
+        try {
+            Path file = Path.of(unwrapPath(source)).getFileName();
+            return file != null ? file.toString() : source;
+        } catch (Throwable t) {
+            return source;
+        }
     }
 
     private void importCookieFileAt(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries) {
@@ -630,6 +693,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     return;
                 }
                 AuthLog.expected(LOGGER, "Cookie file " + number + "/" + sources.size() + " failed: " + sources.get(index), error);
+                this.recordFailure(sourceName(sources.get(index)), error);
                 this.scheduleCookieFileImport(sources, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS);
                 return;
             }
@@ -640,6 +704,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     }
 
     private void scheduleCookieFileImport(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs) {
+        if (index >= sources.size()) {
+            this.importCookieFileAt(sources, index, imported, failed, duplicate, rateLimitRetries);
+            return;
+        }
         CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
                 .execute(() -> this.importCookieFileAt(sources, index, imported, failed, duplicate, rateLimitRetries));
     }
@@ -647,6 +715,14 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private boolean isRateLimited(Throwable error) {
         FriendlyException friendly = FriendlyException.friendlyInChain(error);
         return friendly != null && "ias.error.rateLimited".equals(friendly.key());
+    }
+
+    private void recordFailure(String label, Throwable error) {
+        FriendlyException friendly = FriendlyException.friendlyInChain(error);
+        Component reason = friendly != null
+                ? Component.translatable(friendly.key(), friendly.args())
+                : Component.translatable("ias.error");
+        this.failures.add(new ImportFailure(label, reason));
     }
 
     private boolean storeImportedAccount(MicrosoftAccount account) {
@@ -669,6 +745,8 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
             this.importing = false;
             this.selectedCookieFiles = List.of();
+            this.showFailures = !this.failures.isEmpty();
+            this.failureScroll = 0;
             synchronized (this.lock) {
                 this.stage = Component.translatable("ias.cookie.multi.done", imported, total, failed, duplicate).withStyle(failed == 0 ? ChatFormatting.GREEN : ChatFormatting.YELLOW);
                 this.label = null;
@@ -704,7 +782,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
             List<String> records = CookieParser.splitRecords(text);
             if (records.size() > 1) {
-                this.importTextRecords(records, 0, 0, 0, 0, 0, createHandler);
+                List<ImportJob> jobs = new ArrayList<>(records.size());
+                for (int i = 0; i < records.size(); i++) {
+                    jobs.add(new ImportJob(Component.translatable("ias.cookie.account", i + 1).getString(), records.get(i)));
+                }
+                this.importTextRecords(jobs, 0, 0, 0, 0, 0, jobs.size(), createHandler);
                 return;
             }
 
@@ -816,6 +898,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             @Override
             public void error(Throwable error) {
                 AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
+                CookiePopupScreen.this.recordFailure(Component.translatable("ias.cookie.account", number).getString(), error);
                 CookiePopupScreen.this.importTokenValues(tokens, index + 1, imported, failed + 1, duplicate, handler);
             }
         });
@@ -994,6 +1077,8 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 /*this.errorNote.renderCentered(graphics, this.width, this.height + 192, 9, 0xFF_FF_FF | opacityMask);*/
                 pose.popMatrix();
             }
+        } else if (this.showFailures) {
+            this.renderFailures(graphics);
         } else if (this.pathInput != null || this.pasteInput != null) {
             int centerY = this.height / 2;
             if (Float.isFinite(this.error)) {
@@ -1014,6 +1099,91 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 /*graphics.drawCenteredString(this.font, inputTitle, this.width / 2, centerY - 54, 0xFF_FF_FF_FF);*/
             }
         }
+    }
+
+    //? if >=26.1 {
+    private void renderFailures(GuiGraphicsExtractor graphics) {
+    //?} else
+    /*private void renderFailures(GuiGraphics graphics) {*/
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+        int left = centerX - FAILURE_LIST_WIDTH / 2;
+        int top = this.failureListTop();
+        int bottom = this.failureListBottom();
+
+        synchronized (this.lock) {
+            if (this.label == null) {
+                this.label = MultiLineLabel.create(this.font, Objects.requireNonNullElse(this.stage, Component.empty()), FAILURE_LIST_WIDTH);
+            }
+            IStonecutter.renderMultilineLabelCentered(this.label, graphics, centerX, centerY - 54);
+        }
+
+        List<FormattedCharSequence> lines = this.failureLines();
+        int visibleLines = Math.max(1, (bottom - top) / FAILURE_LINE_HEIGHT);
+        int maxScroll = Math.max(0, lines.size() - visibleLines);
+        this.failureScroll = Math.max(0, Math.min(maxScroll, this.failureScroll));
+
+        Component heading = Component.translatable("ias.cookie.failures", this.failures.size());
+        //? if >=26.1 {
+        graphics.centeredText(this.font, heading, centerX, top - 12, 0xFF_FF_80_80);
+        //?} else
+        /*graphics.drawCenteredString(this.font, heading, centerX, top - 12, 0xFF_FF_80_80);*/
+
+        graphics.enableScissor(left, top, left + FAILURE_LIST_WIDTH, bottom);
+        int y = top;
+        for (int i = this.failureScroll; i < lines.size() && i < this.failureScroll + visibleLines; i++) {
+            //? if >=26.1 {
+            graphics.text(this.font, lines.get(i), left, y, 0xFF_FF_FF_FF);
+            //?} else
+            /*graphics.drawString(this.font, lines.get(i), left, y, 0xFF_FF_FF_FF);*/
+            y += FAILURE_LINE_HEIGHT;
+        }
+        graphics.disableScissor();
+
+        if (maxScroll > 0) {
+            int trackX = left + FAILURE_LIST_WIDTH + 5;
+            graphics.fill(trackX, top, trackX + 2, bottom, 0x60_FF_FF_FF);
+            int trackHeight = bottom - top;
+            int thumbHeight = Math.max(10, trackHeight * visibleLines / lines.size());
+            int thumbY = top + (trackHeight - thumbHeight) * this.failureScroll / maxScroll;
+            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, 0xFF_FF_FF_FF);
+        }
+    }
+
+    private List<FormattedCharSequence> failureLines() {
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        for (ImportFailure failure : this.failures) {
+            Component text = Component.literal(failure.label()).withStyle(ChatFormatting.RED)
+                    .append(Component.literal(": ").withStyle(ChatFormatting.DARK_GRAY))
+                    .append(failure.reason().copy().withStyle(ChatFormatting.GRAY));
+            lines.addAll(this.font.split(text, FAILURE_LIST_WIDTH - 8));
+        }
+        return lines;
+    }
+
+    private int failureListTop() {
+        return this.height / 2 - 24;
+    }
+
+    private int failureListBottom() {
+        return this.height / 2 + 62;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (this.showFailures) {
+            int left = this.width / 2 - FAILURE_LIST_WIDTH / 2;
+            int top = this.failureListTop();
+            int bottom = this.failureListBottom();
+            if (mouseX >= left && mouseX <= left + FAILURE_LIST_WIDTH && mouseY >= top && mouseY <= bottom) {
+                List<FormattedCharSequence> lines = this.failureLines();
+                int visibleLines = Math.max(1, (bottom - top) / FAILURE_LINE_HEIGHT);
+                int maxScroll = Math.max(0, lines.size() - visibleLines);
+                this.failureScroll = Math.max(0, Math.min(maxScroll, this.failureScroll - (int) (scrollY * 2.0D)));
+                return true;
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
@@ -1122,11 +1292,18 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
             this.importing = false;
             this.errored = true;
+            this.showFailures = false;
             //? if >=1.21.11 {
             this.init(this.width, this.height);
             //?} else
             /*this.init(this.minecraft, this.width, this.height);*/
         });
+    }
+
+    private record ImportJob(String label, String source) {
+    }
+
+    private record ImportFailure(String label, Component reason) {
     }
 
     private Screen currentScreen() {

@@ -69,6 +69,7 @@ ias.cookie=Cookie / Token Import
 ias.cookie.selected=%s cookie files selected
 ias.cookie.multi.progress=Importing cookie file %s/%s...
 ias.cookie.multi.done=%s/%s imported, %s failed, %s duplicate.
+ias.cookie.failures=Failed imports (%s):
 ias.cookie.path=File Path
 ias.cookie.paste=Paste
 ias.cookie.path.hint=Cookie file path

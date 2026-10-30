@@ -101,6 +101,7 @@
   "ias.cookie.selected": "%s cookie files selected",
   "ias.cookie.multi.progress": "Importing cookie file %s/%s...",
   "ias.cookie.multi.done": "%s/%s imported, %s failed, %s duplicate.",
+  "ias.cookie.failures": "Failed imports (%s):",
   "ias.error.cookie.invalid": "The cookie file is invalid or missing required Microsoft session cookies (__Host-MSAAUTHP / __Host-MSAAUTH).",
   "ias.error.cookie.expired": "Unable to authenticate with these cookies. They may be expired or revoked.",
   "ias.error.cookie.file": "Unable to read the cookie file. Check that the path exists and is readable.",

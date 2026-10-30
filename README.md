@@ -33,7 +33,7 @@ A fork of [In-Game Account Switcher](https://github.com/The-Fireplace-Minecraft-
 | **26.3** | Fabric / Lunar Fabric | `.\gradlew.bat :26.3-fabric:jar` | `build\libs\CookieIAS-*+26.3-fabric.jar` |
 | **26.2** | Fabric / Lunar Fabric | `.\gradlew.bat :26.2-fabric:jar` | `build\libs\CookieIAS-*+26.2-fabric.jar` |
 | **1.21.11** | Fabric / Lunar Fabric | `.\gradlew.bat :1.21.11-fabric:remapJar` | `build\libs\CookieIAS-*+1.21.11-fabric.jar` |
-| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\CookieIAS-3.3.1-pre2+1.8.9-forge.jar` |
+| **1.8.9** | Forge | `cd forge-1.8; .\gradlew.bat build` (requires **JDK 8**) | `forge-1.8\build\libs\CookieIAS-3.3.1-pre3+1.8.9-forge.jar` |
 
 If you need cookie alts on Lunar Client 1.8.9,
 check out my injectable tool here https://github.com/naczo5/lunar-cookies
@@ -47,7 +47,7 @@ check out my injectable tool here https://github.com/naczo5/lunar-cookies
 ### 1.8.9 (Forge)
 
 1. Install Forge for **1.8.9**.
-2. Copy `forge-1.8\build\libs\CookieIAS-3.3.1-pre2+1.8.9-forge.jar` into the instance's **mods** folder.
+2. Copy `forge-1.8\build\libs\CookieIAS-3.3.1-pre3+1.8.9-forge.jar` into the instance's **mods** folder.
 3. Open the account switcher from its title-screen button or press **`O`**.
 
 ### 26.3 / 26.2 / 1.21.11 (Fabric or Lunar Fabric)

@@ -11,6 +11,7 @@ import net.minecraft.client.resources.I18n;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.Session;
 import org.lwjgl.input.Keyboard;
+import org.lwjgl.input.Mouse;
 import ru.vidtu.iasfork.cookie.CookieAuth;
 import ru.vidtu.iasfork.cookie.CookieAuthException;
 import ru.vidtu.iasfork.cookie.CookieParser;
@@ -39,6 +40,10 @@ public class GuiCookieImport extends GuiScreen {
     /** Files picked via Browse (multi-select). Empty = parse pathInput text. */
     private final List<String> selectedFiles = new ArrayList<String>();
     private final List<String> statusLines = new ArrayList<String>();
+    private final List<String> failures = new ArrayList<String>();
+    private final List<String> failureDisplayLines = new ArrayList<String>();
+    private boolean showFailures;
+    private int failureScroll;
 
     public GuiCookieImport(GuiScreen parent) {
         this(parent, false);
@@ -55,6 +60,14 @@ public class GuiCookieImport extends GuiScreen {
         buttonList.clear();
         int centerX = width / 2;
         int centerY = height / 2;
+
+        if (showFailures) {
+            pathInput = null;
+            pasteInput = null;
+            rebuildFailureLines();
+            buttonList.add(new GuiButton(3, centerX - 75, centerY + 72, 150, 20, I18n.format("gui.back")));
+            return;
+        }
 
         buttonList.add(new GuiButton(10, centerX - 77, centerY - 38, 74, 20, I18n.format("ias.cookie.path")));
         buttonList.add(new GuiButton(11, centerX + 3, centerY - 38, 74, 20, I18n.format("ias.cookie.paste")));
@@ -207,6 +220,10 @@ public class GuiCookieImport extends GuiScreen {
         if (importing) {
             return;
         }
+        showFailures = false;
+        failureScroll = 0;
+        failures.clear();
+        failureDisplayLines.clear();
         String raw;
         if (pasteMode) {
             raw = resolvePasteSource();
@@ -435,6 +452,7 @@ public class GuiCookieImport extends GuiScreen {
                         ok.addAll(profiles);
                     } else {
                         failed++;
+                        failures.add(failureText(path, 0, lastError != null ? lastError : new Exception(I18n.format("ias.error.cookie.invalid"))));
                         if (lastError != null) {
                             lastError.printStackTrace();
                         }
@@ -468,7 +486,7 @@ public class GuiCookieImport extends GuiScreen {
                             }
                             CookieAuth.MinecraftProfile last = done.isEmpty() ? null : done.get(done.size() - 1);
                             Config.save();
-                            if (last != null && failedCount == 0 && done.size() == 1) {
+                            if (last != null && failedCount == 0 && done.size() == 1 && failures.isEmpty()) {
                                 MR.setSession(new Session(last.name, last.uuid, last.token, "mojang"));
                                 mc.displayGuiScreen(returnToAccountListOnSuccess ? new GuiAccountSelector() : parent);
                                 return;
@@ -477,8 +495,14 @@ public class GuiCookieImport extends GuiScreen {
                                 MR.setSession(new Session(last.name, last.uuid, last.token, "mojang"));
                             }
                             statusLines.clear();
-                            statusLines.add(I18n.format("ias.cookie.multi.done", done.size(), total, failedCount, dup));
+                            int reportFailed = failures.size();
+                            statusLines.add(I18n.format("ias.cookie.multi.done", done.size(), done.size() + reportFailed, reportFailed, dup));
                             importing = false;
+                            showFailures = !failures.isEmpty();
+                            failureScroll = 0;
+                            if (showFailures) {
+                                initGui();
+                            }
                         } catch (Throwable t) {
                             showError(formatError(t));
                             importing = false;
@@ -495,10 +519,12 @@ public class GuiCookieImport extends GuiScreen {
                         List<CookieAuth.MinecraftProfile> out = new ArrayList<CookieAuth.MinecraftProfile>();
                         int blobFailed = 0;
                         Throwable last = null;
-                        for (String blob : records) {
+                        List<String> partialFailures = new ArrayList<String>();
+                        for (int blobIndex = 0; blobIndex < records.size(); blobIndex++) {
                             if (closed) {
                                 break;
                             }
+                            String blob = records.get(blobIndex);
                             try {
                                 out.add(CookieAuth.authenticate(CookieParser.fromText(blob)));
                             } catch (Throwable t) {
@@ -509,10 +535,12 @@ public class GuiCookieImport extends GuiScreen {
                                     } catch (Throwable tt) {
                                         blobFailed++;
                                         last = tt;
+                                        partialFailures.add(failureText(path, blobIndex + 1, tt));
                                     }
                                 } else {
                                     blobFailed++;
                                     last = t;
+                                    partialFailures.add(failureText(path, blobIndex + 1, t));
                                 }
                             }
                         }
@@ -522,6 +550,7 @@ public class GuiCookieImport extends GuiScreen {
                             }
                             throw new Exception(last == null ? "No accounts in dump" : last.getMessage());
                         }
+                        failures.addAll(partialFailures);
                         if (blobFailed > 0) {
                             // Surface partial-dump failures in the log; the file still
                             // counts once, but no blob is silently dropped.
@@ -634,6 +663,56 @@ public class GuiCookieImport extends GuiScreen {
         }
     }
 
+    private static String failureText(String path, int index, Throwable error) {
+        String label = sourceName(path) + (index > 0 ? " #" + index : "");
+        return EnumChatFormatting.RED + label + EnumChatFormatting.GRAY + ": " + formatError(error);
+    }
+
+    private static String sourceName(String path) {
+        try {
+            return new java.io.File(path.trim()).getName();
+        } catch (Throwable t) {
+            return path;
+        }
+    }
+
+    private void rebuildFailureLines() {
+        failureDisplayLines.clear();
+        for (String failure : failures) {
+            failureDisplayLines.addAll(fontRendererObj.listFormattedStringToWidth(failure, width - 80));
+        }
+    }
+
+    private int failureListTop() {
+        return height / 2 - 18;
+    }
+
+    private int failureListBottom() {
+        return height / 2 + 52;
+    }
+
+    @Override
+    public void handleMouseInput() throws IOException {
+        super.handleMouseInput();
+        if (!showFailures || failureDisplayLines.isEmpty() || mc == null) {
+            return;
+        }
+        int wheel = Mouse.getEventDWheel();
+        if (wheel == 0) {
+            return;
+        }
+        int mouseX = Mouse.getEventX() * width / Math.max(1, mc.displayWidth);
+        int mouseY = height - Mouse.getEventY() * height / Math.max(1, mc.displayHeight) - 1;
+        int left = width / 2 - 125;
+        int right = width / 2 + 125;
+        if (mouseX < left || mouseX > right || mouseY < failureListTop() || mouseY > failureListBottom()) {
+            return;
+        }
+        int visible = Math.max(1, (failureListBottom() - failureListTop()) / 10);
+        int maxScroll = Math.max(0, failureDisplayLines.size() - visible);
+        failureScroll = Math.max(0, Math.min(maxScroll, failureScroll - (wheel > 0 ? 1 : -1)));
+    }
+
     private static String formatError(Throwable t) {
         if (isRateLimited(t)) {
             try {
@@ -691,6 +770,35 @@ public class GuiCookieImport extends GuiScreen {
         }
         drawDefaultBackground();
         drawCenteredString(fontRendererObj, I18n.format("ias.cookie"), width / 2, height / 2 - 70, 0xFFFFFF);
+        if (showFailures) {
+            int y = height / 2 - 48;
+            for (String line : statusLines) {
+                drawCenteredString(fontRendererObj, line, width / 2, y, 0xFFFFFF);
+                y += 10;
+            }
+            drawCenteredString(fontRendererObj, I18n.format("ias.cookie.failures", failures.size()),
+                    width / 2, height / 2 - 28, 0xFF5555);
+            int top = failureListTop();
+            int bottom = failureListBottom();
+            int visible = Math.max(1, (bottom - top) / 10);
+            int maxScroll = Math.max(0, failureDisplayLines.size() - visible);
+            failureScroll = Math.max(0, Math.min(maxScroll, failureScroll));
+            int lineY = top;
+            for (int i = failureScroll; i < failureDisplayLines.size() && i < failureScroll + visible; i++) {
+                drawString(fontRendererObj, failureDisplayLines.get(i), width / 2 - 120, lineY, 0xFFFFFF);
+                lineY += 10;
+            }
+            if (maxScroll > 0) {
+                int trackX = width / 2 + 127;
+                drawRect(trackX, top, trackX + 2, bottom, 0x80FFFFFF);
+                int trackHeight = bottom - top;
+                int thumbHeight = Math.max(10, trackHeight * visible / failureDisplayLines.size());
+                int thumbY = top + (trackHeight - thumbHeight) * failureScroll / maxScroll;
+                drawRect(trackX, thumbY, trackX + 2, thumbY + thumbHeight, 0xFFFFFFFF);
+            }
+            super.drawScreen(mouseX, mouseY, partialTicks);
+            return;
+        }
         int y = height / 2 + 20;
         for (String line : statusLines) {
             drawCenteredString(fontRendererObj, line, width / 2, y, 0xFFFFFF);
