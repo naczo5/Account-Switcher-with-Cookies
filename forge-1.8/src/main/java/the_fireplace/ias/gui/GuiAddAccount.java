@@ -23,6 +23,7 @@ public class GuiAddAccount extends AbstractAccountGui {
 		super.initGui();
 		buttonList.add(new GuiButton(13, width / 2 - 60, height / 3 * 2 - 24, 120, 20, I18n.format("ias.msauth.btn")));
 		buttonList.add(new GuiButton(14, width / 2 - 60, height / 3 * 2, 120, 20, I18n.format("ias.add.cookie")));
+		buttonList.add(new GuiButton(15, width / 2 - 60, height / 3 * 2 + 24, 120, 20, I18n.format("ias.providers")));
 	}
 
 	@Override
@@ -35,6 +36,10 @@ public class GuiAddAccount extends AbstractAccountGui {
 			// Keep this initialized form as the import screen's visual parent, then
 			// open a fresh account list once the import succeeds.
 			mc.displayGuiScreen(new GuiCookieImport(this, true));
+			return;
+		}
+		if (button.id == 15) {
+			mc.displayGuiScreen(new GuiProviders(this));
 			return;
 		}
 		super.actionPerformed(button);

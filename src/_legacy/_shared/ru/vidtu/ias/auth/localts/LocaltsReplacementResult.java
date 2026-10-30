@@ -19,20 +19,49 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import java.util.Objects;
 
 /**
  * Result of opening a replacement request.
- *
- * @param success       Whether the replacement was submitted
- * @param replacementId Replacement request identifier
- * @param redirect      URL/path to view the replacement chat
- * @author VidTu
  */
-public record LocaltsReplacementResult(
-        boolean success,
-        @NotNull String replacementId,
-        @Nullable String redirect
-) {
+public final class LocaltsReplacementResult {
+    private final boolean success;
+    private final String replacementId;
+    private final String redirect;
+
+    public LocaltsReplacementResult(boolean success, String replacementId, String redirect) {
+        this.success = success;
+        this.replacementId = replacementId != null ? replacementId : "";
+        this.redirect = redirect;
+    }
+
+    public boolean success() {
+        return this.success;
+    }
+
+    public String replacementId() {
+        return this.replacementId;
+    }
+
+    public String redirect() {
+        return this.redirect;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsReplacementResult that = (LocaltsReplacementResult) o;
+        return success == that.success && Objects.equals(replacementId, that.replacementId) && Objects.equals(redirect, that.redirect);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(success, replacementId, redirect);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsReplacementResult[success=" + success + ", replacementId=" + replacementId + "]";
+    }
 }

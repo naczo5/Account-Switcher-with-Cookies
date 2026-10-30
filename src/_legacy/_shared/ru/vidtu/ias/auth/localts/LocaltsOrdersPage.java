@@ -19,27 +19,71 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
-
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Paginated list of orders from the Localts API.
- *
- * @param success       Whether the request succeeded
- * @param orders        Orders in the current page
- * @param page          Current zero-based page index
- * @param size          Current page size
- * @param totalPages    Total number of available pages
- * @param totalElements Total number of orders across all pages
- * @author VidTu
  */
-public record LocaltsOrdersPage(
-        boolean success,
-        @NotNull List<LocaltsOrderSummary> orders,
-        int page,
-        int size,
-        int totalPages,
-        int totalElements
-) {
+public final class LocaltsOrdersPage {
+    private final boolean success;
+    private final List<LocaltsOrderSummary> orders;
+    private final int page;
+    private final int size;
+    private final int totalPages;
+    private final int totalElements;
+
+    public LocaltsOrdersPage(boolean success, List<LocaltsOrderSummary> orders, int page, int size, int totalPages, int totalElements) {
+        this.success = success;
+        this.orders = orders != null ? Collections.unmodifiableList(orders) : Collections.<LocaltsOrderSummary>emptyList();
+        this.page = page;
+        this.size = size;
+        this.totalPages = totalPages;
+        this.totalElements = totalElements;
+    }
+
+    public boolean success() {
+        return this.success;
+    }
+
+    public List<LocaltsOrderSummary> orders() {
+        return this.orders;
+    }
+
+    public int page() {
+        return this.page;
+    }
+
+    public int size() {
+        return this.size;
+    }
+
+    public int totalPages() {
+        return this.totalPages;
+    }
+
+    public int totalElements() {
+        return this.totalElements;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsOrdersPage that = (LocaltsOrdersPage) o;
+        return success == that.success && page == that.page && size == that.size &&
+                totalPages == that.totalPages && totalElements == that.totalElements &&
+                Objects.equals(orders, that.orders);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(success, orders, page, size, totalPages, totalElements);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsOrdersPage[page=" + page + ", totalElements=" + totalElements + "]";
+    }
 }

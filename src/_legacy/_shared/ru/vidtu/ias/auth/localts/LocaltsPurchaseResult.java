@@ -19,17 +19,43 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
+import java.util.Objects;
 
 /**
  * Result of a product purchase.
- *
- * @param success Whether the purchase succeeded
- * @param orderId Created order identifier
- * @author VidTu
  */
-public record LocaltsPurchaseResult(
-        boolean success,
-        @NotNull String orderId
-) {
+public final class LocaltsPurchaseResult {
+    private final boolean success;
+    private final String orderId;
+
+    public LocaltsPurchaseResult(boolean success, String orderId) {
+        this.success = success;
+        this.orderId = orderId != null ? orderId : "";
+    }
+
+    public boolean success() {
+        return this.success;
+    }
+
+    public String orderId() {
+        return this.orderId;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsPurchaseResult that = (LocaltsPurchaseResult) o;
+        return success == that.success && Objects.equals(orderId, that.orderId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(success, orderId);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsPurchaseResult[success=" + success + ", orderId=" + orderId + "]";
+    }
 }

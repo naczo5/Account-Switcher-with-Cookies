@@ -19,21 +19,56 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
+import java.util.Objects;
 
 /**
  * Summary of an order returned in order listings.
- *
- * @param id          Order identifier
- * @param productId   Product identifier
- * @param productType Product type (e.g. Text)
- * @param timestamp   Order timestamp in epoch milliseconds
- * @author VidTu
  */
-public record LocaltsOrderSummary(
-        @NotNull String id,
-        @NotNull String productId,
-        @NotNull String productType,
-        long timestamp
-) {
+public final class LocaltsOrderSummary {
+    private final String id;
+    private final String productId;
+    private final String productType;
+    private final long timestamp;
+
+    public LocaltsOrderSummary(String id, String productId, String productType, long timestamp) {
+        this.id = id != null ? id : "";
+        this.productId = productId != null ? productId : "";
+        this.productType = productType != null ? productType : "";
+        this.timestamp = timestamp;
+    }
+
+    public String id() {
+        return this.id;
+    }
+
+    public String productId() {
+        return this.productId;
+    }
+
+    public String productType() {
+        return this.productType;
+    }
+
+    public long timestamp() {
+        return this.timestamp;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsOrderSummary that = (LocaltsOrderSummary) o;
+        return timestamp == that.timestamp && Objects.equals(id, that.id) &&
+                Objects.equals(productId, that.productId) && Objects.equals(productType, that.productType);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, productId, productType, timestamp);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsOrderSummary[id=" + id + ", productId=" + productId + ", timestamp=" + timestamp + "]";
+    }
 }

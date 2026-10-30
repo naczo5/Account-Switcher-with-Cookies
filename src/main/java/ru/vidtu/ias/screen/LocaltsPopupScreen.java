@@ -38,10 +38,11 @@ import ru.vidtu.ias.auth.localts.LocaltsMe;
 import ru.vidtu.ias.auth.localts.LocaltsOrder;
 import ru.vidtu.ias.auth.localts.LocaltsOrderSummary;
 import ru.vidtu.ias.auth.localts.LocaltsOrdersPage;
+import ru.vidtu.ias.auth.localts.LocaltsProduct;
+import ru.vidtu.ias.auth.localts.LocaltsPurchaseResult;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.crypt.Crypt;
 import ru.vidtu.ias.platform.IStonecutter;
-import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,9 +53,8 @@ import java.util.function.Supplier;
 
 /**
  * Localts marketplace integration popup screen.
- * <p>
- * Displays credit balance, username, and packaged orders, allowing one-click
- * batch import of purchased accounts into IAS.
+ * Displays credit balance, username, and packaged orders, allows in-game alt purchases,
+ * and enables one-click batch import of purchased accounts into IAS.
  *
  * @author VidTu
  */
@@ -68,7 +68,7 @@ final class LocaltsPopupScreen extends Screen {
     });
 
     private static final int PANEL_HALF_W = 125;
-    private static final int PANEL_HALF_H = 75;
+    private static final int PANEL_HALF_H = 80;
 
     private final Screen parent;
     private final Consumer<Account> handler;
@@ -76,18 +76,26 @@ final class LocaltsPopupScreen extends Screen {
 
     private PopupBox apiKeyBox;
     private PopupButton saveKeyBtn;
+    private PopupButton buyAltsBtn;
     private PopupButton importBtn;
     private PopupButton refreshBtn;
     private PopupButton changeKeyBtn;
 
     private boolean editingKey;
+    private boolean buyingMode;
     private boolean loading;
+    private boolean purchasing;
     private boolean closed;
     private boolean initialRefreshTriggered;
     private Component statusText = Component.empty();
     private LocaltsMe user;
     private final List<String> packagedAccounts = new ArrayList<>();
     private int packagedOrdersCount;
+
+    // Buying mode state
+    private final List<LocaltsProduct> products = new ArrayList<>();
+    private int selectedProductIndex;
+    private int purchaseQty = 1;
 
     public LocaltsPopupScreen(Screen parent, Consumer<Account> handler, Crypt crypt) {
         super(Component.translatable("ias.localts"));
@@ -136,36 +144,103 @@ final class LocaltsPopupScreen extends Screen {
             PopupButton cancelBtn = new PopupButton(centerX - 50, centerY + 28, 100, 20,
                     CommonComponents.GUI_CANCEL, btn -> this.onClose(), Supplier::get);
             this.addRenderableWidget(cancelBtn);
+        } else if (this.buyingMode) {
+            this.apiKeyBox = null;
+
+            int prodY = centerY - 28;
+            PopupButton prevBtn = new PopupButton(centerX - 100, prodY, 20, 20, Component.literal("<"), btn -> {
+                if (!this.products.isEmpty()) {
+                    this.selectedProductIndex = (this.selectedProductIndex - 1 + this.products.size()) % this.products.size();
+                    this.purchaseQty = 1;
+                    this.reInit();
+                }
+            }, Supplier::get);
+            this.addRenderableWidget(prevBtn);
+
+            PopupButton nextBtn = new PopupButton(centerX + 80, prodY, 20, 20, Component.literal(">"), btn -> {
+                if (!this.products.isEmpty()) {
+                    this.selectedProductIndex = (this.selectedProductIndex + 1) % this.products.size();
+                    this.purchaseQty = 1;
+                    this.reInit();
+                }
+            }, Supplier::get);
+            this.addRenderableWidget(nextBtn);
+
+            int qtyY = centerY + 4;
+            PopupButton decBtn = new PopupButton(centerX - 45, qtyY, 20, 20, Component.literal("-"), btn -> {
+                if (this.purchaseQty > 1) {
+                    this.purchaseQty--;
+                    this.reInit();
+                }
+            }, Supplier::get);
+            this.addRenderableWidget(decBtn);
+
+            PopupButton incBtn = new PopupButton(centerX + 25, qtyY, 20, 20, Component.literal("+"), btn -> {
+                if (!this.products.isEmpty() && this.selectedProductIndex < this.products.size()) {
+                    LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+                    if (this.purchaseQty < prod.stock()) {
+                        this.purchaseQty++;
+                        this.reInit();
+                    }
+                }
+            }, Supplier::get);
+            this.addRenderableWidget(incBtn);
+
+            PopupButton confirmBuyBtn = new PopupButton(centerX - 80, centerY + 28, 160, 20,
+                    Component.translatable("ias.localts.buy.confirm"), btn -> this.confirmPurchase(), Supplier::get);
+            boolean canBuy = canPurchaseSelected();
+            confirmBuyBtn.active = canBuy && !this.loading && !this.purchasing;
+            confirmBuyBtn.color(0.5F, 1.0F, 0.5F, true);
+            this.addRenderableWidget(confirmBuyBtn);
+
+            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 52, 100, 20,
+                    CommonComponents.GUI_BACK, btn -> {
+                this.buyingMode = false;
+                this.reInit();
+            }, Supplier::get);
+            this.addRenderableWidget(backBtn);
         } else {
-            int importBtnWidth = 140;
-            this.importBtn = new PopupButton(centerX - importBtnWidth / 2, centerY - 2, importBtnWidth, 20,
+            this.apiKeyBox = null;
+            int btnW = 150;
+
+            this.buyAltsBtn = new PopupButton(centerX - btnW / 2, centerY - 24, btnW, 20,
+                    Component.translatable("ias.localts.buy"), btn -> {
+                this.buyingMode = true;
+                this.purchaseQty = 1;
+                this.reInit();
+                if (this.products.isEmpty() && !this.loading) {
+                    this.fetchProducts();
+                }
+            }, Supplier::get);
+            this.buyAltsBtn.color(0.5F, 1.0F, 0.5F, true);
+            this.buyAltsBtn.active = !this.loading;
+            this.addRenderableWidget(this.buyAltsBtn);
+
+            this.importBtn = new PopupButton(centerX - btnW / 2, centerY, btnW, 20,
                     Component.translatable("ias.localts.importAccounts", this.packagedAccounts.size()),
                     btn -> this.importPackagedAccounts(), Supplier::get);
             this.importBtn.active = !this.packagedAccounts.isEmpty() && !this.loading;
-            this.importBtn.color(0.5F, 1.0F, 0.5F, true);
+            this.importBtn.color(0.5F, 0.75F, 1.0F, true);
             this.addRenderableWidget(this.importBtn);
 
-            this.refreshBtn = new PopupButton(centerX - 100, centerY + 22, 64, 20,
+            this.refreshBtn = new PopupButton(centerX - 100, centerY + 24, 64, 20,
                     Component.translatable("ias.localts.refresh"), btn -> this.refreshData(), Supplier::get);
             this.refreshBtn.active = !this.loading;
             this.addRenderableWidget(this.refreshBtn);
 
-            PopupButton browseStoreBtn = new PopupButton(centerX - 32, centerY + 22, 64, 20,
+            PopupButton browseStoreBtn = new PopupButton(centerX - 32, centerY + 24, 64, 20,
                     Component.translatable("ias.localts.store"), btn -> IStonecutter.openUrl("https://localts.store/store"), Supplier::get);
             browseStoreBtn.color(0.5F, 0.75F, 1.0F, true);
             this.addRenderableWidget(browseStoreBtn);
 
-            this.changeKeyBtn = new PopupButton(centerX + 36, centerY + 22, 64, 20,
+            this.changeKeyBtn = new PopupButton(centerX + 36, centerY + 24, 64, 20,
                     Component.translatable("ias.localts.keyBtn"), btn -> {
                 this.editingKey = true;
-                //? if >=1.21.11 {
-                this.init(this.width, this.height);
-                //?} else
-                /*this.init(this.minecraft, this.width, this.height);*/
+                this.reInit();
             }, Supplier::get);
             this.addRenderableWidget(this.changeKeyBtn);
 
-            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 46, 100, 20,
+            PopupButton backBtn = new PopupButton(centerX - 50, centerY + 50, 100, 20,
                     CommonComponents.GUI_BACK, btn -> this.onClose(), Supplier::get);
             this.addRenderableWidget(backBtn);
 
@@ -174,6 +249,22 @@ final class LocaltsPopupScreen extends Screen {
                 this.refreshData();
             }
         }
+    }
+
+    private void reInit() {
+        //? if >=1.21.11 {
+        this.init(this.width, this.height);
+        //?} else
+        /*this.init(this.minecraft, this.width, this.height);*/
+    }
+
+    private boolean canPurchaseSelected() {
+        if (this.products.isEmpty() || this.selectedProductIndex >= this.products.size()) return false;
+        LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+        if (prod.stock() < this.purchaseQty || this.purchaseQty < 1) return false;
+        if (this.user == null) return false;
+        long totalCost = (long) prod.priceInCredits() * this.purchaseQty;
+        return this.user.balance() >= totalCost;
     }
 
     private void saveApiKey() {
@@ -198,11 +289,7 @@ final class LocaltsPopupScreen extends Screen {
         this.statusText = Component.translatable("ias.localts.connecting").withStyle(ChatFormatting.YELLOW);
         this.initialRefreshTriggered = true;
 
-        //? if >=1.21.11 {
-        this.init(this.width, this.height);
-        //?} else
-        /*this.init(this.minecraft, this.width, this.height);*/
-
+        this.reInit();
         this.refreshData();
     }
 
@@ -212,71 +299,129 @@ final class LocaltsPopupScreen extends Screen {
         String key = IASConfig.localtsApiKey;
         if (key == null || key.isBlank()) {
             this.editingKey = true;
-            //? if >=1.21.11 {
-            this.init(this.width, this.height);
-            //?} else
-            /*this.init(this.minecraft, this.width, this.height);*/
+            this.reInit();
             return;
         }
 
         this.loading = true;
         this.statusText = Component.translatable("ias.localts.loading").withStyle(ChatFormatting.YELLOW);
-        if (this.refreshBtn != null) this.refreshBtn.active = false;
-        if (this.importBtn != null) this.importBtn.active = false;
 
         EXECUTOR.execute(() -> {
             try {
                 LocaltsClient client = new LocaltsClient(key);
                 LocaltsMe me = client.getMe();
-                LocaltsOrdersPage page = client.getOrders(0, 10);
+                List<LocaltsProduct> prods = client.getProducts();
 
+                LocaltsOrdersPage page = client.getOrders(0, 50);
                 List<String> accounts = new ArrayList<>();
-                int packagedCount = 0;
+                int packagedOrders = 0;
 
                 for (LocaltsOrderSummary summary : page.orders()) {
+                    if (this.closed) return;
                     try {
                         LocaltsOrder order = client.getOrder(summary.id());
                         if (order.hasPackagedItems()) {
-                            packagedCount++;
-                            accounts.addAll(LocaltsClient.extractOrderAccountContents(order));
+                            List<String> extracted = LocaltsClient.extractOrderAccounts(order);
+                            if (!extracted.isEmpty()) {
+                                accounts.addAll(extracted);
+                                packagedOrders++;
+                            }
                         }
-                    } catch (Throwable orderErr) {
-                        LOGGER.warn("IAS/Localts: Failed to query order {}", summary.id(), orderErr);
+                    } catch (Throwable ignored) {
                     }
                 }
 
-                assert this.minecraft != null;
-                final int finalPackagedCount = packagedCount;
+                final int finalPackagedOrders = packagedOrders;
                 this.minecraft.execute(() -> {
-                    if (this.closed || this.minecraft == null || this.currentScreen() != this) return;
-                    this.loading = false;
+                    if (this.closed || currentScreen() != this) return;
                     this.user = me;
-                    this.packagedOrdersCount = finalPackagedCount;
+                    this.products.clear();
+                    this.products.addAll(prods);
                     this.packagedAccounts.clear();
                     this.packagedAccounts.addAll(accounts);
-                    this.statusText = Component.translatable("ias.localts.ready", accounts.size(), finalPackagedCount)
-                            .withStyle(accounts.isEmpty() ? ChatFormatting.GRAY : ChatFormatting.GREEN);
-
-                    //? if >=1.21.11 {
-                    this.init(this.width, this.height);
-                    //?} else
-                    /*this.init(this.minecraft, this.width, this.height);*/
+                    this.packagedOrdersCount = finalPackagedOrders;
+                    this.loading = false;
+                    this.statusText = Component.translatable("ias.localts.ready", this.packagedAccounts.size(), this.packagedOrdersCount)
+                            .withStyle(ChatFormatting.GREEN);
+                    this.reInit();
                 });
             } catch (Throwable t) {
-                LOGGER.error("IAS/Localts: Failed to refresh Localts data", t);
-                assert this.minecraft != null;
+                LOGGER.error("IAS: Failed to refresh Localts data.", t);
                 this.minecraft.execute(() -> {
-                    if (this.closed || this.minecraft == null || this.currentScreen() != this) return;
+                    if (this.closed || currentScreen() != this) return;
                     this.loading = false;
-                    FriendlyException friendly = FriendlyException.friendlyInChain(t);
-                    if (friendly != null) {
-                        this.statusText = Component.translatable(friendly.key(), friendly.args()).withStyle(ChatFormatting.RED);
-                    } else {
-                        this.statusText = Component.translatable("ias.error").withStyle(ChatFormatting.RED);
-                    }
+                    this.statusText = Component.literal(t.getMessage()).withStyle(ChatFormatting.RED);
+                    this.reInit();
+                });
+            }
+        });
+    }
 
-                    if (this.refreshBtn != null) this.refreshBtn.active = true;
-                    if (this.importBtn != null) this.importBtn.active = false;
+    private void fetchProducts() {
+        this.loading = true;
+        this.statusText = Component.translatable("ias.localts.loading").withStyle(ChatFormatting.YELLOW);
+
+        EXECUTOR.execute(() -> {
+            try {
+                LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
+                List<LocaltsProduct> prods = client.getProducts();
+                this.minecraft.execute(() -> {
+                    if (this.closed || currentScreen() != this) return;
+                    this.products.clear();
+                    this.products.addAll(prods);
+                    this.loading = false;
+                    this.statusText = Component.empty();
+                    this.reInit();
+                });
+            } catch (Throwable t) {
+                this.minecraft.execute(() -> {
+                    if (this.closed || currentScreen() != this) return;
+                    this.loading = false;
+                    this.statusText = Component.literal(t.getMessage()).withStyle(ChatFormatting.RED);
+                    this.reInit();
+                });
+            }
+        });
+    }
+
+    private void confirmPurchase() {
+        if (!canPurchaseSelected() || this.purchasing) return;
+        LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+        int qty = this.purchaseQty;
+
+        this.purchasing = true;
+        this.statusText = Component.translatable("ias.localts.buy.purchasing").withStyle(ChatFormatting.YELLOW);
+        this.reInit();
+
+        EXECUTOR.execute(() -> {
+            try {
+                LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
+                LocaltsPurchaseResult purchaseResult = client.purchase(prod.id(), qty);
+                LocaltsOrder order = client.getOrder(purchaseResult.orderId());
+                List<String> rawAccounts = LocaltsClient.extractOrderAccounts(order);
+
+                final LocaltsMe updatedMe = client.getMe();
+                this.minecraft.execute(() -> {
+                    if (this.closed || currentScreen() != this) return;
+                    this.user = updatedMe;
+                    this.purchasing = false;
+                    this.buyingMode = false;
+                    if (!rawAccounts.isEmpty()) {
+                        Screen cookieScreen = new CookiePopupScreen(this.parent, this.handler, this.crypt, rawAccounts);
+                        //$set_screen 'this.minecraft' 'cookieScreen'
+                        this.minecraft.gui.setScreen(cookieScreen);
+                    } else {
+                        this.statusText = Component.translatable("ias.localts.buy.success", qty).withStyle(ChatFormatting.GREEN);
+                        this.reInit();
+                    }
+                });
+            } catch (Throwable t) {
+                LOGGER.error("IAS: Localts purchase failed.", t);
+                this.minecraft.execute(() -> {
+                    if (this.closed || currentScreen() != this) return;
+                    this.purchasing = false;
+                    this.statusText = Component.literal(t.getMessage()).withStyle(ChatFormatting.RED);
+                    this.reInit();
                 });
             }
         });
@@ -284,10 +429,10 @@ final class LocaltsPopupScreen extends Screen {
 
     private void importPackagedAccounts() {
         if (this.packagedAccounts.isEmpty()) return;
-        assert this.minecraft != null;
-        CookiePopupScreen screen = new CookiePopupScreen(this.parent, this.handler, this.crypt, this.packagedAccounts);
-        //$set_screen 'this.minecraft' 'screen'
-        this.minecraft.gui.setScreen(screen);
+        List<String> accountsToImport = new ArrayList<>(this.packagedAccounts);
+        Screen cookieScreen = new CookiePopupScreen(this.parent, this.handler, this.crypt, accountsToImport);
+        //$set_screen 'this.minecraft' 'cookieScreen'
+        this.minecraft.gui.setScreen(cookieScreen);
     }
 
     @Override
@@ -303,13 +448,12 @@ final class LocaltsPopupScreen extends Screen {
         //?} else
         /*super.render(graphics, mouseX, mouseY, delta);*/
 
-        // Title
         pose.pushMatrix();
-        pose.scale(2.0F, 2.0F);
+        pose.scale(1.5F, 1.5F);
         //? if >=26.1 {
-        graphics.centeredText(this.font, this.title, this.width / 4, this.height / 4 - 35, 0xFF_FF_FF_FF);
+        graphics.centeredText(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 72) / 1.5F), 0xFF_FF_FF_FF);
         //?} else
-        /*graphics.drawCenteredString(this.font, this.title, this.width / 4, this.height / 4 - 35, 0xFF_FF_FF_FF);*/
+        /*graphics.drawCenteredString(this.font, this.title, (int) (this.width / 3.0F), (int) ((this.height / 2.0F - 72) / 1.5F), 0xFF_FF_FF_FF);*/
         pose.popMatrix();
 
         int centerX = this.width / 2;
@@ -320,24 +464,58 @@ final class LocaltsPopupScreen extends Screen {
             graphics.centeredText(this.font, Component.translatable("ias.localts.enterKey"), centerX, centerY - 38, 0xFF_AA_AA_AA);
             //?} else
             /*graphics.drawCenteredString(this.font, Component.translatable("ias.localts.enterKey"), centerX, centerY - 38, 0xFF_AA_AA_AA);*/
+        } else if (this.buyingMode) {
+            String balText = this.user != null ? (this.user.balance() + " credits") : "---";
+            Component balComp = Component.translatable("ias.localts.buy.total", "", balText).withStyle(ChatFormatting.GOLD);
+            //? if >=26.1 {
+            graphics.centeredText(this.font, balComp, centerX, centerY - 52, 0xFF_FF_AA_00);
+            //?} else
+            /*graphics.drawCenteredString(this.font, balComp, centerX, centerY - 52, 0xFF_FF_AA_00);*/
+
+            if (this.products.isEmpty()) {
+                Component msg = this.loading ? Component.translatable("ias.localts.loading") : Component.translatable("ias.localts.buy.noProducts");
+                //? if >=26.1 {
+                graphics.centeredText(this.font, msg, centerX, centerY - 10, 0xFF_AA_AA_AA);
+                //?} else
+                /*graphics.drawCenteredString(this.font, msg, centerX, centerY - 10, 0xFF_AA_AA_AA);*/
+            } else if (this.selectedProductIndex < this.products.size()) {
+                LocaltsProduct prod = this.products.get(this.selectedProductIndex);
+                Component prodLine = Component.literal(prod.name() + " (" + prod.priceInCredits() + "c)").withStyle(ChatFormatting.YELLOW);
+                Component stockLine = Component.literal("Stock: " + prod.stock()).withStyle(prod.stock() > 0 ? ChatFormatting.GREEN : ChatFormatting.RED);
+                Component qtyLine = Component.translatable("ias.localts.buy.qty", this.purchaseQty);
+
+                long total = (long) prod.priceInCredits() * this.purchaseQty;
+                Component totalLine = Component.literal("Total: " + total + " credits").withStyle(this.user != null && this.user.balance() >= total ? ChatFormatting.GREEN : ChatFormatting.RED);
+
+                //? if >=26.1 {
+                graphics.centeredText(this.font, prodLine, centerX, centerY - 24, 0xFF_FF_FF_55);
+                graphics.centeredText(this.font, stockLine, centerX, centerY - 12, 0xFF_AA_AA_AA);
+                graphics.centeredText(this.font, qtyLine, centerX, centerY + 10, 0xFF_FF_FF_FF);
+                graphics.centeredText(this.font, totalLine, centerX, centerY + 20, 0xFF_FF_FF_FF);
+                //?} else
+                /*graphics.drawCenteredString(this.font, prodLine, centerX, centerY - 24, 0xFF_FF_FF_55);
+                graphics.drawCenteredString(this.font, stockLine, centerX, centerY - 12, 0xFF_AA_AA_AA);
+                graphics.drawCenteredString(this.font, qtyLine, centerX, centerY + 10, 0xFF_FF_FF_FF);
+                graphics.drawCenteredString(this.font, totalLine, centerX, centerY + 20, 0xFF_FF_FF_FF);*/
+            }
         } else if (this.user != null) {
             Component userInfo = Component.translatable("ias.localts.userInfo", this.user.username(), this.user.balance(), String.format("%.2f", this.user.balance() / 100.0));
             //? if >=26.1 {
-            graphics.centeredText(this.font, userInfo, centerX, centerY - 38, 0xFF_55_FF_55);
+            graphics.centeredText(this.font, userInfo, centerX, centerY - 44, 0xFF_55_FF_55);
             //?} else
-            /*graphics.drawCenteredString(this.font, userInfo, centerX, centerY - 38, 0xFF_55_FF_55);*/
+            /*graphics.drawCenteredString(this.font, userInfo, centerX, centerY - 44, 0xFF_55_FF_55);*/
 
             if (this.statusText != null && !this.statusText.getString().isBlank()) {
                 //? if >=26.1 {
-                graphics.centeredText(this.font, this.statusText, centerX, centerY - 20, 0xFF_FF_FF_FF);
+                graphics.centeredText(this.font, this.statusText, centerX, centerY - 32, 0xFF_FF_FF_FF);
                 //?} else
-                /*graphics.drawCenteredString(this.font, this.statusText, centerX, centerY - 20, 0xFF_FF_FF_FF);*/
+                /*graphics.drawCenteredString(this.font, this.statusText, centerX, centerY - 32, 0xFF_FF_FF_FF);*/
             }
         } else if (this.statusText != null && !this.statusText.getString().isBlank()) {
             //? if >=26.1 {
-            graphics.centeredText(this.font, this.statusText, centerX, centerY - 25, 0xFF_FF_FF_FF);
+            graphics.centeredText(this.font, this.statusText, centerX, centerY - 36, 0xFF_FF_FF_FF);
             //?} else
-            /*graphics.drawCenteredString(this.font, this.statusText, centerX, centerY - 25, 0xFF_FF_FF_FF);*/
+            /*graphics.drawCenteredString(this.font, this.statusText, centerX, centerY - 36, 0xFF_FF_FF_FF);*/
         }
     }
 

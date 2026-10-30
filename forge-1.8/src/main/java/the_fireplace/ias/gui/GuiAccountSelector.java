@@ -116,6 +116,7 @@ public class GuiAccountSelector extends GuiScreen {
 		}
 		this.buttonList.add(new GuiButton(14, bulkX, 12, 78, 20, I18n.format("ias.accounts.bulkImport")));
 		this.buttonList.add(new GuiButton(15, openX, 12, 78, 20, I18n.format("ias.accounts.openImport")));
+		this.buttonList.add(new GuiButton(16, 8, 12, 68, 20, I18n.format("ias.providers")));
 		search  = new GuiTextField(8, this.fontRendererObj, this.width / 2 - 80, 14, 160, 16);
 		search.setText(query);
 		updateButtons();
@@ -226,6 +227,8 @@ public class GuiAccountSelector extends GuiScreen {
 				bulkImport();
 			}else if(button.id == 15){
 				openImportFolder();
+			}else if(button.id == 16){
+				mc.displayGuiScreen(new GuiProviders(this));
 			}else if(button.id == 11){
 				mc.displayGuiScreen(new GuiManageProfile(this, queriedaccounts.get(selectedAccountIndex)));
 			}else if(button.id == 12){

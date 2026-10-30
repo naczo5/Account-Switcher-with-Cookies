@@ -20,6 +20,7 @@ compileJava.options.encoding = 'UTF-8'
 task copyHypixelSources(type: Copy) {
     from('../src/_legacy/_shared') {
         include 'ru/vidtu/ias/auth/hypixel/**'
+        include 'ru/vidtu/ias/auth/localts/**'
     }
     into 'build/generated-sources/ias-shared'
 }

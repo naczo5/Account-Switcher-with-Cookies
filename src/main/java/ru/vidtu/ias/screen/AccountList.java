@@ -720,34 +720,41 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * Opens the account adding screen.
      */
     void add() {
-        final Screen add = new AddPopupScreen(this.screen, false, account -> {
-            // Set to this.
-            //$ set_screen 'this.minecraft' 'this.screen'
-            this.minecraft.gui.setScreen(this.screen);
-
-            // Add the account.
-            IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
-            IASStorage.ACCOUNTS.add(account);
-
-            // Save storage.
-            try {
-                IAS.disclaimersStorage();
-                IAS.saveStorage();
-            } catch (Throwable t) {
-                LOGGER.error("IAS: Unable to save storage.", t);
-            }
-
-            // Update the list.
-            this.update(this.screen.search().getValue());
-            this.setSelected(this.entryFor(account));
-
-            // Cookie/token import otherwise only stores the account. Switch into it immediately.
-            if (account.canLogin()) {
-                this.login(true, null);
-            }
-        });
+        final Screen add = new AddPopupScreen(this.screen, false, this::addAccount);
         //$ set_screen 'this.minecraft' 'add'
         this.minecraft.gui.setScreen(add);
+    }
+
+    /**
+     * Adds an account from an external screen (like providers) and updates list.
+     *
+     * @param account The account to add
+     */
+    void addAccount(Account account) {
+        // Set to this.
+        //$ set_screen 'this.minecraft' 'this.screen'
+        this.minecraft.gui.setScreen(this.screen);
+
+        // Add the account.
+        IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
+        IASStorage.ACCOUNTS.add(account);
+
+        // Save storage.
+        try {
+            IAS.disclaimersStorage();
+            IAS.saveStorage();
+        } catch (Throwable t) {
+            LOGGER.error("IAS: Unable to save storage.", t);
+        }
+
+        // Update the list.
+        this.update(this.screen.search().getValue());
+        this.setSelected(this.entryFor(account));
+
+        // Cookie/token import otherwise only stores the account. Switch into it immediately.
+        if (account.canLogin()) {
+            this.login(true, null);
+        }
     }
 
     /**

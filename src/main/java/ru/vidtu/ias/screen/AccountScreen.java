@@ -43,6 +43,7 @@ import ru.vidtu.ias.account.MicrosoftAccount;
 import ru.vidtu.ias.auth.LoginData;
 import ru.vidtu.ias.auth.microsoft.MSAuth;
 import ru.vidtu.ias.config.IASStorage;
+import ru.vidtu.ias.crypt.DummyCrypt;
 import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.config.IASConfig;
 import ru.vidtu.ias.utils.DirectPlay;
@@ -251,6 +252,15 @@ public final class AccountScreen extends Screen {
                 .tooltip(Tooltip.create(Component.translatable("ias.accounts.openImport.tip")))
                 .build();
         this.addRenderableWidget(openImport);
+
+        Button providers = Button.builder(Component.translatable("ias.providers"), btn -> {
+            //$ set_screen 'this.minecraft' 'new ProvidersPopupScreen(this, this.list::addAccount, DummyCrypt.INSTANCE)'
+            this.minecraft.gui.setScreen(new ProvidersPopupScreen(this, this.list::addAccount, DummyCrypt.INSTANCE));
+        })
+                .bounds(8, 11, 68, 20)
+                .tooltip(Tooltip.create(Component.translatable("ias.providers.subtitle")))
+                .build();
+        this.addRenderableWidget(providers);
 
         // Direct-play shortcuts: jump straight to the vanilla world list or
         // direct-connect after login, without going back through the

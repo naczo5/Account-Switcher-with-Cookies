@@ -19,17 +19,43 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
+import java.util.Objects;
 
 /**
  * An item inside a packaged Localts order.
- *
- * @param id      Unique identifier of the item
- * @param content The item payload (refresh token, MSAAUTH token, or cookie dump)
- * @author VidTu
  */
-public record LocaltsOrderItem(
-        @NotNull String id,
-        @NotNull String content
-) {
+public final class LocaltsOrderItem {
+    private final String id;
+    private final String content;
+
+    public LocaltsOrderItem(String id, String content) {
+        this.id = id != null ? id : "";
+        this.content = content != null ? content : "";
+    }
+
+    public String id() {
+        return this.id;
+    }
+
+    public String content() {
+        return this.content;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsOrderItem that = (LocaltsOrderItem) o;
+        return Objects.equals(id, that.id) && Objects.equals(content, that.content);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, content);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsOrderItem[id=" + id + ", content=" + content + "]";
+    }
 }

@@ -107,12 +107,12 @@ final class AddPopupScreen extends Screen {
         button.color(1.0F, 0.5F, 0.5F, true);
         this.addRenderableWidget(button);
 
-        // Add Localts button.
-        button = new PopupButton(this.width / 2 - 75, this.height / 2 + 24, 150, 20, Component.translatable("ias.add.localts"), btn -> {
-            //$set_screen 'this.minecraft' 'new LocaltsPopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE)'
-            this.minecraft.gui.setScreen(new LocaltsPopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE));
+        // Add Providers button.
+        button = new PopupButton(this.width / 2 - 75, this.height / 2 + 24, 150, 20, Component.translatable("ias.providers"), btn -> {
+            //$set_screen 'this.minecraft' 'new ProvidersPopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE)'
+            this.minecraft.gui.setScreen(new ProvidersPopupScreen(this.parent, this.handler, DummyCrypt.INSTANCE));
         }, Supplier::get);
-        button.setTooltip(Tooltip.create(Component.translatable("ias.add.localts.tip")));
+        button.setTooltip(Tooltip.create(Component.translatable("ias.providers.subtitle")));
         button.setTooltipDelay(Duration.ofMillis(250L));
         button.color(1.0F, 0.75F, 0.35F, true);
         this.addRenderableWidget(button);

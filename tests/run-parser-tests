@@ -81,6 +81,7 @@ mkdir -p "$OUT/classes"
 if [ -n "$GSON" ] && [ -n "$SLF4J" ]; then
     "$JAVAC" -encoding UTF-8 -d "$OUT/classes" -cp "$OUT/classes$SEP$CP" \
         "$SRC/ru/vidtu/ias/utils/GSONUtils.java" \
+        "$SRC/ru/vidtu/ias/auth/localts/LocaltsException.java" \
         "$SRC/ru/vidtu/ias/auth/localts/LocaltsMe.java" \
         "$SRC/ru/vidtu/ias/auth/localts/LocaltsProduct.java" \
         "$SRC/ru/vidtu/ias/auth/localts/LocaltsOrderSummary.java" \

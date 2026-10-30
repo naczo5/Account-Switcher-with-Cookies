@@ -19,19 +19,49 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
+import java.util.Objects;
 
 /**
  * Replacement details for an order, if one was opened.
- *
- * @param id     Replacement identifier
- * @param status Status: OPEN, ACCEPTED, PARTIALLY_ACCEPTED, or DENIED
- * @param items  Number of items in the replacement
- * @author VidTu
  */
-public record LocaltsOrderReplacement(
-        @NotNull String id,
-        @NotNull String status,
-        int items
-) {
+public final class LocaltsOrderReplacement {
+    private final String id;
+    private final String status;
+    private final int items;
+
+    public LocaltsOrderReplacement(String id, String status, int items) {
+        this.id = id != null ? id : "";
+        this.status = status != null ? status : "";
+        this.items = items;
+    }
+
+    public String id() {
+        return this.id;
+    }
+
+    public String status() {
+        return this.status;
+    }
+
+    public int items() {
+        return this.items;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsOrderReplacement that = (LocaltsOrderReplacement) o;
+        return items == that.items && Objects.equals(id, that.id) && Objects.equals(status, that.status);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, status, items);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsOrderReplacement[id=" + id + ", status=" + status + ", items=" + items + "]";
+    }
 }

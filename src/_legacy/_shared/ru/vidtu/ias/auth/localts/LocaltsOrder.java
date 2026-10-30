@@ -19,45 +19,100 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Full details of a Localts order, including packaged items.
- *
- * @param success         Whether the request succeeded
- * @param orderId         The order identifier
- * @param status          Packaging stage: PENDING, PACKAGING, or PACKAGED
- * @param orderStatus     Overall order status: PENDING, PROCESSING, COMPLETE, PARTIALLY_REFUNDED, or REFUNDED
- * @param refundedCredits Credits refunded for this order, or null
- * @param refundedItems   Number of items refunded, or null
- * @param replacement     Replacement details, or null
- * @param productName     Name of the product, or null if not packaged yet
- * @param items           Purchased items (empty if not packaged or fully refunded)
- * @author VidTu
  */
-public record LocaltsOrder(
-        boolean success,
-        @NotNull String orderId,
-        @NotNull String status,
-        @NotNull String orderStatus,
-        @Nullable Integer refundedCredits,
-        @Nullable Integer refundedItems,
-        @Nullable LocaltsOrderReplacement replacement,
-        @Nullable String productName,
-        @NotNull List<LocaltsOrderItem> items
-) {
-    /**
-     * Whether the order has packaged items ready for import.
-     *
-     * @return {@code true} if status is PACKAGED and items are present
-     */
+public final class LocaltsOrder {
+    private final boolean success;
+    private final String orderId;
+    private final String status;
+    private final String orderStatus;
+    private final Integer refundedCredits;
+    private final Integer refundedItems;
+    private final LocaltsOrderReplacement replacement;
+    private final String productName;
+    private final List<LocaltsOrderItem> items;
+
+    public LocaltsOrder(boolean success, String orderId, String status, String orderStatus,
+                        Integer refundedCredits, Integer refundedItems, LocaltsOrderReplacement replacement,
+                        String productName, List<LocaltsOrderItem> items) {
+        this.success = success;
+        this.orderId = orderId != null ? orderId : "";
+        this.status = status != null ? status : "";
+        this.orderStatus = orderStatus != null ? orderStatus : "";
+        this.refundedCredits = refundedCredits;
+        this.refundedItems = refundedItems;
+        this.replacement = replacement;
+        this.productName = productName;
+        this.items = items != null ? Collections.unmodifiableList(items) : Collections.<LocaltsOrderItem>emptyList();
+    }
+
+    public boolean success() {
+        return this.success;
+    }
+
+    public String orderId() {
+        return this.orderId;
+    }
+
+    public String status() {
+        return this.status;
+    }
+
+    public String orderStatus() {
+        return this.orderStatus;
+    }
+
+    public Integer refundedCredits() {
+        return this.refundedCredits;
+    }
+
+    public Integer refundedItems() {
+        return this.refundedItems;
+    }
+
+    public LocaltsOrderReplacement replacement() {
+        return this.replacement;
+    }
+
+    public String productName() {
+        return this.productName;
+    }
+
+    public List<LocaltsOrderItem> items() {
+        return this.items;
+    }
+
     public boolean hasPackagedItems() {
         if ("REFUNDED".equalsIgnoreCase(this.orderStatus)) {
             return false;
         }
         return "PACKAGED".equalsIgnoreCase(this.status) && !this.items.isEmpty();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsOrder that = (LocaltsOrder) o;
+        return success == that.success && Objects.equals(orderId, that.orderId) &&
+                Objects.equals(status, that.status) && Objects.equals(orderStatus, that.orderStatus) &&
+                Objects.equals(refundedCredits, that.refundedCredits) && Objects.equals(refundedItems, that.refundedItems) &&
+                Objects.equals(replacement, that.replacement) && Objects.equals(productName, that.productName) &&
+                Objects.equals(items, that.items);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(success, orderId, status, orderStatus, refundedCredits, refundedItems, replacement, productName, items);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsOrder[orderId=" + orderId + ", status=" + status + ", orderStatus=" + orderStatus + "]";
     }
 }

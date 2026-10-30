@@ -19,19 +19,49 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import org.jetbrains.annotations.NotNull;
+import java.util.Objects;
 
 /**
  * Information about the authenticated Localts user and account balance.
- *
- * @param success  Whether the request succeeded
- * @param username Display username of the user
- * @param balance  Current balance in credits
- * @author VidTu
  */
-public record LocaltsMe(
-        boolean success,
-        @NotNull String username,
-        long balance
-) {
+public final class LocaltsMe {
+    private final boolean success;
+    private final String username;
+    private final long balance;
+
+    public LocaltsMe(boolean success, String username, long balance) {
+        this.success = success;
+        this.username = username != null ? username : "";
+        this.balance = balance;
+    }
+
+    public boolean success() {
+        return this.success;
+    }
+
+    public String username() {
+        return this.username;
+    }
+
+    public long balance() {
+        return this.balance;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        LocaltsMe localtsMe = (LocaltsMe) o;
+        return success == localtsMe.success && balance == localtsMe.balance && Objects.equals(username, localtsMe.username);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(success, username, balance);
+    }
+
+    @Override
+    public String toString() {
+        return "LocaltsMe[success=" + success + ", username=" + username + ", balance=" + balance + "]";
+    }
 }

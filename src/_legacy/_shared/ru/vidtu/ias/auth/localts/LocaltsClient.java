@@ -19,29 +19,22 @@
 
 package ru.vidtu.ias.auth.localts;
 
-import com.google.errorprone.annotations.CheckReturnValue;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import ru.vidtu.ias.utils.GSONUtils;
-import ru.vidtu.ias.utils.exceptions.FriendlyException;
+import com.google.gson.JsonParser;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URI;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -55,6 +48,7 @@ import java.util.UUID;
  * <p>
  * Supports querying user profile/balance, browsing products, purchasing items with credits,
  * querying order history, retrieving packaged account tokens/cookies, and submitting replacements.
+ * Built with standard Java 8 HttpURLConnection for compatibility with both modern Fabric and Forge 1.8.9.
  *
  * @author VidTu
  */
@@ -65,118 +59,89 @@ public final class LocaltsClient {
     public static final String DEFAULT_BASE_URL = "https://localts.store/v1";
 
     /**
-     * Standard request timeout.
+     * Standard request timeout in milliseconds.
      */
-    public static final Duration TIMEOUT = Duration.ofSeconds(15);
+    public static final int TIMEOUT_MS = 15000;
 
     /**
      * Browser-like User-Agent to avoid generic automated client blocks.
      */
     public static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 CookieIAS/3.4.0";
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("IAS/LocaltsClient");
-
-    private static final HttpClient DEFAULT_CLIENT = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_2)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-
-    @NotNull
     private final String apiKey;
-
-    @NotNull
     private final String baseUrl;
 
-    @NotNull
-    private final HttpClient client;
-
     /**
-     * Creates a new Localts client with the default base URL and shared HTTP client.
+     * Creates a new Localts client with the default base URL.
      *
      * @param apiKey User's API key from {@code https://localts.store/user/settings#api-keys}
      */
-    public LocaltsClient(@NotNull String apiKey) {
-        this(apiKey, DEFAULT_BASE_URL, DEFAULT_CLIENT);
+    public LocaltsClient(String apiKey) {
+        this(apiKey, DEFAULT_BASE_URL);
     }
 
     /**
-     * Creates a new Localts client with a custom base URL and shared HTTP client.
+     * Creates a new Localts client with a custom base URL.
      *
      * @param apiKey  User's API key
      * @param baseUrl API base URL (must include {@code /v1} prefix or trailing path)
      */
-    public LocaltsClient(@NotNull String apiKey, @NotNull String baseUrl) {
-        this(apiKey, baseUrl, DEFAULT_CLIENT);
-    }
-
-    /**
-     * Creates a new Localts client with full parameters.
-     *
-     * @param apiKey  User's API key
-     * @param baseUrl API base URL
-     * @param client  Underlying HTTP client
-     */
-    public LocaltsClient(@NotNull String apiKey, @NotNull String baseUrl, @NotNull HttpClient client) {
-        this.apiKey = Objects.requireNonNull(apiKey, "apiKey").strip();
-        String normalized = Objects.requireNonNull(baseUrl, "baseUrl").strip();
+    public LocaltsClient(String apiKey, String baseUrl) {
+        this.apiKey = apiKey != null ? apiKey.trim() : "";
+        String normalized = baseUrl != null ? baseUrl.trim() : DEFAULT_BASE_URL;
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         this.baseUrl = normalized;
-        this.client = Objects.requireNonNull(client, "client");
     }
 
-    @NotNull
     public String apiKey() {
         return this.apiKey;
     }
 
-    @NotNull
     public String baseUrl() {
         return this.baseUrl;
     }
 
     /**
-     * Fetches current authenticated user information and credit balance.
+     * Verifies that an API key has been supplied.
      *
-     * @return User info and credit balance
-     * @throws FriendlyException On authentication failure, rate limiting, or API error
+     * @throws LocaltsException If API key is blank or missing
      */
-    @CheckReturnValue
-    @NotNull
-    public LocaltsMe getMe() {
-        requireApiKey();
-        JsonObject json = sendJson(buildRequest("/me").GET().build(), "GET /v1/me");
-        try {
-            return parseMe(json);
-        } catch (Throwable t) {
-            throw new FriendlyException("Failed to parse Localts account data: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+    public void requireApiKey() {
+        if (this.apiKey.isEmpty()) {
+            throw new LocaltsException("Localts API key is required for this action.", "ias.error.localts.missingKey");
         }
     }
 
     /**
-     * Lists all available store products. Authentication is optional for this endpoint.
+     * Retrieves username and current credit balance for the authenticated user.
+     *
+     * @return User account info and balance
+     * @throws LocaltsException On 401 unauthorized or API failure
+     */
+    public LocaltsMe getMe() {
+        requireApiKey();
+        JsonObject json = sendJson("GET", this.baseUrl + "/me", null, null, "GET /v1/me");
+        try {
+            return parseMe(json);
+        } catch (Throwable t) {
+            throw new LocaltsException("Failed to parse Localts profile: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+        }
+    }
+
+    /**
+     * Retrieves a list of available public store products.
      *
      * @return List of available products
-     * @throws FriendlyException On network failure or API error
+     * @throws LocaltsException On network failure or API error
      */
-    @CheckReturnValue
-    @NotNull
     public List<LocaltsProduct> getProducts() {
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(this.baseUrl + "/products"))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "application/json")
-                .timeout(TIMEOUT);
-        if (!this.apiKey.isBlank()) {
-            builder.header("X-API-Key", this.apiKey);
-        }
-        JsonObject json = sendJson(builder.GET().build(), "GET /v1/products");
+        JsonObject json = sendJson("GET", this.baseUrl + "/products", null, null, "GET /v1/products");
         try {
             return parseProducts(json);
         } catch (Throwable t) {
-            throw new FriendlyException("Failed to parse Localts products: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+            throw new LocaltsException("Failed to parse Localts products: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
         }
     }
 
@@ -186,23 +151,19 @@ public final class LocaltsClient {
      * @param productId ID of the product to purchase
      * @param amount    Number of items to purchase (must be >= 1)
      * @return Purchase result containing the new order ID
-     * @throws FriendlyException If insufficient balance, out of stock, unauthorized, or invalid product
+     * @throws LocaltsException If insufficient balance, out of stock, unauthorized, or invalid product
      */
-    @CheckReturnValue
-    @NotNull
-    public LocaltsPurchaseResult purchase(@NotNull String productId, int amount) {
+    public LocaltsPurchaseResult purchase(String productId, int amount) {
         requireApiKey();
         if (amount < 1) {
             throw new IllegalArgumentException("Amount must be at least 1: " + amount);
         }
-        String path = "/products/" + urlEncode(productId) + "/purchase?amount=" + amount;
-        JsonObject json = sendJson(buildRequest(path)
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build(), "POST /v1/products/.../purchase");
+        String path = this.baseUrl + "/products/" + urlEncode(productId) + "/purchase?amount=" + amount;
+        JsonObject json = sendJson("POST", path, new byte[0], "application/json", "POST /v1/products/.../purchase");
         try {
             return parsePurchaseResult(json);
         } catch (Throwable t) {
-            throw new FriendlyException("Failed to parse Localts purchase result: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+            throw new LocaltsException("Failed to parse Localts purchase result: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
         }
     }
 
@@ -212,20 +173,18 @@ public final class LocaltsClient {
      * @param page Zero-based page index
      * @param size Number of orders per page (1 to 100)
      * @return Paginated orders page
-     * @throws FriendlyException On authentication failure or bad parameters
+     * @throws LocaltsException On authentication failure or bad parameters
      */
-    @CheckReturnValue
-    @NotNull
     public LocaltsOrdersPage getOrders(int page, int size) {
         requireApiKey();
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
-        String path = "/orders?page=" + safePage + "&size=" + safeSize;
-        JsonObject json = sendJson(buildRequest(path).GET().build(), "GET /v1/orders");
+        String url = this.baseUrl + "/orders?page=" + safePage + "&size=" + safeSize;
+        JsonObject json = sendJson("GET", url, null, null, "GET /v1/orders");
         try {
             return parseOrdersPage(json);
         } catch (Throwable t) {
-            throw new FriendlyException("Failed to parse Localts orders: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+            throw new LocaltsException("Failed to parse Localts orders: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
         }
     }
 
@@ -234,18 +193,16 @@ public final class LocaltsClient {
      *
      * @param orderId The order ID to fetch
      * @return Full order details
-     * @throws FriendlyException If unauthorized, order not found, or not owned by user
+     * @throws LocaltsException If unauthorized, order not found, or not owned by user
      */
-    @CheckReturnValue
-    @NotNull
-    public LocaltsOrder getOrder(@NotNull String orderId) {
+    public LocaltsOrder getOrder(String orderId) {
         requireApiKey();
-        String path = "/orders/get-order?id=" + urlEncode(orderId.strip());
-        JsonObject json = sendJson(buildRequest(path).GET().build(), "GET /v1/orders/get-order");
+        String url = this.baseUrl + "/orders/get-order?id=" + urlEncode(orderId != null ? orderId.trim() : "");
+        JsonObject json = sendJson("GET", url, null, null, "GET /v1/orders/get-order");
         try {
             return parseOrder(json);
         } catch (Throwable t) {
-            throw new FriendlyException("Failed to parse Localts order details: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+            throw new LocaltsException("Failed to parse Localts order details: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
         }
     }
 
@@ -258,122 +215,161 @@ public final class LocaltsClient {
      * @param issue   Optional problem label (up to 100 characters)
      * @param files   Optional proof files (screenshots/videos up to 10 files, 20MB each)
      * @return Replacement result
-     * @throws FriendlyException On validation failure, unauthorized, or rejection
+     * @throws LocaltsException On validation failure, unauthorized, or rejection
      */
-    @CheckReturnValue
-    @NotNull
-    public LocaltsReplacementResult requestReplacement(@NotNull String orderId, @NotNull String details, int amount,
-                                                       @Nullable String issue, @Nullable List<Path> files) {
+    public LocaltsReplacementResult requestReplacement(String orderId, String details, int amount,
+                                                       String issue, List<Path> files) {
         requireApiKey();
-        String path = "/orders/" + urlEncode(orderId.strip()) + "/replace";
+        String url = this.baseUrl + "/orders/" + urlEncode(orderId != null ? orderId.trim() : "") + "/replace";
         String boundary = "----CookieIASBoundary" + UUID.randomUUID().toString().replace("-", "");
-        byte[] body = buildMultipartBody(boundary, details, amount, issue, files != null ? files : List.of());
-
-        HttpRequest request = buildRequest(path)
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
-        JsonObject json = sendJson(request, "POST /v1/orders/.../replace");
+        byte[] body = buildMultipartBody(boundary, details, amount, issue, files != null ? files : Collections.<Path>emptyList());
+        JsonObject json = sendJson("POST", url, body, "multipart/form-data; boundary=" + boundary, "POST /v1/orders/.../replace");
         try {
             return parseReplacementResult(json);
         } catch (Throwable t) {
-            throw new FriendlyException("Failed to parse Localts replacement result: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
+            throw new LocaltsException("Failed to parse Localts replacement result: " + t.getMessage(), t, "ias.error.localts.failed", t.getMessage());
         }
     }
 
     /**
-     * Extracts all raw account content strings (refresh tokens or cookies) from packaged items in an order.
+     * Extracts raw account tokens or cookie payloads from a packaged order.
      *
-     * @param order Order to extract items from
-     * @return List of content strings ready to be passed to {@code TokenImporter} or {@code CookieParser}
+     * @param order A packaged Localts order
+     * @return Non-empty list of raw account payloads ready for CookieParser
      */
-    @CheckReturnValue
-    @NotNull
-    public static List<String> extractOrderAccountContents(@NotNull LocaltsOrder order) {
-        if (!order.hasPackagedItems()) {
-            return List.of();
+    public static List<String> extractOrderAccounts(LocaltsOrder order) {
+        return extractOrderAccountContents(order);
+    }
+
+    /**
+     * Extracts raw account tokens or cookie payloads from a packaged order.
+     *
+     * @param order A packaged Localts order
+     * @return Non-empty list of raw account payloads ready for CookieParser
+     */
+    public static List<String> extractOrderAccountContents(LocaltsOrder order) {
+        if (order == null || !order.hasPackagedItems()) {
+            return Collections.emptyList();
         }
-        List<String> contents = new ArrayList<>();
+        List<String> list = new ArrayList<String>();
         for (LocaltsOrderItem item : order.items()) {
-            String content = item.content().strip();
-            if (!content.isBlank()) {
-                contents.add(content);
+            String c = item.content().trim();
+            if (!c.isEmpty()) {
+                list.add(c);
             }
         }
-        return Collections.unmodifiableList(contents);
+        return list;
     }
 
-    private void requireApiKey() {
-        if (this.apiKey.isBlank()) {
-            throw new FriendlyException("Localts API key is not configured.", "ias.error.localts.missingKey");
-        }
-    }
-
-    @NotNull
-    private HttpRequest.Builder buildRequest(@NotNull String path) {
-        return HttpRequest.newBuilder()
-                .uri(URI.create(this.baseUrl + path))
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "application/json")
-                .header("X-API-Key", this.apiKey)
-                .timeout(TIMEOUT);
-    }
-
-    @NotNull
-    private JsonObject sendJson(@NotNull HttpRequest request, @NotNull String operation) {
+    private JsonObject sendJson(String method, String urlStr, byte[] body, String contentType, String operation) {
+        HttpURLConnection conn = null;
         try {
-            LOGGER.debug("IAS/Localts: Sending {}", operation);
-            HttpResponse<String> response = this.client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            int code = response.statusCode();
-            String body = response.body();
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod(method);
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(TIMEOUT_MS);
+            conn.setReadTimeout(TIMEOUT_MS);
+            conn.setRequestProperty("User-Agent", USER_AGENT);
+            conn.setRequestProperty("Accept", "application/json");
+
+            if (!this.apiKey.isEmpty()) {
+                conn.setRequestProperty("X-API-Key", this.apiKey);
+            }
+
+            if (body != null) {
+                conn.setDoOutput(true);
+                if (contentType != null) {
+                    conn.setRequestProperty("Content-Type", contentType);
+                }
+                conn.setFixedLengthStreamingMode(body.length);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(body);
+                    os.flush();
+                }
+            }
+
+            int code = conn.getResponseCode();
 
             if (code == 401) {
-                throw new FriendlyException("Invalid or missing Localts API key (HTTP 401).", "ias.error.localts.unauthorized");
+                throw new LocaltsException("Invalid or missing Localts API key (HTTP 401).", "ias.error.localts.unauthorized");
             }
             if (code == 403) {
-                throw new FriendlyException("Access forbidden to Localts resource (HTTP 403).", "ias.error.localts.forbidden");
+                throw new LocaltsException("Access forbidden to Localts resource (HTTP 403).", "ias.error.localts.forbidden");
             }
             if (code == 404) {
-                throw new FriendlyException("Localts resource not found (HTTP 404).", "ias.error.localts.notFound");
+                throw new LocaltsException("Localts resource not found (HTTP 404).", "ias.error.localts.notFound");
             }
             if (code == 429) {
-                throw new FriendlyException("Rate limited by Localts (HTTP 429).", "ias.error.rateLimited");
+                throw new LocaltsException("Rate limited by Localts (HTTP 429).", "ias.error.rateLimited");
             }
             if (code < 200 || code >= 300) {
-                throw new FriendlyException("Localts server returned HTTP " + code, "ias.error.localts.http", code);
+                String errText = readStream(conn.getErrorStream());
+                String extractedMsg = null;
+                try {
+                    JsonElement elem = new JsonParser().parse(errText);
+                    if (elem.isJsonObject()) {
+                        JsonObject obj = elem.getAsJsonObject();
+                        extractedMsg = optString(obj, "error", optString(obj, "message", null));
+                    }
+                } catch (Throwable ignored) {
+                }
+                if (extractedMsg != null) {
+                    throw new LocaltsException(extractedMsg, "ias.error.localts.failed", extractedMsg);
+                }
+                throw new LocaltsException("Localts server returned HTTP " + code, "ias.error.localts.http", code);
             }
 
-            if (body == null || body.isBlank()) {
+            String respBody = readStream(conn.getInputStream());
+            if (respBody.trim().isEmpty()) {
                 throw new JsonParseException("Received empty response body from " + operation);
             }
-            JsonElement parsed = GSONUtils.GSON.fromJson(body, JsonElement.class);
-            if (parsed == null || !parsed.isJsonObject()) {
-                throw new JsonParseException("Expected JSON object from " + operation + ", got: " + body);
+            JsonElement parsed = new JsonParser().parse(respBody);
+            if (!parsed.isJsonObject()) {
+                throw new JsonParseException("Expected JSON object from " + operation + ", got: " + respBody);
             }
             JsonObject obj = parsed.getAsJsonObject();
             if (obj.has("success")) {
                 JsonElement successElem = obj.get("success");
                 if (successElem != null && !successElem.isJsonNull() && successElem.isJsonPrimitive() && !successElem.getAsBoolean()) {
                     String error = optString(obj, "error", "Operation failed");
-                    throw new FriendlyException(error, "ias.error.localts.failed", error);
+                    throw new LocaltsException(error, "ias.error.localts.failed", error);
                 }
             }
             return obj;
-        } catch (FriendlyException e) {
+        } catch (LocaltsException e) {
             throw e;
         } catch (Throwable t) {
-            throw new FriendlyException("Localts request failed: " + t.getMessage(), t, "ias.error.localts.network", t.getMessage());
+            throw new LocaltsException("Localts request failed: " + t.getMessage(), t, "ias.error.localts.network", t.getMessage());
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
         }
     }
 
-    @NotNull
-    public static String optString(@Nullable JsonObject obj, @NotNull String key, @NotNull String def) {
+    private static String readStream(InputStream is) throws IOException {
+        if (is == null) return "";
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = is.read(buf)) != -1) {
+                baos.write(buf, 0, n);
+            }
+            return new String(baos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            is.close();
+        }
+    }
+
+    public static String optString(JsonObject obj, String key, String def) {
         if (obj == null || !obj.has(key)) return def;
         JsonElement elem = obj.get(key);
         return (elem != null && !elem.isJsonNull() && elem.isJsonPrimitive()) ? elem.getAsString() : def;
     }
 
-    public static long optLong(@Nullable JsonObject obj, @NotNull String key, long def) {
+    public static long optLong(JsonObject obj, String key, long def) {
         if (obj == null || !obj.has(key)) return def;
         JsonElement elem = obj.get(key);
         if (elem == null || elem.isJsonNull() || !elem.isJsonPrimitive()) return def;
@@ -384,7 +380,7 @@ public final class LocaltsClient {
         }
     }
 
-    public static int optInt(@Nullable JsonObject obj, @NotNull String key, int def) {
+    public static int optInt(JsonObject obj, String key, int def) {
         if (obj == null || !obj.has(key)) return def;
         JsonElement elem = obj.get(key);
         if (elem == null || elem.isJsonNull() || !elem.isJsonPrimitive()) return def;
@@ -395,7 +391,7 @@ public final class LocaltsClient {
         }
     }
 
-    public static boolean optBoolean(@Nullable JsonObject obj, @NotNull String key, boolean def) {
+    public static boolean optBoolean(JsonObject obj, String key, boolean def) {
         if (obj == null || !obj.has(key)) return def;
         JsonElement elem = obj.get(key);
         if (elem == null || elem.isJsonNull() || !elem.isJsonPrimitive()) return def;
@@ -406,8 +402,7 @@ public final class LocaltsClient {
         }
     }
 
-    @Nullable
-    public static Integer optNullableInt(@Nullable JsonObject obj, @NotNull String key) {
+    public static Integer optNullableInt(JsonObject obj, String key) {
         if (obj == null || !obj.has(key)) return null;
         JsonElement elem = obj.get(key);
         if (elem == null || elem.isJsonNull() || !elem.isJsonPrimitive()) return null;
@@ -418,30 +413,30 @@ public final class LocaltsClient {
         }
     }
 
-    @Nullable
-    public static String optNullableString(@Nullable JsonObject obj, @NotNull String key) {
+    public static String optNullableString(JsonObject obj, String key) {
         if (obj == null || !obj.has(key)) return null;
         JsonElement elem = obj.get(key);
-        if (elem == null || elem.isJsonNull() || !elem.isJsonPrimitive()) return null;
-        return elem.getAsString();
+        return (elem != null && !elem.isJsonNull() && elem.isJsonPrimitive()) ? elem.getAsString() : null;
     }
 
-    @CheckReturnValue
-    @NotNull
-    public static LocaltsMe parseMe(@NotNull JsonObject json) {
-        boolean success = optBoolean(json, "success", true);
-        String username = optString(json, "username", "");
-        long balance = optLong(json, "balance", 0L);
+    public static LocaltsMe parseMe(JsonObject obj) {
+        boolean success = optBoolean(obj, "success", true);
+        String username = optString(obj, "username", "");
+        long balance = optLong(obj, "balance", 0L);
         return new LocaltsMe(success, username, balance);
     }
 
-    @CheckReturnValue
-    @NotNull
-    public static List<LocaltsProduct> parseProducts(@NotNull JsonObject json) {
-        JsonArray array = json.has("products") && json.get("products").isJsonArray()
-                ? json.getAsJsonArray("products")
-                : new JsonArray();
-        List<LocaltsProduct> list = new ArrayList<>(array.size());
+    public static List<LocaltsProduct> parseProducts(JsonObject obj) {
+        List<LocaltsProduct> result = new ArrayList<LocaltsProduct>();
+        if (obj == null) return result;
+        JsonArray array = null;
+        if (obj.has("products") && obj.get("products").isJsonArray()) {
+            array = obj.getAsJsonArray("products");
+        } else if (obj.has("data") && obj.get("data").isJsonArray()) {
+            array = obj.getAsJsonArray("data");
+        }
+        if (array == null) return result;
+
         for (JsonElement elem : array) {
             if (!elem.isJsonObject()) continue;
             JsonObject p = elem.getAsJsonObject();
@@ -454,156 +449,144 @@ public final class LocaltsClient {
             String type = optString(p, "type", "text");
             String logoUrl = optNullableString(p, "logoUrl");
 
-            List<String> tags = new ArrayList<>();
+            List<String> tags = new ArrayList<String>();
             if (p.has("tags") && p.get("tags").isJsonArray()) {
                 for (JsonElement t : p.getAsJsonArray("tags")) {
-                    if (t != null && !t.isJsonNull() && t.isJsonPrimitive()) {
-                        tags.add(t.getAsString());
-                    }
+                    if (t.isJsonPrimitive()) tags.add(t.getAsString());
                 }
             }
 
-            Map<String, Integer> discounts = new LinkedHashMap<>();
+            Map<String, Integer> discounts = new LinkedHashMap<String, Integer>();
             if (p.has("quantityDiscounts") && p.get("quantityDiscounts").isJsonObject()) {
-                for (Map.Entry<String, JsonElement> entry : p.getAsJsonObject("quantityDiscounts").entrySet()) {
-                    try {
-                        if (entry.getValue() != null && entry.getValue().isJsonPrimitive()) {
-                            discounts.put(entry.getKey(), entry.getValue().getAsInt());
+                JsonObject qd = p.getAsJsonObject("quantityDiscounts");
+                for (Map.Entry<String, JsonElement> e : qd.entrySet()) {
+                    if (e.getValue().isJsonPrimitive()) {
+                        try {
+                            discounts.put(e.getKey(), e.getValue().getAsInt());
+                        } catch (NumberFormatException ignored) {
                         }
-                    } catch (Throwable ignored) {
                     }
                 }
             }
 
-            list.add(new LocaltsProduct(id, name, description, category, price, stock, type, logoUrl,
-                    Collections.unmodifiableList(tags), Collections.unmodifiableMap(discounts)));
+            result.add(new LocaltsProduct(id, name, description, category, price, stock, type, logoUrl, tags, discounts));
         }
-        return Collections.unmodifiableList(list);
+        return result;
     }
 
-    @CheckReturnValue
-    @NotNull
-    public static LocaltsPurchaseResult parsePurchaseResult(@NotNull JsonObject json) {
-        boolean success = optBoolean(json, "success", true);
-        String orderId = optString(json, "orderId", optString(json, "order-id", ""));
+    public static LocaltsPurchaseResult parsePurchaseResult(JsonObject obj) {
+        boolean success = optBoolean(obj, "success", true);
+        String orderId = optString(obj, "orderId", "");
         return new LocaltsPurchaseResult(success, orderId);
     }
 
-    @CheckReturnValue
-    @NotNull
-    public static LocaltsOrdersPage parseOrdersPage(@NotNull JsonObject json) {
-        boolean success = optBoolean(json, "success", true);
-        JsonArray array = json.has("orders") && json.get("orders").isJsonArray()
-                ? json.getAsJsonArray("orders")
-                : new JsonArray();
-        List<LocaltsOrderSummary> list = new ArrayList<>(array.size());
-        for (JsonElement elem : array) {
-            if (!elem.isJsonObject()) continue;
-            JsonObject o = elem.getAsJsonObject();
-            String id = optString(o, "id", "");
-            String productId = optString(o, "productId", "");
-            String productType = optString(o, "productType", "Text");
-            long timestamp = optLong(o, "timestamp", 0L);
-            list.add(new LocaltsOrderSummary(id, productId, productType, timestamp));
+    public static LocaltsOrdersPage parseOrdersPage(JsonObject obj) {
+        boolean success = optBoolean(obj, "success", true);
+        int page = optInt(obj, "page", 0);
+        int size = optInt(obj, "size", 0);
+        int totalPages = optInt(obj, "totalPages", 0);
+        int totalElements = optInt(obj, "totalElements", 0);
+        List<LocaltsOrderSummary> list = new ArrayList<LocaltsOrderSummary>();
+
+        if (obj.has("orders") && obj.get("orders").isJsonArray()) {
+            for (JsonElement elem : obj.getAsJsonArray("orders")) {
+                if (!elem.isJsonObject()) continue;
+                JsonObject o = elem.getAsJsonObject();
+                String id = optString(o, "id", "");
+                String productId = optString(o, "productId", "");
+                String productType = optString(o, "productType", "Text");
+                long timestamp = optLong(o, "timestamp", 0L);
+                list.add(new LocaltsOrderSummary(id, productId, productType, timestamp));
+            }
         }
-        int page = optInt(json, "page", 0);
-        int size = optInt(json, "size", list.size());
-        int totalPages = optInt(json, "totalPages", 1);
-        int totalElements = optInt(json, "totalElements", list.size());
-        return new LocaltsOrdersPage(success, Collections.unmodifiableList(list), page, size, totalPages, totalElements);
+        return new LocaltsOrdersPage(success, list, page, size, totalPages, totalElements);
     }
 
-    @CheckReturnValue
-    @NotNull
-    public static LocaltsOrder parseOrder(@NotNull JsonObject json) {
-        boolean success = optBoolean(json, "success", true);
-        String orderId = optString(json, "order-id", optString(json, "orderId", ""));
-        String status = optString(json, "status", "PENDING");
-        String orderStatus = optString(json, "order-status", optString(json, "orderStatus", status));
-        Integer refundedCredits = optNullableInt(json, "refunded-credits");
+    public static LocaltsOrder parseOrder(JsonObject obj) {
+        boolean success = optBoolean(obj, "success", true);
+        String orderId = optString(obj, "order-id", optString(obj, "orderId", ""));
+        String status = optString(obj, "status", "PENDING");
+        String orderStatus = optString(obj, "order-status", optString(obj, "orderStatus", status));
+        Integer refundedCredits = optNullableInt(obj, "refunded-credits");
         if (refundedCredits == null) {
-            refundedCredits = optNullableInt(json, "refundedCredits");
+            refundedCredits = optNullableInt(obj, "refundedCredits");
         }
-        Integer refundedItems = optNullableInt(json, "refunded-items");
+        Integer refundedItems = optNullableInt(obj, "refunded-items");
         if (refundedItems == null) {
-            refundedItems = optNullableInt(json, "refundedItems");
+            refundedItems = optNullableInt(obj, "refundedItems");
         }
-        String productName = optNullableString(json, "product-name");
+        String productName = optNullableString(obj, "product-name");
         if (productName == null) {
-            productName = optNullableString(json, "productName");
+            productName = optNullableString(obj, "productName");
         }
 
         LocaltsOrderReplacement replacement = null;
-        if (json.has("replacement") && json.get("replacement").isJsonObject()) {
-            JsonObject r = json.getAsJsonObject("replacement");
-            String rId = optString(r, "id", "");
-            String rStatus = optString(r, "status", "OPEN");
-            int rItems = optInt(r, "items", 1);
-            replacement = new LocaltsOrderReplacement(rId, rStatus, rItems);
+        if (obj.has("replacement") && obj.get("replacement").isJsonObject()) {
+            JsonObject r = obj.getAsJsonObject("replacement");
+            replacement = new LocaltsOrderReplacement(
+                    optString(r, "id", ""),
+                    optString(r, "status", "OPEN"),
+                    optInt(r, "items", 0)
+            );
         }
 
-        List<LocaltsOrderItem> items = new ArrayList<>();
-        if (json.has("items") && json.get("items").isJsonArray()) {
-            for (JsonElement elem : json.getAsJsonArray("items")) {
+        List<LocaltsOrderItem> items = new ArrayList<LocaltsOrderItem>();
+        if (obj.has("items") && obj.get("items").isJsonArray()) {
+            for (JsonElement elem : obj.getAsJsonArray("items")) {
                 if (!elem.isJsonObject()) continue;
-                JsonObject item = elem.getAsJsonObject();
-                String itemId = optString(item, "id", "");
-                String content = optString(item, "content", "");
-                items.add(new LocaltsOrderItem(itemId, content));
+                JsonObject it = elem.getAsJsonObject();
+                items.add(new LocaltsOrderItem(optString(it, "id", ""), optString(it, "content", "")));
             }
         }
-
-        return new LocaltsOrder(success, orderId, status, orderStatus, refundedCredits, refundedItems,
-                replacement, productName, Collections.unmodifiableList(items));
+        return new LocaltsOrder(success, orderId, status, orderStatus, refundedCredits, refundedItems, replacement, productName, items);
     }
 
-    @CheckReturnValue
-    @NotNull
-    public static LocaltsReplacementResult parseReplacementResult(@NotNull JsonObject json) {
-        boolean success = optBoolean(json, "success", true);
-        String replacementId = optString(json, "replacementId", optString(json, "replacement-id", ""));
-        String redirect = optNullableString(json, "redirect");
+    public static LocaltsReplacementResult parseReplacementResult(JsonObject obj) {
+        boolean success = optBoolean(obj, "success", true);
+        String replacementId = optString(obj, "replacementId", "");
+        String redirect = optNullableString(obj, "redirect");
         return new LocaltsReplacementResult(success, replacementId, redirect);
     }
 
-    private static byte[] buildMultipartBody(String boundary, String details, int amount,
-                                            @Nullable String issue, List<Path> files) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+    private static String urlEncode(String s) {
         try {
-            writeFormField(out, boundary, "details", details);
-            writeFormField(out, boundary, "amount", Integer.toString(amount));
-            if (issue != null && !issue.isBlank()) {
-                writeFormField(out, boundary, "issue", issue);
-            }
-            for (Path file : files) {
-                if (Files.isRegularFile(file)) {
-                    String filename = file.getFileName().toString();
-                    String mimeType = Files.probeContentType(file);
-                    if (mimeType == null || mimeType.isBlank()) {
-                        mimeType = "application/octet-stream";
-                    }
-                    out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-                    out.write(("Content-Disposition: form-data; name=\"files\"; filename=\"" + filename + "\"\r\n").getBytes(StandardCharsets.UTF_8));
-                    out.write(("Content-Type: " + mimeType + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-                    Files.copy(file, out);
-                    out.write("\r\n".getBytes(StandardCharsets.UTF_8));
-                }
-            }
-            out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to construct multipart body", e);
+            return URLEncoder.encode(s != null ? s : "", StandardCharsets.UTF_8.name()).replace("+", "%20");
+        } catch (Throwable t) {
+            return s != null ? s : "";
         }
-        return out.toByteArray();
     }
 
-    private static void writeFormField(ByteArrayOutputStream out, String boundary, String name, String value) throws IOException {
+    private static byte[] buildMultipartBody(String boundary, String details, int amount,
+                                             String issue, List<Path> files) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            appendField(out, boundary, "details", details);
+            appendField(out, boundary, "amount", String.valueOf(amount));
+            if (issue != null && !issue.trim().isEmpty()) {
+                appendField(out, boundary, "issue", issue.trim());
+            }
+            for (Path path : files) {
+                if (path == null || !Files.isRegularFile(path)) continue;
+                String filename = path.getFileName().toString();
+                String mime = Files.probeContentType(path);
+                if (mime == null) mime = "application/octet-stream";
+                out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+                out.write(("Content-Disposition: form-data; name=\"files\"; filename=\"" + filename + "\"\r\n").getBytes(StandardCharsets.UTF_8));
+                out.write(("Content-Type: " + mime + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                out.write(Files.readAllBytes(path));
+                out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+            }
+            out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new LocaltsException("Failed to construct multipart replacement request: " + e.getMessage(), e, "ias.error.localts.network", e.getMessage());
+        }
+    }
+
+    private static void appendField(ByteArrayOutputStream out, String boundary, String name, String value) throws IOException {
         out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
         out.write(("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n").getBytes(StandardCharsets.UTF_8));
         out.write(value.getBytes(StandardCharsets.UTF_8));
         out.write("\r\n".getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String urlEncode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

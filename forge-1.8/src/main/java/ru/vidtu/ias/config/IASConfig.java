@@ -21,6 +21,7 @@ public final class IASConfig {
     public static String liquidProxyRoute = "";
     public static int liquidProxyRoutePort = 25565;
     public static String hypixelApiKey = "";
+    public static String localtsApiKey = "";
     public static boolean hypixelCheckAllowRankedDirect = true;
     public static boolean hypixelCheckAllowUnrankedDirect = false;
     public static boolean hypixelCheckAllowUnknownDirect = false;
@@ -52,6 +53,7 @@ public final class IASConfig {
             liquidProxyType = readString(json, "liquidProxyType", liquidProxyType);
             liquidProxyRoute = readString(json, "liquidProxyRoute", liquidProxyRoute);
             hypixelApiKey = readString(json, "hypixelApiKey", hypixelApiKey);
+            localtsApiKey = readString(json, "localtsApiKey", localtsApiKey);
             if (json.has("liquidProxyPort") && json.get("liquidProxyPort").isJsonPrimitive()) {
                 liquidProxyPort = json.get("liquidProxyPort").getAsInt();
             }
@@ -62,6 +64,28 @@ public final class IASConfig {
             hypixelCheckAllowUnrankedDirect = readBool(json, "hypixelCheckAllowUnrankedDirect", hypixelCheckAllowUnrankedDirect);
             hypixelCheckAllowUnknownDirect = readBool(json, "hypixelCheckAllowUnknownDirect", hypixelCheckAllowUnknownDirect);
             hypixelCheckAllowNeverJoinedDirect = readBool(json, "hypixelCheckAllowNeverJoinedDirect", hypixelCheckAllowNeverJoinedDirect);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void save(File minecraftDir) {
+        try {
+            File dir = new File(minecraftDir, "config/cookieias");
+            if (!dir.isDirectory() && !dir.mkdirs()) {
+                return;
+            }
+            File file = new File(dir, "ias.json");
+            JsonObject json = new JsonObject();
+            if (file.isFile()) {
+                try {
+                    String text = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+                    json = new JsonParser().parse(text).getAsJsonObject();
+                } catch (Throwable ignored) {
+                }
+            }
+            json.addProperty("localtsApiKey", localtsApiKey != null ? localtsApiKey : "");
+            json.addProperty("hypixelApiKey", hypixelApiKey != null ? hypixelApiKey : "");
+            Files.write(file.toPath(), json.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Throwable ignored) {
         }
     }
