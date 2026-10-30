@@ -71,8 +71,8 @@ final class ProvidersPopupScreen extends Screen {
         // Localts Store provider button
         PopupButton localtsBtn = new PopupButton(centerX - 100, centerY - 32, 200, 24,
                 Component.translatable("ias.providers.localts"), btn -> {
-            //$set_screen 'this.minecraft' 'new LocaltsPopupScreen(this.parent, this.handler, this.crypt)'
-            this.minecraft.gui.setScreen(new LocaltsPopupScreen(this.parent, this.handler, this.crypt));
+            //$set_screen 'this.minecraft' 'new LocaltsPopupScreen(this, this.handler, this.crypt)'
+            this.minecraft.gui.setScreen(new LocaltsPopupScreen(this, this.handler, this.crypt));
         }, Supplier::get);
         localtsBtn.setTooltip(Tooltip.create(Component.translatable("ias.providers.localts.desc")));
         localtsBtn.setTooltipDelay(Duration.ofMillis(250L));

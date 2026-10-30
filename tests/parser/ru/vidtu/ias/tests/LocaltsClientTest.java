@@ -136,6 +136,17 @@ public final class LocaltsClientTest {
         LocaltsPurchaseResult res = LocaltsClient.parsePurchaseResult(json);
         assertTrue(res.success(), "purchase success");
         assertEquals("ord_999", res.orderId(), "order id mismatch");
+
+        String kebabJsonStr = """
+                {
+                  "success": true,
+                  "order-id": "ord_kebab_123"
+                }
+                """;
+        JsonObject kebabJson = GSONUtils.GSON.fromJson(kebabJsonStr, JsonObject.class);
+        LocaltsPurchaseResult kebabRes = LocaltsClient.parsePurchaseResult(kebabJson);
+        assertTrue(kebabRes.success(), "kebab purchase success");
+        assertEquals("ord_kebab_123", kebabRes.orderId(), "kebab order id mismatch");
     }
 
     private static void testParseOrdersPage() {
