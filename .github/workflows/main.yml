@@ -41,15 +41,17 @@ jobs:
         timeout-minutes: 10
         uses: 'gradle/actions/setup-gradle@v3'
 
+      - name: 'Build Modern Fabric (26.3, 26.2, 1.21.11)'
+        timeout-minutes: 20
+        run: './gradlew assemble'
+
+      # Run this after the Gradle build so the parser test script can find the
+      # annotations/Gson/SLF4J jars in the Gradle cache on a clean runner.
       - name: 'Run Parser Tests'
         timeout-minutes: 5
         run: |
           chmod +x tests/run-parser-tests
           ./tests/run-parser-tests
-
-      - name: 'Build Modern Fabric (26.3, 26.2, 1.21.11)'
-        timeout-minutes: 20
-        run: './gradlew assemble'
 
       - name: 'Build Forge 1.8.9'
         timeout-minutes: 20
