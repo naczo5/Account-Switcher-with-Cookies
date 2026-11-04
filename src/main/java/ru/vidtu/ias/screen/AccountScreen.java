@@ -593,6 +593,30 @@ public final class AccountScreen extends Screen {
     }
 
     /**
+     * Refreshes the account list behind a chain of popups (providers, Localts, cookie import).
+     *
+     * @param screen Screen whose parent chain may contain the account list
+     */
+    static void refreshFrom(Screen screen) {
+        Screen current = screen;
+        for (int i = 0; i < 8 && current != null; i++) {
+            if (current instanceof AccountScreen accountScreen) {
+                accountScreen.refreshAccounts();
+                return;
+            }
+            current = parentOf(current);
+        }
+    }
+
+    private static Screen parentOf(Screen screen) {
+        if (screen instanceof ProvidersPopupScreen providers) return providers.parent();
+        if (screen instanceof LocaltsPopupScreen localts) return localts.parent();
+        if (screen instanceof CookiePopupScreen cookie) return cookie.parent();
+        if (screen instanceof AccountScreen accountScreen) return accountScreen.parent();
+        return null;
+    }
+
+    /**
      * Updates the selected entry.
      */
     void updateSelected() {
@@ -718,23 +742,69 @@ public final class AccountScreen extends Screen {
         assert this.minecraft != null;
         String title = Component.translatable("ias.profile.skin.choose").getString();
         String startPath = this.skinPngPath;
+        if (isHeadless()) {
+            this.openSkinBrowser(startPath);
+            return;
+        }
         IAS.executor().execute(() -> {
             try {
                 String path = CookieFileDialogs.pickPngFile(title, startPath);
                 if (path == null) {
                     return;
                 }
-                this.minecraft.execute(() -> {
-                    if (this.minecraft == null || this != this.currentScreen()) return;
-                    this.skinPngPath = path;
-                    this.profileStatus = Component.translatable("ias.profile.skin.selected", Path.of(path).getFileName().toString()).withStyle(ChatFormatting.AQUA);
-                    this.updateProfileControlState();
-                });
+                this.minecraft.execute(() -> this.applySkinPath(path, true));
             } catch (Throwable t) {
                 LOGGER.warn("IAS: Skin PNG browse failed.", t);
-                this.minecraft.execute(() -> this.profileStatus = Component.translatable("ias.profile.skin.browse.failed").withStyle(ChatFormatting.RED));
+                this.minecraft.execute(() -> {
+                    if (this.minecraft == null || this != this.currentScreen()) return;
+                    this.openSkinBrowser(startPath);
+                });
             }
         });
+    }
+
+    private void openSkinBrowser(String startPath) {
+        assert this.minecraft != null;
+        Screen browser = new FileBrowserPopupScreen(this,
+                Component.translatable("ias.profile.skin.choose"),
+                startPath,
+                new String[]{"*.png"},
+                paths -> {
+                    if (paths == null || paths.isEmpty()) return;
+                    this.applySkinPath(paths.get(0), false);
+                });
+        //$ set_screen 'this.minecraft' 'browser'
+        this.minecraft.gui.setScreen(browser);
+    }
+
+    /**
+     * Stores a chosen skin file. The native dialog applies only while this screen is showing.
+     * The in-game browser applies before it returns here, so that path must not require the
+     * current screen to already be this one.
+     *
+     * @param path           Absolute PNG path
+     * @param requireCurrent Whether the account screen must be the active screen
+     */
+    private void applySkinPath(String path, boolean requireCurrent) {
+        if (path == null || path.isBlank() || this.minecraft == null) return;
+        if (requireCurrent && this != this.currentScreen()) return;
+        this.skinPngPath = path;
+        String fileName;
+        try {
+            fileName = Path.of(path).getFileName().toString();
+        } catch (InvalidPathException e) {
+            fileName = path;
+        }
+        this.profileStatus = Component.translatable("ias.profile.skin.selected", fileName).withStyle(ChatFormatting.AQUA);
+        this.updateProfileControlState();
+    }
+
+    private static boolean isHeadless() {
+        try {
+            return java.awt.GraphicsEnvironment.isHeadless();
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     private void applySkinPng() {

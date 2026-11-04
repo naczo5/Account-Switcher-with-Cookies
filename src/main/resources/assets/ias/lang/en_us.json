@@ -312,6 +312,7 @@
   "ias.localts.connected": "Connected as %s (%s credits)",
   "ias.localts.userInfo": "%s | %s credits ($%s)",
   "ias.localts.ready": "%s accounts ready across %s packaged order(s)",
+  "ias.localts.ready.partial": "%s accounts ready across %s packaged order(s). %s order(s) could not be loaded.",
   "ias.localts.importAccounts": "Import Accounts (%s)",
   "ias.localts.refresh": "Refresh",
   "ias.localts.store": "Store",

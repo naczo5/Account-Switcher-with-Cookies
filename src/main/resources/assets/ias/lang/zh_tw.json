@@ -142,6 +142,7 @@
   "ias.localts.connected": "已連線為 %s（%s 點數）",
   "ias.localts.userInfo": "%s | %s 點數 ($%s)",
   "ias.localts.ready": "%2$s 個訂單中共有 %1$s 個帳號可供匯入",
+  "ias.localts.ready.partial": "%2$s 個訂單中共有 %1$s 個帳號可供匯入，%3$s 個訂單未能載入。",
   "ias.localts.importAccounts": "匯入帳號 (%s)",
   "ias.localts.refresh": "重新整理",
   "ias.localts.store": "商店",

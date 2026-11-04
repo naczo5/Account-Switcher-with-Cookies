@@ -216,6 +216,7 @@
   "ias.localts.connected": "Połączono jako %s (%s kredytów)",
   "ias.localts.userInfo": "%s | %s kredytów ($%s)",
   "ias.localts.ready": "%s kont gotowych do importu w %s zamówieniu(ach)",
+  "ias.localts.ready.partial": "%s kont gotowych do importu w %s zamówieniu(ach). Nie udało się wczytać %s zamówień.",
   "ias.localts.importAccounts": "Importuj konta (%s)",
   "ias.localts.refresh": "Odśwież",
   "ias.localts.store": "Sklep",

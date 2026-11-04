@@ -143,6 +143,7 @@
   "ias.localts.connected": "已连接为 %s（%s 积分）",
   "ias.localts.userInfo": "%s | %s 积分 ($%s)",
   "ias.localts.ready": "%2$s 个订单中共有 %1$s 个账号可供导入",
+  "ias.localts.ready.partial": "%2$s 个订单中共有 %1$s 个账号可供导入，%3$s 个订单未能加载。",
   "ias.localts.importAccounts": "导入账号 (%s)",
   "ias.localts.refresh": "刷新",
   "ias.localts.store": "商店",

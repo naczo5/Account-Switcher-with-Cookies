@@ -142,6 +142,7 @@
   "ias.localts.connected": "Подключено как %s (%s кредитов)",
   "ias.localts.userInfo": "%s | %s кредитов ($%s)",
   "ias.localts.ready": "Готово к импорту аккаунтов: %s (заказов: %s)",
+  "ias.localts.ready.partial": "Готово к импорту аккаунтов: %s (заказов: %s). Не удалось загрузить заказов: %s.",
   "ias.localts.importAccounts": "Импортировать аккаунты (%s)",
   "ias.localts.refresh": "Обновить",
   "ias.localts.store": "Магазин",

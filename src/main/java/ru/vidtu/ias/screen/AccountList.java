@@ -537,8 +537,8 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         // Skip if nothing is selected.
         AccountEntry selected = this.getSelected();
         if (selected == null) return;
-        int index = this.children().indexOf(selected);
-        if (index < 0 || index >= IASStorage.ACCOUNTS.size()) return;
+        int index = IASStorage.ACCOUNTS.indexOf(selected.account());
+        if (index < 0) return;
 
         // Replace in storage.
         final Screen add = new AddPopupScreen(this.screen, true, account -> {
@@ -701,19 +701,7 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * @return Import screen
      */
     private CookiePopupScreen importScreen() {
-        return new CookiePopupScreen(this.screen, account -> {
-            //$ set_screen 'this.minecraft' 'this.screen'
-            this.minecraft.gui.setScreen(this.screen);
-            IASStorage.ACCOUNTS.removeIf(Predicate.isEqual(account));
-            IASStorage.ACCOUNTS.add(account);
-            try {
-                IAS.disclaimersStorage();
-                IAS.saveStorage();
-            } catch (Throwable t) {
-                LOGGER.error("IAS: Unable to save storage.", t);
-            }
-            this.update(this.screen.search().getValue());
-        }, DummyCrypt.INSTANCE);
+        return new CookiePopupScreen(this.screen, this::addAccount, DummyCrypt.INSTANCE);
     }
 
     /**
@@ -1715,11 +1703,11 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * @param entry Target entry
      */
     void swapUp(AccountEntry entry) {
-        // Get and validate indexes.
-        int idx = this.children().indexOf(entry);
-        if (idx < 0 || idx >= IASStorage.ACCOUNTS.size()) return;
+        // Search reorders visible rows, so a visible index is not a storage index.
+        if (entry == null || !this.screen.search().getValue().isBlank()) return;
+        int idx = IASStorage.ACCOUNTS.indexOf(entry.account());
+        if (idx <= 0 || idx >= IASStorage.ACCOUNTS.size()) return;
         int upIdx = idx - 1;
-        if (upIdx < 0) return;
 
         // Move storage.
         IASStorage.ACCOUNTS.set(idx, IASStorage.ACCOUNTS.get(upIdx));
@@ -1733,7 +1721,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             LOGGER.error("IAS: Unable to save storage.", t);
         }
 
-        // Move elements.
+        // Move elements. Visible order matches storage only while search is empty.
+        if (idx >= this.children().size() || upIdx >= this.children().size()) {
+            this.update("");
+            this.setSelected(this.entryFor(entry.account()));
+            return;
+        }
         //? if <1.21.10 {
         /*this.children().set(idx, this.children().get(upIdx));
         this.children().set(upIdx, entry);
@@ -1748,11 +1741,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * @param entry Target entry
      */
     void swapDown(AccountEntry entry) {
-        // Get and validate indexes.
-        int idx = this.children().indexOf(entry);
-        if (idx < 0 || idx >= IASStorage.ACCOUNTS.size()) return;
+        // Search reorders visible rows, so a visible index is not a storage index.
+        if (entry == null || !this.screen.search().getValue().isBlank()) return;
+        int idx = IASStorage.ACCOUNTS.indexOf(entry.account());
+        if (idx < 0 || idx >= IASStorage.ACCOUNTS.size() - 1) return;
         int downIdx = idx + 1;
-        if (downIdx >= this.children().size() || downIdx >= IASStorage.ACCOUNTS.size()) return;
+        if (downIdx >= this.children().size()) return;
 
         // Move storage.
         IASStorage.ACCOUNTS.set(idx, IASStorage.ACCOUNTS.get(downIdx));
@@ -1766,7 +1760,12 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
             LOGGER.error("IAS: Unable to save storage.", t);
         }
 
-        // Move elements.
+        // Move elements. Visible order matches storage only while search is empty.
+        if (idx >= this.children().size()) {
+            this.update("");
+            this.setSelected(this.entryFor(entry.account()));
+            return;
+        }
         //? if <1.21.10 {
         /*this.children().set(idx, this.children().get(downIdx));
         this.children().set(downIdx, entry);

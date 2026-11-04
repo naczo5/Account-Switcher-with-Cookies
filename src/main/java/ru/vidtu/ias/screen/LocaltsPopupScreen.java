@@ -39,7 +39,6 @@ import ru.vidtu.ias.auth.localts.LocaltsClient;
 import ru.vidtu.ias.auth.localts.LocaltsMe;
 import ru.vidtu.ias.auth.localts.LocaltsOrder;
 import ru.vidtu.ias.auth.localts.LocaltsOrderSummary;
-import ru.vidtu.ias.auth.localts.LocaltsOrdersPage;
 import ru.vidtu.ias.auth.localts.LocaltsProduct;
 import ru.vidtu.ias.auth.localts.LocaltsPurchaseResult;
 import ru.vidtu.ias.config.IASConfig;
@@ -231,7 +230,7 @@ final class LocaltsPopupScreen extends Screen {
 
             this.refreshBtn = new PopupButton(centerX - 100, centerY + 22, 64, 20,
                     Component.translatable("ias.localts.refresh"), btn -> this.refreshData(), Supplier::get);
-            this.refreshBtn.active = !this.loading;
+            this.refreshBtn.active = !this.loading && !this.purchasing;
             this.addRenderableWidget(this.refreshBtn);
 
             PopupButton browseStoreBtn = new PopupButton(centerX - 32, centerY + 22, 64, 20,
@@ -301,7 +300,7 @@ final class LocaltsPopupScreen extends Screen {
     }
 
     private void refreshData() {
-        if (this.closed || this.loading) return;
+        if (this.closed || this.loading || this.purchasing) return;
 
         String key = IASConfig.localtsApiKey;
         if (key == null || key.isBlank()) {
@@ -319,11 +318,12 @@ final class LocaltsPopupScreen extends Screen {
                 LocaltsMe me = client.getMe();
                 List<LocaltsProduct> prods = client.getProducts();
 
-                LocaltsOrdersPage page = client.getOrders(0, 50);
+                List<LocaltsOrderSummary> orders = client.listAllOrders();
                 List<String> accounts = new ArrayList<>();
                 int packagedOrders = 0;
+                int skippedOrders = 0;
 
-                for (LocaltsOrderSummary summary : page.orders()) {
+                for (LocaltsOrderSummary summary : orders) {
                     if (this.closed) return;
                     try {
                         LocaltsOrder order = client.getOrder(summary.id());
@@ -334,11 +334,14 @@ final class LocaltsPopupScreen extends Screen {
                                 packagedOrders++;
                             }
                         }
-                    } catch (Throwable ignored) {
+                    } catch (Throwable t) {
+                        skippedOrders++;
+                        LOGGER.warn("IAS: Unable to load Localts order {}.", summary.id(), t);
                     }
                 }
 
                 final int finalPackagedOrders = packagedOrders;
+                final int finalSkippedOrders = skippedOrders;
                 this.minecraft.execute(() -> {
                     if (this.closed || currentScreen() != this) return;
                     this.user = me;
@@ -349,8 +352,13 @@ final class LocaltsPopupScreen extends Screen {
                     this.packagedOrdersCount = finalPackagedOrders;
                     this.clampSelection();
                     this.loading = false;
-                    this.statusText = Component.translatable("ias.localts.ready", this.packagedAccounts.size(), this.packagedOrdersCount)
-                            .withStyle(ChatFormatting.GREEN);
+                    if (finalSkippedOrders > 0) {
+                        this.statusText = Component.translatable("ias.localts.ready.partial", this.packagedAccounts.size(), this.packagedOrdersCount, finalSkippedOrders)
+                                .withStyle(ChatFormatting.YELLOW);
+                    } else {
+                        this.statusText = Component.translatable("ias.localts.ready", this.packagedAccounts.size(), this.packagedOrdersCount)
+                                .withStyle(ChatFormatting.GREEN);
+                    }
                     this.reInit();
                 });
             } catch (Throwable t) {
@@ -371,7 +379,7 @@ final class LocaltsPopupScreen extends Screen {
      * @param preserveStatus Whether to keep the current status text (for example, a purchase error)
      */
     private void fetchProducts(boolean preserveStatus) {
-        if (this.closed || this.loading) return;
+        if (this.closed || this.loading || this.purchasing) return;
         this.loading = true;
         if (!preserveStatus) {
             this.statusText = Component.translatable("ias.localts.loading").withStyle(ChatFormatting.YELLOW);
@@ -488,28 +496,37 @@ final class LocaltsPopupScreen extends Screen {
                 }
                 final LocaltsMe finalMe = updatedMe;
                 this.minecraft.execute(() -> {
-                    if (this.closed || currentScreen() != this) return;
+                    this.purchasing = false;
                     if (finalMe != null) {
                         this.user = finalMe;
                     }
-                    this.purchasing = false;
-                    this.buyingMode = false;
+                    // Credits are already spent. Open the importer even if the user left
+                    // this screen while the purchase was in flight.
                     if (!rawAccounts.isEmpty()) {
+                        this.buyingMode = false;
                         Screen cookieScreen = new CookiePopupScreen(this.parent, this.handler, this.crypt, rawAccounts);
                         //$set_screen 'this.minecraft' 'cookieScreen'
                         this.minecraft.gui.setScreen(cookieScreen);
-                    } else {
-                        this.statusText = Component.translatable("ias.localts.buy.pending").withStyle(ChatFormatting.GOLD);
-                        this.reInit();
-                        this.fetchProducts(true);
+                        return;
                     }
+                    if (this.closed || currentScreen() != this) {
+                        LOGGER.warn("IAS: Localts purchase finished without delivered accounts after the screen closed.");
+                        return;
+                    }
+                    this.buyingMode = false;
+                    this.statusText = Component.translatable("ias.localts.buy.pending").withStyle(ChatFormatting.GOLD);
+                    this.reInit();
+                    this.fetchProducts(true);
                 });
             } catch (Throwable t) {
                 LOGGER.error("IAS: Localts purchase failed.", t);
                 final LocaltsPurchaseResult res = purchaseResult;
                 this.minecraft.execute(() -> {
-                    if (this.closed || currentScreen() != this) return;
                     this.purchasing = false;
+                    if (this.closed || currentScreen() != this) {
+                        LOGGER.warn("IAS: Localts purchase failed after the screen closed.");
+                        return;
+                    }
                     if (res != null && res.orderId() != null && !res.orderId().isEmpty()) {
                         this.statusText = Component.literal("Purchased (Order " + res.orderId() + "), but delivery failed: " + formatError(t).getString() + ". Click Refresh to retrieve.").withStyle(ChatFormatting.GOLD);
                     } else {
@@ -668,6 +685,10 @@ final class LocaltsPopupScreen extends Screen {
         graphics.fill(centerX - PANEL_HALF_W, centerY - panelHalfHeight, centerX + PANEL_HALF_W, centerY + panelHalfHeight, 0xF8_20_20_30);
         graphics.fill(centerX - PANEL_HALF_W + 1, centerY - panelHalfHeight - 1, centerX + PANEL_HALF_W - 1, centerY - panelHalfHeight, 0xF8_20_20_30);
         graphics.fill(centerX - PANEL_HALF_W + 1, centerY + panelHalfHeight, centerX + PANEL_HALF_W - 1, centerY + panelHalfHeight + 1, 0xF8_20_20_30);
+    }
+
+    Screen parent() {
+        return this.parent;
     }
 
     @Override

@@ -1,7 +1,5 @@
 package the_fireplace.ias.gui;
 
-import com.github.mrebhan.ingameaccountswitcher.tools.Config;
-import com.github.mrebhan.ingameaccountswitcher.tools.alt.AltDatabase;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
@@ -15,15 +13,9 @@ import ru.vidtu.ias.auth.localts.LocaltsException;
 import ru.vidtu.ias.auth.localts.LocaltsMe;
 import ru.vidtu.ias.auth.localts.LocaltsOrder;
 import ru.vidtu.ias.auth.localts.LocaltsOrderSummary;
-import ru.vidtu.ias.auth.localts.LocaltsOrdersPage;
 import ru.vidtu.ias.auth.localts.LocaltsProduct;
 import ru.vidtu.ias.auth.localts.LocaltsPurchaseResult;
 import ru.vidtu.ias.config.IASConfig;
-import ru.vidtu.iasfork.cookie.CookieAuth;
-import ru.vidtu.iasfork.cookie.CookieParser;
-import ru.vidtu.iasfork.cookie.TokenImporter;
-import the_fireplace.ias.account.ExtendedAccountData;
-import the_fireplace.ias.enums.EnumBool;
 
 import java.awt.Desktop;
 import java.io.IOException;
@@ -127,7 +119,9 @@ public class GuiLocalts extends GuiScreen {
 
             // Row with Refresh, Store, Key
             int rowY = centerY + 26;
-            this.buttonList.add(new GuiButton(12, centerX - 98, rowY, 62, 20, I18n.format("ias.localts.refresh")));
+            GuiButton refreshBtn = new GuiButton(12, centerX - 98, rowY, 62, 20, I18n.format("ias.localts.refresh"));
+            refreshBtn.enabled = !this.loading && !this.purchasing && !this.importing;
+            this.buttonList.add(refreshBtn);
             this.buttonList.add(new GuiButton(13, centerX - 32, rowY, 64, 20, I18n.format("ias.localts.store")));
             this.buttonList.add(new GuiButton(14, centerX + 36, rowY, 62, 20, I18n.format("ias.localts.keyBtn")));
 
@@ -299,7 +293,7 @@ public class GuiLocalts extends GuiScreen {
     }
 
     private void refreshData() {
-        if (this.loading || IASConfig.localtsApiKey == null || IASConfig.localtsApiKey.trim().isEmpty()) return;
+        if (this.loading || this.purchasing || this.importing || IASConfig.localtsApiKey == null || IASConfig.localtsApiKey.trim().isEmpty()) return;
         this.loading = true;
         this.statusText = I18n.format("ias.localts.loading");
         this.statusColor = 0xFFFF55;
@@ -312,11 +306,12 @@ public class GuiLocalts extends GuiScreen {
                     final LocaltsMe me = client.getMe();
                     final List<LocaltsProduct> prods = client.getProducts();
 
-                    LocaltsOrdersPage page = client.getOrders(0, 50);
+                    List<LocaltsOrderSummary> orders = client.listAllOrders();
                     final List<String> accounts = new ArrayList<String>();
                     int pkgOrders = 0;
+                    int skippedOrders = 0;
 
-                    for (LocaltsOrderSummary summary : page.orders()) {
+                    for (LocaltsOrderSummary summary : orders) {
                         if (closed) return;
                         try {
                             LocaltsOrder order = client.getOrder(summary.id());
@@ -327,11 +322,14 @@ public class GuiLocalts extends GuiScreen {
                                     pkgOrders++;
                                 }
                             }
-                        } catch (Throwable ignored) {
+                        } catch (Throwable t) {
+                            skippedOrders++;
+                            System.err.println("IAS: Unable to load Localts order " + summary.id() + ": " + t);
                         }
                     }
 
                     final int finalPkgOrders = pkgOrders;
+                    final int finalSkippedOrders = skippedOrders;
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
@@ -343,8 +341,13 @@ public class GuiLocalts extends GuiScreen {
                             packagedAccounts.addAll(accounts);
                             packagedOrdersCount = finalPkgOrders;
                             loading = false;
-                            statusText = I18n.format("ias.localts.ready", packagedAccounts.size(), packagedOrdersCount);
-                            statusColor = 0x55FF55;
+                            if (finalSkippedOrders > 0) {
+                                statusText = I18n.format("ias.localts.ready.partial", packagedAccounts.size(), packagedOrdersCount, finalSkippedOrders);
+                                statusColor = 0xFFFF55;
+                            } else {
+                                statusText = I18n.format("ias.localts.ready", packagedAccounts.size(), packagedOrdersCount);
+                                statusColor = 0x55FF55;
+                            }
                             initGui();
                         }
                     });
@@ -365,7 +368,7 @@ public class GuiLocalts extends GuiScreen {
     }
 
     private void fetchProducts(final boolean preserveStatus) {
-        if (this.loading) return;
+        if (this.loading || this.purchasing) return;
         this.loading = true;
         if (!preserveStatus) {
             this.statusText = I18n.format("ias.localts.loading");
@@ -459,22 +462,7 @@ public class GuiLocalts extends GuiScreen {
                     LocaltsClient client = new LocaltsClient(IASConfig.localtsApiKey);
                     purchaseResult = client.purchase(prod.id(), qty);
                     LocaltsOrder order = client.getOrder(purchaseResult.orderId());
-                    List<String> rawAccounts = LocaltsClient.extractOrderAccounts(order);
-
-                    final List<CookieAuth.MinecraftProfile> profiles = new ArrayList<CookieAuth.MinecraftProfile>();
-                    for (String payload : rawAccounts) {
-                        try {
-                            List<String> tokens = TokenImporter.extractValues(payload);
-                            if (!tokens.isEmpty()) {
-                                profiles.add(TokenImporter.importSingleToken(tokens.get(0)));
-                            } else {
-                                CookieParser.ParsedCookies parsed = CookieParser.fromText(payload);
-                                profiles.add(CookieAuth.authenticate(parsed));
-                            }
-                        } catch (Throwable t) {
-                            t.printStackTrace();
-                        }
-                    }
+                    final List<String> rawAccounts = LocaltsClient.extractOrderAccounts(order);
 
                     LocaltsMe updatedMe = null;
                     try {
@@ -486,27 +474,23 @@ public class GuiLocalts extends GuiScreen {
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
-                            if (closed) return;
+                            purchasing = false;
                             if (finalMe != null) {
                                 user = finalMe;
                             }
-                            int count = 0;
-                            for (CookieAuth.MinecraftProfile profile : profiles) {
-                                saveAccount(profile);
-                                count++;
+                            // Credits are already spent. Open the importer even if this screen closed.
+                            if (!rawAccounts.isEmpty()) {
+                                buyingMode = false;
+                                openPayloadImport(rawAccounts);
+                                return;
                             }
-                            if (count > 0) {
-                                Config.save();
+                            if (closed) {
+                                System.err.println("IAS: Localts purchase finished without delivered accounts after the screen closed.");
+                                return;
                             }
-                            purchasing = false;
                             buyingMode = false;
-                            if (count > 0) {
-                                statusText = I18n.format("ias.localts.buy.success", count);
-                                statusColor = 0x55FF55;
-                            } else {
-                                statusText = I18n.format("ias.localts.buy.pending");
-                                statusColor = 0xFFAA00;
-                            }
+                            statusText = I18n.format("ias.localts.buy.pending");
+                            statusColor = 0xFFAA00;
                             initGui();
                             fetchProducts(true);
                         }
@@ -516,8 +500,11 @@ public class GuiLocalts extends GuiScreen {
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
-                            if (closed) return;
                             purchasing = false;
+                            if (closed) {
+                                System.err.println("IAS: Localts purchase failed after the screen closed: " + formatError(t));
+                                return;
+                            }
                             if (res != null && res.orderId() != null && !res.orderId().isEmpty()) {
                                 statusText = "Order " + res.orderId() + " created, delivery failed: " + formatError(t) + ". Click Refresh to retrieve.";
                                 statusColor = 0xFFAA00;
@@ -538,57 +525,19 @@ public class GuiLocalts extends GuiScreen {
 
     private void importPackagedAccounts() {
         if (this.packagedAccounts.isEmpty() || this.importing || this.purchasing) return;
-        this.importing = true;
-        this.statusText = I18n.format("ias.login.cookiesToMsaMsr");
-        this.statusColor = 0xFFFF55;
-        initGui();
-
-        final List<String> toImport = new ArrayList<String>(this.packagedAccounts);
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                final List<CookieAuth.MinecraftProfile> profiles = new ArrayList<CookieAuth.MinecraftProfile>();
-                for (String payload : toImport) {
-                    if (closed) return;
-                    try {
-                        List<String> tokens = TokenImporter.extractValues(payload);
-                        if (!tokens.isEmpty()) {
-                            profiles.add(TokenImporter.importSingleToken(tokens.get(0)));
-                        } else {
-                            CookieParser.ParsedCookies parsed = CookieParser.fromText(payload);
-                            profiles.add(CookieAuth.authenticate(parsed));
-                        }
-                    } catch (Throwable t) {
-                        t.printStackTrace();
-                    }
-                }
-
-                Minecraft.getMinecraft().addScheduledTask(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (closed) return;
-                        int count = 0;
-                        for (CookieAuth.MinecraftProfile profile : profiles) {
-                            saveAccount(profile);
-                            count++;
-                        }
-                        if (count > 0) {
-                            Config.save();
-                        }
-                        importing = false;
-                        statusText = I18n.format("ias.localts.imported", count);
-                        statusColor = 0x55FF55;
-                        initGui();
-                    }
-                });
-            }
-        }, "IAS-Localts-Import").start();
+        openPayloadImport(this.packagedAccounts);
     }
 
-    private static boolean saveAccount(CookieAuth.MinecraftProfile profile) {
-        ExtendedAccountData data = ExtendedAccountData.cookieSession(profile.name, profile.token, profile.uuid, profile.refreshToken);
-        data.premium = EnumBool.TRUE;
-        return ExtendedAccountData.replaceOrAddCookieAccount(AltDatabase.getInstance(), data);
+    /**
+     * Hands purchased or packaged payloads to the cookie importer so failures,
+     * rate-limit retries, and the scrollable failure list stay visible.
+     *
+     * @param payloads Raw token or cookie texts
+     */
+    private void openPayloadImport(List<String> payloads) {
+        GuiCookieImport screen = new GuiCookieImport(this.parent, true);
+        this.mc.displayGuiScreen(screen);
+        screen.beginPayloads(payloads);
     }
 
     private static String formatError(Throwable t) {

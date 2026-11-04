@@ -157,6 +157,10 @@ final class ProvidersPopupScreen extends Screen {
         graphics.fill(centerX - PANEL_HALF_W + 1, centerY + PANEL_HALF_H, centerX + PANEL_HALF_W - 1, centerY + PANEL_HALF_H + 1, 0xF8_20_20_30);
     }
 
+    Screen parent() {
+        return this.parent;
+    }
+
     @Override
     public void onClose() {
         assert this.minecraft != null;

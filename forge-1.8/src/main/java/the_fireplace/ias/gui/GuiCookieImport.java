@@ -56,6 +56,9 @@ public class GuiCookieImport extends GuiScreen {
 
     @Override
     public void initGui() {
+        // displayGuiScreen always calls onGuiClosed, which marks the screen closed.
+        // Showing it again (file browser return, resize) must accept further input.
+        this.closed = false;
         Keyboard.enableRepeatEvents(true);
         buttonList.clear();
         int centerX = width / 2;
@@ -135,6 +138,10 @@ public class GuiCookieImport extends GuiScreen {
 
     private void browseCookieFile() {
         final String start = pathInput != null ? pathInput.getText().trim() : savedPath.trim();
+        if (isHeadless()) {
+            openInGameBrowser(start);
+            return;
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -146,27 +153,56 @@ public class GuiCookieImport extends GuiScreen {
                     Minecraft.getMinecraft().addScheduledTask(new Runnable() {
                         @Override
                         public void run() {
-                            if (closed) {
-                                return;
-                            }
-                            selectedFiles.clear();
-                            selectedFiles.addAll(paths);
-                            String joined = joinPaths(paths);
-                            savedPath = joined;
-                            if (pathInput != null) {
-                                pathInput.setText(joined);
-                            }
-                            statusLines.clear();
-                            if (paths.size() > 1) {
-                                statusLines.add(I18n.format("ias.cookie.selected", paths.size()));
-                            }
+                            applySelectedFiles(paths);
                         }
                     });
                 } catch (Throwable t) {
-                    showError(I18n.format("ias.cookie.browse.failed"));
+                    Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (closed) {
+                                return;
+                            }
+                            openInGameBrowser(start);
+                        }
+                    });
                 }
             }
         }, "IAS/CookieBrowse").start();
+    }
+
+    private void openInGameBrowser(String start) {
+        mc.displayGuiScreen(new GuiFileBrowser(this, start, null, true, new GuiFileBrowser.Callback() {
+            @Override
+            public void onChosen(List<String> paths) {
+                applySelectedFiles(paths);
+            }
+        }));
+    }
+
+    private void applySelectedFiles(List<String> paths) {
+        if (paths == null || paths.isEmpty() || closed) {
+            return;
+        }
+        selectedFiles.clear();
+        selectedFiles.addAll(paths);
+        String joined = joinPaths(paths);
+        savedPath = joined;
+        if (pathInput != null) {
+            pathInput.setText(joined);
+        }
+        statusLines.clear();
+        if (paths.size() > 1) {
+            statusLines.add(I18n.format("ias.cookie.selected", paths.size()));
+        }
+    }
+
+    private static boolean isHeadless() {
+        try {
+            return java.awt.GraphicsEnvironment.isHeadless();
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     private static String joinPaths(List<String> paths) {
@@ -214,6 +250,172 @@ public class GuiCookieImport extends GuiScreen {
             pathInput.setText(savedPath);
         }
         importCookies();
+    }
+
+    /**
+     * Imports raw Localts payloads (tokens or cookie text) with the same spacing,
+     * rate-limit retries, and failure list as a multi-file import.
+     *
+     * @param payloads Account texts, one delivery per entry
+     */
+    public void beginPayloads(List<String> payloads) {
+        if (payloads == null || payloads.isEmpty() || importing) {
+            return;
+        }
+        importing = true;
+        showFailures = false;
+        failureScroll = 0;
+        failures.clear();
+        failureDisplayLines.clear();
+        statusLines.clear();
+        statusLines.add(I18n.format("ias.login.cookiesToMsaMsr"));
+        final List<PayloadJob> jobs = new ArrayList<PayloadJob>();
+        for (String payload : payloads) {
+            if (payload == null || payload.trim().isEmpty()) {
+                continue;
+            }
+            List<String> tokens = ru.vidtu.iasfork.cookie.TokenImporter.extractValues(payload);
+            if (tokens.isEmpty()) {
+                jobs.add(new PayloadJob(false, payload));
+            } else {
+                for (String token : tokens) {
+                    jobs.add(new PayloadJob(true, token));
+                }
+            }
+        }
+        if (jobs.isEmpty()) {
+            importing = false;
+            showError(I18n.format("ias.error.cookie.invalid"));
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                importPayloads(jobs);
+            }
+        }, "IAS/LocaltsImport").start();
+    }
+
+    private void importPayloads(List<PayloadJob> jobs) {
+        final List<CookieAuth.MinecraftProfile> ok = new ArrayList<CookieAuth.MinecraftProfile>();
+        final int total = jobs.size();
+        for (int i = 0; i < total; i++) {
+            if (closed) {
+                return;
+            }
+            final int idx = i;
+            postStatus(I18n.format("ias.cookie.multi.progress", idx + 1, total));
+            PayloadJob job = jobs.get(idx);
+            CookieAuth.MinecraftProfile profile = null;
+            Throwable lastError = null;
+            int rateLimitRetries = 0;
+            while (profile == null) {
+                if (closed) {
+                    return;
+                }
+                try {
+                    if (job.token) {
+                        profile = ru.vidtu.iasfork.cookie.TokenImporter.importSingleToken(job.value);
+                    } else {
+                        profile = CookieAuth.authenticate(CookieParser.fromText(job.value));
+                    }
+                } catch (Throwable t) {
+                    if (isRateLimited(t) && rateLimitRetries < 2) {
+                        rateLimitRetries++;
+                        postStatus(I18n.format("ias.error.rateLimited"));
+                        try {
+                            Thread.sleep(30000L);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        continue;
+                    }
+                    lastError = t;
+                    break;
+                }
+            }
+            if (profile != null) {
+                ok.add(profile);
+            } else {
+                failures.add(EnumChatFormatting.RED + ("Account " + (idx + 1)) + EnumChatFormatting.GRAY + ": "
+                        + formatError(lastError != null ? lastError : new Exception(I18n.format("ias.error.cookie.invalid"))));
+            }
+            if (idx + 1 < total) {
+                try {
+                    Thread.sleep(6000L);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        if (closed) {
+            return;
+        }
+        final List<CookieAuth.MinecraftProfile> done = ok;
+        Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+            @Override
+            public void run() {
+                if (closed) {
+                    return;
+                }
+                try {
+                    int dup = 0;
+                    for (CookieAuth.MinecraftProfile p : done) {
+                        if (saveAccount(p)) {
+                            dup++;
+                        }
+                    }
+                    CookieAuth.MinecraftProfile last = done.isEmpty() ? null : done.get(done.size() - 1);
+                    Config.save();
+                    if (last != null) {
+                        MR.setSession(new Session(last.name, last.uuid, last.token, "mojang"));
+                    }
+                    if (last != null && failures.isEmpty() && done.size() == 1) {
+                        mc.displayGuiScreen(returnToAccountListOnSuccess ? new GuiAccountSelector() : parent);
+                        return;
+                    }
+                    statusLines.clear();
+                    int reportFailed = failures.size();
+                    statusLines.add(I18n.format("ias.cookie.multi.done", done.size(), done.size() + reportFailed, reportFailed, dup));
+                    importing = false;
+                    showFailures = !failures.isEmpty();
+                    failureScroll = 0;
+                    if (showFailures) {
+                        initGui();
+                    }
+                } catch (Throwable t) {
+                    showError(formatError(t));
+                    importing = false;
+                }
+            }
+        });
+    }
+
+    private void postStatus(final String line) {
+        try {
+            Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+                @Override
+                public void run() {
+                    if (!closed) {
+                        statusLines.clear();
+                        statusLines.add(line);
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static final class PayloadJob {
+        private final boolean token;
+        private final String value;
+
+        private PayloadJob(boolean token, String value) {
+            this.token = token;
+            this.value = value;
+        }
     }
 
     private void importCookies() {
@@ -453,9 +655,6 @@ public class GuiCookieImport extends GuiScreen {
                     } else {
                         failed++;
                         failures.add(failureText(path, 0, lastError != null ? lastError : new Exception(I18n.format("ias.error.cookie.invalid"))));
-                        if (lastError != null) {
-                            lastError.printStackTrace();
-                        }
                     }
                     if (idx + 1 < total) {
                         try {

@@ -686,6 +686,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
 
             boolean wasDuplicate = this.storeImportedAccount(account);
+            if (records.size() == 1) {
+                // One account should enter the session, matching Add / provider import.
+                this.minecraft.execute(() -> {
+                    if (this.closed || this != this.currentScreen()) {
+                        return;
+                    }
+                    this.closed = true;
+                    this.handler.accept(account);
+                });
+            }
             this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
         }, IAS.executor());
     }
@@ -706,71 +716,6 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         } catch (Throwable t) {
             return source;
         }
-    }
-
-    private void importCookieFileAt(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries) {
-        if (this.closed) {
-            return;
-        }
-        if (index >= sources.size()) {
-            this.finishCookieFileImport(imported, failed, duplicate, sources.size());
-            return;
-        }
-
-        int number = index + 1;
-        this.stage(Component.translatable("ias.cookie.multi.progress", number, sources.size()).withStyle(ChatFormatting.YELLOW));
-        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
-        this.startCreateFromSource(sources.get(index), true, new CreateHandler() {
-            @Override
-            public boolean cancelled() {
-                return CookiePopupScreen.this.closed;
-            }
-
-            @Override
-            public void stage(String stage, Object... args) {
-                CookiePopupScreen.this.stage(stage, args);
-            }
-
-            @Override
-            public void success(MicrosoftAccount account) {
-                future.complete(account);
-            }
-
-            @Override
-            public void error(Throwable error) {
-                future.completeExceptionally(error);
-            }
-        });
-
-        future.whenCompleteAsync((account, error) -> {
-            if (this.closed) {
-                return;
-            }
-            if (error != null || account == null) {
-                if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
-                    int attempt = rateLimitRetries + 1;
-                    this.stage(Component.literal("Rate limited. Retrying cookie file " + number + "/" + sources.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
-                    this.scheduleCookieFileImport(sources, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS);
-                    return;
-                }
-                AuthLog.expected(LOGGER, "Cookie file " + number + "/" + sources.size() + " failed: " + sources.get(index), error);
-                this.recordFailure(sourceName(sources.get(index)), error);
-                this.scheduleCookieFileImport(sources, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS);
-                return;
-            }
-
-            boolean wasDuplicate = this.storeImportedAccount(account);
-            this.scheduleCookieFileImport(sources, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS);
-        }, IAS.executor());
-    }
-
-    private void scheduleCookieFileImport(List<String> sources, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs) {
-        if (index >= sources.size()) {
-            this.importCookieFileAt(sources, index, imported, failed, duplicate, rateLimitRetries);
-            return;
-        }
-        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
-                .execute(() -> this.importCookieFileAt(sources, index, imported, failed, duplicate, rateLimitRetries));
     }
 
     private boolean isRateLimited(Throwable error) {
@@ -813,9 +758,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 this.label = null;
                 this.error = 0.0F;
             }
-            if (this.parent instanceof AccountScreen accountScreen) {
-                accountScreen.refreshAccounts();
-            }
+            AccountScreen.refreshFrom(this.parent);
             //? if >=1.21.11 {
             this.init(this.width, this.height);
             //?} else
@@ -853,7 +796,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
             List<String> tokens = TokenImporter.extractValues(text);
             if (tokens.size() > 1) {
-                this.importTokenValues(tokens, 0, 0, 0, 0, createHandler);
+                this.importTokenValues(tokens, 0, 0, 0, 0, 0, createHandler);
                 return;
             }
 
@@ -928,7 +871,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         }
     }
 
-    private void importTokenValues(List<String> tokens, int index, int imported, int failed, int duplicate, CreateHandler handler) {
+    private void importTokenValues(List<String> tokens, int index, int imported, int failed, int duplicate, int rateLimitRetries, CreateHandler handler) {
         if (this.closed) {
             return;
         }
@@ -939,6 +882,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         int number = index + 1;
         this.stage(Component.translatable("ias.cookie.multi.progress", number, tokens.size()).withStyle(ChatFormatting.YELLOW));
+        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
         TokenImporter.createAccountFromToken(this.crypt, tokens.get(index), new CreateHandler() {
             @Override
             public boolean cancelled() {
@@ -952,17 +896,44 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
             @Override
             public void success(MicrosoftAccount account) {
-                boolean wasDuplicate = CookiePopupScreen.this.storeImportedAccount(account);
-                CookiePopupScreen.this.importTokenValues(tokens, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), handler);
+                future.complete(account);
             }
 
             @Override
             public void error(Throwable error) {
-                AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
-                CookiePopupScreen.this.recordFailure(Component.translatable("ias.cookie.account", number).getString(), error);
-                CookiePopupScreen.this.importTokenValues(tokens, index + 1, imported, failed + 1, duplicate, handler);
+                future.completeExceptionally(error);
             }
         });
+
+        future.whenCompleteAsync((account, error) -> {
+            if (this.closed) {
+                return;
+            }
+            if (error != null || account == null) {
+                if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
+                    int attempt = rateLimitRetries + 1;
+                    this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + tokens.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
+                    this.scheduleTokenImport(tokens, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+                    return;
+                }
+                AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
+                this.recordFailure(Component.translatable("ias.cookie.account", number).getString(), error);
+                this.scheduleTokenImport(tokens, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                return;
+            }
+
+            boolean wasDuplicate = this.storeImportedAccount(account);
+            this.scheduleTokenImport(tokens, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+        }, IAS.executor());
+    }
+
+    private void scheduleTokenImport(List<String> tokens, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs, CreateHandler handler) {
+        if (index >= tokens.size()) {
+            this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler);
+            return;
+        }
+        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
+                .execute(() -> this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler));
     }
 
     private static String unwrapPath(String path) {
@@ -1075,6 +1046,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         if (this.pathInput != null) {
             this.pathInput.setValue(this.savedPath);
         }
+    }
+
+    Screen parent() {
+        return this.parent;
     }
 
     @Override

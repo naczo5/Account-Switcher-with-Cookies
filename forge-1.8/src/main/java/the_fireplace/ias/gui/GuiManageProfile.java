@@ -15,6 +15,7 @@ import the_fireplace.ias.tools.SkinTools;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.io.File;
+import java.util.List;
 
 /**
  * Screen allowing skin upload and Mojang IGN change for 1.8.9.
@@ -33,6 +34,8 @@ public class GuiManageProfile extends GuiScreen {
     private GuiButton backButton;
 
     private boolean isSlim = false;
+    private String skinPath = "";
+    private String nameDraft;
     private volatile String status = "";
     private volatile int statusColor = 0xFFFFFF;
     private volatile boolean busy = false;
@@ -53,6 +56,7 @@ public class GuiManageProfile extends GuiScreen {
         // Skin change section
         skinPathField = new GuiTextField(0, this.fontRendererObj, centerX - 100, centerY - 65, 145, 20);
         skinPathField.setMaxStringLength(256);
+        skinPathField.setText(this.skinPath);
 
         this.buttonList.add(browseButton = new GuiButton(1, centerX + 50, centerY - 65, 50, 20, "Browse..."));
         this.buttonList.add(modelButton = new GuiButton(2, centerX - 100, centerY - 40, 95, 20, "Model: Classic"));
@@ -61,7 +65,7 @@ public class GuiManageProfile extends GuiScreen {
         // Name change section
         nameField = new GuiTextField(4, this.fontRendererObj, centerX - 100, centerY + 15, 200, 20);
         nameField.setMaxStringLength(16);
-        nameField.setText(account.alias);
+        nameField.setText(this.nameDraft != null ? this.nameDraft : account.alias);
 
         this.buttonList.add(applyNameButton = new GuiButton(5, centerX - 100, centerY + 40, 200, 20, "Change Name"));
 
@@ -141,6 +145,12 @@ public class GuiManageProfile extends GuiScreen {
     }
 
     private void browseSkinFile() {
+        this.rememberFields();
+        final String start = this.skinPath;
+        if (isHeadless()) {
+            this.openSkinBrowser(start);
+            return;
+        }
         new Thread(() -> {
             try {
                 JFileChooser chooser = new JFileChooser();
@@ -149,18 +159,52 @@ public class GuiManageProfile extends GuiScreen {
                 int result = chooser.showOpenDialog(null);
                 if (result == JFileChooser.APPROVE_OPTION && chooser.getSelectedFile() != null) {
                     final String path = chooser.getSelectedFile().getAbsolutePath();
-                    mc.addScheduledTask(() -> {
-                        if (skinPathField != null) {
-                            skinPathField.setText(path);
-                            updateButtons();
-                        }
-                    });
+                    mc.addScheduledTask(() -> this.applySkinPath(path));
                 }
             } catch (Throwable t) {
-                status = "File browser failed. Type path manually.";
-                statusColor = 0xFF5555;
+                mc.addScheduledTask(() -> this.openSkinBrowser(start));
             }
         }).start();
+    }
+
+    private void openSkinBrowser(String start) {
+        this.rememberFields();
+        this.mc.displayGuiScreen(new GuiFileBrowser(this, start, "png", false, new GuiFileBrowser.Callback() {
+            @Override
+            public void onChosen(List<String> paths) {
+                if (paths != null && !paths.isEmpty()) {
+                    applySkinPath(paths.get(0));
+                }
+            }
+        }));
+    }
+
+    private void applySkinPath(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return;
+        }
+        this.skinPath = path;
+        if (this.skinPathField != null) {
+            this.skinPathField.setText(path);
+            this.updateButtons();
+        }
+    }
+
+    private void rememberFields() {
+        if (this.skinPathField != null) {
+            this.skinPath = this.skinPathField.getText();
+        }
+        if (this.nameField != null) {
+            this.nameDraft = this.nameField.getText();
+        }
+    }
+
+    private static boolean isHeadless() {
+        try {
+            return java.awt.GraphicsEnvironment.isHeadless();
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     private static final java.util.regex.Pattern MINECRAFT_NAME = java.util.regex.Pattern.compile("[A-Za-z0-9_]{3,16}");

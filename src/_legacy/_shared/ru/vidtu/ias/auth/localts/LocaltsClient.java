@@ -190,6 +190,33 @@ public final class LocaltsClient {
     }
 
     /**
+     * Loads every order page. Stops after {@code totalPages}, a short page, or an empty page.
+     *
+     * @return All order summaries, oldest page first
+     * @throws LocaltsException On authentication failure or a failed page request
+     */
+    public List<LocaltsOrderSummary> listAllOrders() {
+        List<LocaltsOrderSummary> all = new ArrayList<LocaltsOrderSummary>();
+        int pageIndex = 0;
+        while (pageIndex < 1000) {
+            LocaltsOrdersPage result = getOrders(pageIndex, 100);
+            if (result.orders().isEmpty()) {
+                break;
+            }
+            all.addAll(result.orders());
+            pageIndex++;
+            int totalPages = result.totalPages();
+            if (totalPages > 0 && pageIndex >= totalPages) {
+                break;
+            }
+            if (result.size() > 0 && result.orders().size() < result.size()) {
+                break;
+            }
+        }
+        return all;
+    }
+
+    /**
      * Retrieves full order details including packaged items (tokens/cookies).
      *
      * @param orderId The order ID to fetch
