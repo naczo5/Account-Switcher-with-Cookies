@@ -7,6 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/naczo5/Account-Switcher-with-Cookies?include_prereleases&color=238636&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
 [![Downloads](https://img.shields.io/github/downloads/naczo5/Account-Switcher-with-Cookies/total?color=1f6feb&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/releases)
 [![Stars](https://img.shields.io/github/stars/naczo5/Account-Switcher-with-Cookies?color=e3b341&logo=github)](https://github.com/naczo5/Account-Switcher-with-Cookies/stargazers)
+[![Visitors](https://api.visitorbadge.io/api/visitors?path=naczo5%2FAccount-Switcher-with-Cookies&label=VIEWS&countColor=%23263759)](https://github.com/naczo5/Account-Switcher-with-Cookies)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](LICENSE)
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.8.9%20%7C%201.21.11%20%7C%2026.2%20%7C%2026.3-brightgreen)](#supported-versions)
 
