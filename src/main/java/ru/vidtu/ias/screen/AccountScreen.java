@@ -742,11 +742,7 @@ public final class AccountScreen extends Screen {
         assert this.minecraft != null;
         String title = Component.translatable("ias.profile.skin.choose").getString();
         String startPath = this.skinPngPath;
-        if (isHeadless()) {
-            this.openSkinBrowser(startPath);
-            return;
-        }
-        IAS.executor().execute(() -> {
+        CookieFileDialogs.runAsync(() -> {
             try {
                 String path = CookieFileDialogs.pickPngFile(title, startPath);
                 if (path == null) {
@@ -797,14 +793,6 @@ public final class AccountScreen extends Screen {
         }
         this.profileStatus = Component.translatable("ias.profile.skin.selected", fileName).withStyle(ChatFormatting.AQUA);
         this.updateProfileControlState();
-    }
-
-    private static boolean isHeadless() {
-        try {
-            return java.awt.GraphicsEnvironment.isHeadless();
-        } catch (Throwable t) {
-            return true;
-        }
     }
 
     private void applySkinPng() {

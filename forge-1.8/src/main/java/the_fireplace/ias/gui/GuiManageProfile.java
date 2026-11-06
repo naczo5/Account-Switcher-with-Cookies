@@ -12,8 +12,6 @@ import ru.vidtu.iasfork.profile.ProfileManager;
 import the_fireplace.ias.account.ExtendedAccountData;
 import the_fireplace.ias.tools.SkinTools;
 
-import javax.swing.*;
-import javax.swing.filechooser.FileNameExtensionFilter;
 import java.io.File;
 import java.util.List;
 
@@ -147,18 +145,10 @@ public class GuiManageProfile extends GuiScreen {
     private void browseSkinFile() {
         this.rememberFields();
         final String start = this.skinPath;
-        if (isHeadless()) {
-            this.openSkinBrowser(start);
-            return;
-        }
         new Thread(() -> {
             try {
-                JFileChooser chooser = new JFileChooser();
-                chooser.setDialogTitle("Select Minecraft Skin PNG");
-                chooser.setFileFilter(new FileNameExtensionFilter("PNG Images (*.png)", "png"));
-                int result = chooser.showOpenDialog(null);
-                if (result == JFileChooser.APPROVE_OPTION && chooser.getSelectedFile() != null) {
-                    final String path = chooser.getSelectedFile().getAbsolutePath();
+                final String path = CookieFileDialogs.pickPngFile("Select Minecraft Skin PNG", start);
+                if (path != null) {
                     mc.addScheduledTask(() -> this.applySkinPath(path));
                 }
             } catch (Throwable t) {
@@ -196,14 +186,6 @@ public class GuiManageProfile extends GuiScreen {
         }
         if (this.nameField != null) {
             this.nameDraft = this.nameField.getText();
-        }
-    }
-
-    private static boolean isHeadless() {
-        try {
-            return java.awt.GraphicsEnvironment.isHeadless();
-        } catch (Throwable t) {
-            return true;
         }
     }
 

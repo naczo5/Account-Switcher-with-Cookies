@@ -34,10 +34,21 @@ import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.FileDialog;
 import java.awt.Frame;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -50,6 +61,17 @@ final class CookieFileDialogs {
      * Logger for this class.
      */
     private static final Logger LOGGER = LoggerFactory.getLogger("IAS/CookieFileDialogs");
+
+    /**
+     * Relative path of the picker class file inside the extracted classpath directory.
+     */
+    private static final String PICKER_CLASS = FilePickerMain.class.getName().replace('.', '/') + ".class";
+
+    /**
+     * Temporary directory with the extracted picker class, {@code null} if not extracted yet.
+     */
+    @Nullable
+    private static Path pickerDir;
 
     /**
      * An instance of this class cannot be created.
@@ -108,6 +130,14 @@ final class CookieFileDialogs {
 
     private static List<String> pickFiles(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
             @Nullable String filterDescription, boolean multiple) throws Exception {
+        // Java caches the headless state when AWT is first initialized, and it can't be reset at runtime.
+        // The picker in a separate JVM isn't affected by that, so it still gives the real OS file browser.
+        if (isHeadless()) {
+            List<String> external = pickFilesExternal(title, startPath, filters, filterDescription, multiple);
+            if (external != null) {
+                return external;
+            }
+        }
         //? if >=26.3 {
         return pickFilesAwt(title, startPath, filters, filterDescription, multiple);
         //?} else {
@@ -154,6 +184,135 @@ final class CookieFileDialogs {
         return files;
     }*/
     //?}
+
+    /**
+     * Runs a blocking file dialog on its own thread, so it doesn't block {@link ru.vidtu.ias.IAS#executor()},
+     * which other account actions depend on while the (separate process) dialog is still open.
+     *
+     * @param task Task to run
+     */
+    static void runAsync(Runnable task) {
+        Thread thread = new Thread(task, "IAS/FileDialog");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static boolean isHeadless() {
+        try {
+            return java.awt.GraphicsEnvironment.isHeadless();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * Opens the AWT file dialog in a separate JVM with {@code java.awt.headless=false}.
+     *
+     * @return Selected absolute paths (empty if cancelled), or {@code null} if the dialog couldn't be shown
+     */
+    @Nullable
+    private static List<String> pickFilesExternal(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
+            @Nullable String filterDescription, boolean multiple) {
+        Process process = null;
+        Writer stdin = null;
+        try {
+            Path classes = pickerClasspath();
+            String exe = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "javaw.exe" : "java";
+            Path java = Path.of(System.getProperty("java.home"), "bin", exe);
+            if (!Files.isRegularFile(java)) {
+                java = Path.of(System.getProperty("java.home"), "bin", "java" + (exe.endsWith(".exe") ? ".exe" : ""));
+            }
+
+            ProcessBuilder builder = new ProcessBuilder(java.toString(),
+                    "-Djava.awt.headless=false",
+                    "-Dfile.encoding=UTF-8",
+                    "-Xmx64M",
+                    "-cp", classes.toString(),
+                    FilePickerMain.class.getName());
+            // Environment-provided options are applied after ours and could force headless mode again.
+            builder.environment().remove("JAVA_TOOL_OPTIONS");
+            builder.environment().remove("_JAVA_OPTIONS");
+            builder.environment().remove("JDK_JAVA_OPTIONS");
+            builder.redirectError(ProcessBuilder.Redirect.DISCARD);
+            process = builder.start();
+
+            // Keep stdin open until the picker is done, the picker exits when it's closed (the game quit).
+            stdin = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
+            stdin.write(singleLine(title) + "\n");
+            stdin.write(singleLine(startPath) + "\n");
+            stdin.write((multiple ? "1" : "0") + "\n");
+            stdin.write((filters != null ? String.join(",", filters) : "") + "\n");
+            stdin.write(singleLine(filterDescription) + "\n");
+            stdin.flush();
+
+            List<String> selected = new ArrayList<>();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith(FilePickerMain.RESULT_PREFIX)) {
+                        String path = line.substring(FilePickerMain.RESULT_PREFIX.length());
+                        if (!path.isEmpty()) {
+                            selected.add(path);
+                        }
+                    }
+                }
+            }
+            int code = process.waitFor();
+            if (code != 0) {
+                LOGGER.warn("IAS: External file dialog exited with code {}.", code);
+                return null;
+            }
+            return selected;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Throwable t) {
+            LOGGER.warn("IAS: Unable to open the file dialog in a separate process.", t);
+            return null;
+        } finally {
+            if (stdin != null) {
+                try {
+                    stdin.close();
+                } catch (IOException ignored) {
+                }
+            }
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private static String singleLine(@Nullable String value) {
+        return value == null ? "" : value.replace('\r', ' ').replace('\n', ' ');
+    }
+
+    /**
+     * Extracts {@link FilePickerMain} from the mod into a temporary directory so a separate JVM can run it.
+     * Extracting works for every loader, unlike locating the mod jar.
+     */
+    private static synchronized Path pickerClasspath() throws IOException {
+        if (pickerDir != null && Files.isRegularFile(pickerDir.resolve(PICKER_CLASS))) {
+            return pickerDir;
+        }
+        Path dir = Files.createTempDirectory("ias-file-picker");
+        dir.toFile().deleteOnExit();
+        Path target = dir.resolve(PICKER_CLASS);
+        Files.createDirectories(target.getParent());
+        try (InputStream in = FilePickerMain.class.getResourceAsStream("FilePickerMain.class")) {
+            if (in == null) {
+                throw new FileNotFoundException("FilePickerMain.class");
+            }
+            Files.copy(in, target);
+        }
+        // Deletion hooks run longest path first, so children are removed before their parents.
+        Path current = dir;
+        for (Path part : dir.relativize(target)) {
+            current = current.resolve(part);
+            current.toFile().deleteOnExit();
+        }
+        pickerDir = dir;
+        return dir;
+    }
 
     private static List<String> pickFilesAwt(@Nullable String title, @Nullable String startPath, @Nullable String[] filters,
             @Nullable String filterDescription, boolean multiple) throws Exception {

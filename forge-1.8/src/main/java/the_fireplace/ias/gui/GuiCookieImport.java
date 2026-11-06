@@ -140,10 +140,6 @@ public class GuiCookieImport extends GuiScreen {
 
     private void browseCookieFile() {
         final String start = pathInput != null ? pathInput.getText().trim() : savedPath.trim();
-        if (isHeadless()) {
-            openInGameBrowser(start);
-            return;
-        }
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -196,14 +192,6 @@ public class GuiCookieImport extends GuiScreen {
         statusLines.clear();
         if (paths.size() > 1) {
             statusLines.add(I18n.format("ias.cookie.selected", paths.size()));
-        }
-    }
-
-    private static boolean isHeadless() {
-        try {
-            return java.awt.GraphicsEnvironment.isHeadless();
-        } catch (Throwable t) {
-            return true;
         }
     }
 

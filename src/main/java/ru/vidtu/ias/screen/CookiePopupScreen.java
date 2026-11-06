@@ -1064,11 +1064,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         }
         final String startPath = initial;
         final String dialogTitle = Component.translatable("ias.cookie.browse").getString();
-        if (isHeadless()) {
-            this.openInGameBrowser(startPath);
-            return;
-        }
-        IAS.executor().execute(() -> {
+        CookieFileDialogs.runAsync(() -> {
             try {
                 List<String> paths = CookieFileDialogs.pickCookieFiles(dialogTitle, startPath);
                 if (paths.isEmpty() || this.closed) {
@@ -1091,14 +1087,6 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 });
             }
         });
-    }
-
-    private static boolean isHeadless() {
-        try {
-            return java.awt.GraphicsEnvironment.isHeadless();
-        } catch (Throwable t) {
-            return true;
-        }
     }
 
     private void openInGameBrowser(String startPath) {

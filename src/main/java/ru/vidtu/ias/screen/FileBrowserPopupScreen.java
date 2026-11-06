@@ -42,7 +42,7 @@ import java.util.function.Supplier;
 
 /**
  * In-game file browser used when AWT/Swing file dialogs are unavailable (for example,
- * when the game runs with {@code java.awt.headless=true}).
+ * when the OS dialog can't be opened, including in a separate process).
  *
  * @author VidTu
  */
