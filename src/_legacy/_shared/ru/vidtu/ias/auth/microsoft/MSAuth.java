@@ -44,6 +44,7 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,6 +59,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -95,6 +101,17 @@ public final class MSAuth {
             .followRedirects(HttpClient.Redirect.NEVER)
             .executor(Runnable::run)
             .build();
+
+    /**
+     * Executor for blocking cookie-auth work (redirect following). It is separate from the single-threaded
+     * {@link IAS#executor()} so a slow or stalled cookie request cannot block every other IAS task.
+     */
+    @NotNull
+    private static final ExecutorService BLOCKING = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "IAS-Blocking");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /**
      * SISU entry point used by Minecraft web login with existing Microsoft session cookies.
@@ -1077,10 +1094,44 @@ public final class MSAuth {
             } catch (Throwable t) {
                 throw new FriendlyException("Unable to exchange cookies for tokens via SISU.", t, "ias.error.cookie.expired");
             }
-        }, IAS.executor()).thenComposeAsync(pair -> {
+        }, BLOCKING).thenComposeAsync(pair -> {
             int sep = pair.indexOf('\0');
             return xstsToMca(pair.substring(sep + 1), pair.substring(0, sep));
         }, IAS.executor());
+    }
+
+    /**
+     * Sends a request and blocks for the whole response, <b>including the body</b>, for at most {@link IAS#TIMEOUT}.
+     * <p>
+     * {@link HttpRequest#timeout()} only covers waiting for the response headers, so a server that sends headers
+     * and then stalls would block {@link HttpClient#send} forever. This cancels the request on timeout instead.
+     *
+     * @param request Request to send
+     * @param handler Body handler
+     * @param <T>     Body type
+     * @return Full response
+     * @throws HttpTimeoutException If the full response was not received in time
+     * @throws Exception            On any other failure
+     */
+    @NotNull
+    private static <T> HttpResponse<T> sendBounded(@NotNull HttpRequest request, @NotNull HttpResponse.BodyHandler<T> handler) throws Exception {
+        CompletableFuture<HttpResponse<T>> future = CLIENT_SYNC.sendAsync(request, handler);
+        try {
+            return future.get(IAS.TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new HttpTimeoutException("Response from " + request.uri().getHost() + " not fully received in " + IAS.TIMEOUT.toSeconds() + "s");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            throw e;
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw e;
+        }
     }
 
     @NotNull
@@ -1097,7 +1148,7 @@ public final class MSAuth {
             builder.header("Cookie", cookieHeader);
         }
 
-        HttpResponse<Void> response = CLIENT_SYNC.send(builder.build(), HttpResponse.BodyHandlers.discarding());
+        HttpResponse<Void> response = sendBounded(builder.build(), HttpResponse.BodyHandlers.discarding());
         if (response.statusCode() != HttpURLConnection.HTTP_MOVED_TEMP) {
             throw new FriendlyException("Unexpected SISU redirect status: " + response.statusCode(), "ias.error.cookie.expired");
         }
@@ -1194,7 +1245,7 @@ public final class MSAuth {
             } catch (Throwable t) {
                 throw t instanceof RuntimeException re ? re : new RuntimeException(t);
             }
-        }, IAS.executor()).thenComposeAsync(authResult -> {
+        }, BLOCKING).thenComposeAsync(authResult -> {
             if (authResult.tokens != null) {
                 return CompletableFuture.completedFuture(authResult.tokens);
             }
@@ -1229,7 +1280,7 @@ public final class MSAuth {
             builder.header("Cookie", cookieHeader);
         }
 
-        HttpResponse<String> response = CLIENT_SYNC.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = sendBounded(builder.build(), HttpResponse.BodyHandlers.ofString());
 
         String responseUrl = response.uri().toString();
         CookieAuthResult currentResult = extractAuthCodeOrTokens(responseUrl);

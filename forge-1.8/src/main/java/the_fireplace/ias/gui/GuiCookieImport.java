@@ -23,6 +23,7 @@ import java.awt.datatransfer.DataFlavor;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Cookie / Localts import screen for 1.8.9.
@@ -40,7 +41,8 @@ public class GuiCookieImport extends GuiScreen {
     /** Files picked via Browse (multi-select). Empty = parse pathInput text. */
     private final List<String> selectedFiles = new ArrayList<String>();
     private final List<String> statusLines = new ArrayList<String>();
-    private final List<String> failures = new ArrayList<String>();
+    // Written by import worker threads, read by the render thread.
+    private final List<String> failures = new CopyOnWriteArrayList<String>();
     private final List<String> failureDisplayLines = new ArrayList<String>();
     private boolean showFailures;
     private int failureScroll;
@@ -291,9 +293,35 @@ public class GuiCookieImport extends GuiScreen {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                importPayloads(jobs);
+                try {
+                    importPayloads(jobs);
+                } catch (Throwable t) {
+                    // An uncaught exception would silently kill this thread and leave the screen
+                    // stuck on the last status line with importing == true.
+                    failImport(t);
+                }
             }
         }, "IAS/LocaltsImport").start();
+    }
+
+    /** Shows an unexpected worker-thread failure on the game thread and unlocks the screen. */
+    private void failImport(final Throwable t) {
+        t.printStackTrace();
+        try {
+            Minecraft.getMinecraft().addScheduledTask(new Runnable() {
+                @Override
+                public void run() {
+                    // Unlock first: this screen instance is reused after the file browser closes it.
+                    importing = false;
+                    if (closed) {
+                        return;
+                    }
+                    showError(formatError(t));
+                }
+            });
+        } catch (Throwable ignored) {
+            importing = false;
+        }
     }
 
     private void importPayloads(List<PayloadJob> jobs) {

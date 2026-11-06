@@ -60,6 +60,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -115,6 +116,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Maximum number of rate-limit retries for one cookie file before moving on.
      */
     private static final int MULTI_COOKIE_RATE_LIMIT_RETRIES = 2;
+
+    /**
+     * Maximum time one account may take in a batch import before it is counted as failed and the batch moves on.
+     */
+    private static final long MULTI_COOKIE_RECORD_TIMEOUT_MS = 120000L;
 
     /**
      * Width of the failed-import list.
@@ -580,7 +586,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         IAS.executor().execute(() -> {
             List<ImportJob> records = new ArrayList<>();
             for (int i = 0; i < sources.size(); i++) {
-                records.add(new ImportJob("Localts #" + (i + 1), sources.get(i)));
+                addJobs(records, "Localts #" + (i + 1), sources.get(i));
             }
             this.importTextRecords(records, 0, 0, 0, 0, 0, records.size(), this);
         });
@@ -613,7 +619,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 try {
                     List<String> split = CookieParser.splitRecords(CookieParser.readText(Path.of(unwrapPath(source))));
                     for (int i = 0; i < split.size(); i++) {
-                        records.add(new ImportJob(split.size() == 1 ? label : label + " #" + (i + 1), split.get(i)));
+                        addJobs(records, split.size() == 1 ? label : label + " #" + (i + 1), split.get(i));
                     }
                 } catch (Throwable t) {
                     readFailed++;
@@ -633,6 +639,23 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         });
     }
 
+    /**
+     * Adds a batch job for the record, or one job per token if the record holds several tokens.
+     * <p>
+     * {@link #startCreateFromSource} would otherwise start a nested batch for such a record, which finishes the
+     * whole screen on its own and never completes the outer record, so the outer batch would stall.
+     */
+    private static void addJobs(List<ImportJob> out, String label, String record) {
+        List<String> tokens = TokenImporter.extractValues(record);
+        if (tokens.size() > 1) {
+            for (int i = 0; i < tokens.size(); i++) {
+                out.add(new ImportJob(label + " #" + (i + 1), tokens.get(i)));
+            }
+            return;
+        }
+        out.add(new ImportJob(label, record));
+    }
+
     private void importTextRecords(List<ImportJob> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, int total, CreateHandler handler) {
         if (this.closed) {
             return;
@@ -645,7 +668,9 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         int number = index + 1;
         ImportJob job = records.get(index);
         this.stage(Component.translatable("ias.cookie.multi.progress", number, records.size()).withStyle(ChatFormatting.YELLOW));
-        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
+        // A record that never reports success or failure must not stall the whole batch.
+        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<MicrosoftAccount>()
+                .orTimeout(MULTI_COOKIE_RECORD_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         this.startCreateFromSource(job.source(), false, new CreateHandler() {
             @Override
             public boolean cancelled() {
@@ -654,7 +679,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
             @Override
             public void stage(String stage, Object... args) {
-                handler.stage(stage, args);
+                // Ignore late stage updates from a record that already finished or timed out.
+                if (!future.isDone()) {
+                    handler.stage(stage, args);
+                }
             }
 
             @Override
@@ -668,35 +696,42 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
         });
 
-        future.whenCompleteAsync((account, error) -> {
-            if (this.closed) {
-                return;
-            }
-            if (error != null || account == null) {
-                if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
-                    int attempt = rateLimitRetries + 1;
-                    this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + records.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
-                    this.scheduleTextRecordImport(records, index, imported, failed, duplicate, attempt, total, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+        future.whenCompleteAsync((account, rawError) -> {
+            // The returned future is never observed, so an exception escaping this callback would be
+            // swallowed and leave the screen stuck on the last stage. Always surface it instead.
+            try {
+                if (this.closed) {
                     return;
                 }
-                AuthLog.expected(LOGGER, "Cookie account " + number + "/" + records.size() + " failed", error);
-                this.recordFailure(job.label(), error);
-                this.scheduleTextRecordImport(records, index + 1, imported, failed + 1, duplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
-                return;
-            }
-
-            boolean wasDuplicate = this.storeImportedAccount(account);
-            if (records.size() == 1) {
-                // One account should enter the session, matching Add / provider import.
-                this.minecraft.execute(() -> {
-                    if (this.closed || this != this.currentScreen()) {
+                Throwable error = this.normalizeTimeout(rawError, job.label());
+                if (error != null || account == null) {
+                    if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
+                        int attempt = rateLimitRetries + 1;
+                        this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + records.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
+                        this.scheduleTextRecordImport(records, index, imported, failed, duplicate, attempt, total, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
                         return;
                     }
-                    this.closed = true;
-                    this.handler.accept(account);
-                });
+                    AuthLog.expected(LOGGER, "Cookie account " + number + "/" + records.size() + " failed", error);
+                    this.recordFailure(job.label(), error);
+                    this.scheduleTextRecordImport(records, index + 1, imported, failed + 1, duplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                    return;
+                }
+
+                boolean wasDuplicate = this.storeImportedAccount(account);
+                if (records.size() == 1) {
+                    // One account should enter the session, matching Add / provider import.
+                    this.minecraft.execute(() -> {
+                        if (this.closed || this != this.currentScreen()) {
+                            return;
+                        }
+                        this.closed = true;
+                        this.handler.accept(account);
+                    });
+                }
+                this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+            } catch (Throwable t) {
+                this.abortImport("Cookie batch import crashed at account " + number + "/" + records.size(), t);
             }
-            this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
         }, IAS.executor());
     }
 
@@ -705,8 +740,38 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler);
             return;
         }
-        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
-                .execute(() -> this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler));
+        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor()).execute(() -> {
+            try {
+                this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler);
+            } catch (Throwable t) {
+                this.abortImport("Cookie batch import crashed at account " + (index + 1) + "/" + records.size(), t);
+            }
+        });
+    }
+
+    /**
+     * Converts a per-record timeout into a user-facing connection failure.
+     */
+    private Throwable normalizeTimeout(Throwable error, String label) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 16; depth++, current = current.getCause()) {
+            if (current instanceof TimeoutException) {
+                return new FriendlyException("Timed out importing " + label, error, "ias.error.connect");
+            }
+        }
+        return error;
+    }
+
+    /**
+     * Stops a batch import after an unexpected failure and shows the error instead of staying on the last stage.
+     */
+    private void abortImport(String message, Throwable t) {
+        LOGGER.error("IAS: {}", message, t);
+        try {
+            this.error(t);
+        } catch (Throwable inner) {
+            LOGGER.error("IAS: Unable to display the import failure.", inner);
+        }
     }
 
     private static String sourceName(String source) {
@@ -882,7 +947,8 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         int number = index + 1;
         this.stage(Component.translatable("ias.cookie.multi.progress", number, tokens.size()).withStyle(ChatFormatting.YELLOW));
-        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<>();
+        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<MicrosoftAccount>()
+                .orTimeout(MULTI_COOKIE_RECORD_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         TokenImporter.createAccountFromToken(this.crypt, tokens.get(index), new CreateHandler() {
             @Override
             public boolean cancelled() {
@@ -891,7 +957,9 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
             @Override
             public void stage(String stage, Object... args) {
-                handler.stage(stage, args);
+                if (!future.isDone()) {
+                    handler.stage(stage, args);
+                }
             }
 
             @Override
@@ -905,25 +973,32 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             }
         });
 
-        future.whenCompleteAsync((account, error) -> {
-            if (this.closed) {
-                return;
-            }
-            if (error != null || account == null) {
-                if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
-                    int attempt = rateLimitRetries + 1;
-                    this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + tokens.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
-                    this.scheduleTokenImport(tokens, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+        future.whenCompleteAsync((account, rawError) -> {
+            // See importTextRecords: never let an exception escape this unobserved callback.
+            try {
+                if (this.closed) {
                     return;
                 }
-                AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
-                this.recordFailure(Component.translatable("ias.cookie.account", number).getString(), error);
-                this.scheduleTokenImport(tokens, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
-                return;
-            }
+                String label = Component.translatable("ias.cookie.account", number).getString();
+                Throwable error = this.normalizeTimeout(rawError, label);
+                if (error != null || account == null) {
+                    if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
+                        int attempt = rateLimitRetries + 1;
+                        this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + tokens.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
+                        this.scheduleTokenImport(tokens, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+                        return;
+                    }
+                    AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
+                    this.recordFailure(label, error);
+                    this.scheduleTokenImport(tokens, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                    return;
+                }
 
-            boolean wasDuplicate = this.storeImportedAccount(account);
-            this.scheduleTokenImport(tokens, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                boolean wasDuplicate = this.storeImportedAccount(account);
+                this.scheduleTokenImport(tokens, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+            } catch (Throwable t) {
+                this.abortImport("Token batch import crashed at account " + number + "/" + tokens.size(), t);
+            }
         }, IAS.executor());
     }
 
@@ -932,8 +1007,13 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler);
             return;
         }
-        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor())
-                .execute(() -> this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler));
+        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor()).execute(() -> {
+            try {
+                this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler);
+            } catch (Throwable t) {
+                this.abortImport("Token batch import crashed at account " + (index + 1) + "/" + tokens.size(), t);
+            }
+        });
     }
 
     private static String unwrapPath(String path) {

@@ -11,6 +11,9 @@ public class GetRequest {
 	public GetRequest(String uri) throws Exception {
 		conn = (HttpURLConnection) new URL(uri).openConnection();
 		conn.setInstanceFollowRedirects(false);
+		// HttpURLConnection defaults to infinite timeouts, which can hang the import forever.
+		conn.setConnectTimeout(15000);
+		conn.setReadTimeout(15000);
 		conn.setRequestMethod("GET");
 	}
 	

@@ -16,6 +16,9 @@ public class PostRequest {
 	public PostRequest(String uri) throws Exception {
 		conn = (HttpURLConnection) new URL(uri).openConnection();
 		conn.setRequestMethod("POST");
+		// HttpURLConnection defaults to infinite timeouts, which can hang the import forever.
+		conn.setConnectTimeout(15000);
+		conn.setReadTimeout(15000);
 		conn.setDoOutput(true);
 		conn.setDoInput(true);
 	}
