@@ -152,7 +152,11 @@ public final class MSAccountFactory {
         Holder<String> refresh = new Holder<>("");
         Holder<byte[]> data = new Holder<>();
 
-        return MSAuth.cookiesToMcaFromCookies(cookieHeader).thenComposeAsync(result -> {
+        return CompletableFuture.completedFuture(null).thenComposeAsync(ignored -> {
+            // Do not even start the cookie flow after the user skipped or closed the import.
+            if (handler.cancelled()) return CompletableFuture.completedFuture(null);
+            return MSAuth.cookiesToMcaFromCookies(cookieHeader, handler::cancelled);
+        }, IAS.executor()).thenComposeAsync(result -> {
             if (result == null || handler.cancelled()) return CompletableFuture.completedFuture(null);
 
             access.set(result.mca());

@@ -64,6 +64,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -1026,18 +1027,55 @@ public final class MSAuth {
     @CheckReturnValue
     @NotNull
     public static CompletableFuture<CookieMcaResult> cookiesToMcaFromCookies(@NotNull String cookieHeader) {
+        return cookiesToMcaFromCookies(cookieHeader, () -> false);
+    }
+
+    /**
+     * Gets a Minecraft Access (MCA) token from browser session cookies, checking the cancellation
+     * state before each network stage so a skipped import stops as soon as possible.
+     *
+     * @param cookieHeader HTTP {@code Cookie} header value
+     * @param cancelled    Cancellation check
+     * @return Future that will complete with MCA and optional refresh token or exceptionally
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<CookieMcaResult> cookiesToMcaFromCookies(@NotNull String cookieHeader, @NotNull BooleanSupplier cancelled) {
+        if (cancelled.getAsBoolean()) {
+            return CompletableFuture.completedFuture(null);
+        }
         return cookiesToMsaMsr(cookieHeader).thenComposeAsync(tokens -> {
+            if (tokens == null || cancelled.getAsBoolean()) {
+                return CompletableFuture.completedFuture(null);
+            }
             LOGGER.info("IAS: Direct OAuth code exchange succeeded from cookies! Converting MSA to MCA...");
             return msaToXbl(tokens.access(), "t=").thenComposeAsync(xbl -> {
+                if (xbl == null || cancelled.getAsBoolean()) {
+                    return CompletableFuture.completedFuture(null);
+                }
                 return xblToXsts(xbl.token(), xbl.hash());
             }, IAS.executor()).thenComposeAsync(xsts -> {
+                if (xsts == null || cancelled.getAsBoolean()) {
+                    return CompletableFuture.completedFuture(null);
+                }
                 return xstsToMca(xsts.token(), xsts.hash());
             }, IAS.executor()).thenApplyAsync(mca -> {
+                if (mca == null || cancelled.getAsBoolean()) {
+                    return null;
+                }
                 return new CookieMcaResult(mca, tokens.refresh());
             }, IAS.executor());
         }, IAS.executor()).exceptionallyComposeAsync(oauthErr -> {
+            if (cancelled.getAsBoolean()) {
+                return CompletableFuture.completedFuture(null);
+            }
             AuthLog.expected(LOGGER, "Direct OAuth exchange failed from cookies, falling back to SISU", oauthErr);
-            return cookiesToMcaViaSisuLeaf(cookieHeader).thenApply(mca -> new CookieMcaResult(mca, ""));
+            return cookiesToMcaViaSisuLeaf(cookieHeader, cancelled).thenApply(mca -> {
+                if (mca == null || cancelled.getAsBoolean()) {
+                    return null;
+                }
+                return new CookieMcaResult(mca, "");
+            });
         }, IAS.executor());
     }
 
@@ -1050,6 +1088,20 @@ public final class MSAuth {
     @CheckReturnValue
     @NotNull
     public static CompletableFuture<String> cookiesToMcaViaSisuLeaf(@NotNull String cookieHeader) {
+        return cookiesToMcaViaSisuLeaf(cookieHeader, () -> false);
+    }
+
+    /**
+     * Fallback SISU flow that follows all redirect hops to obtain a leaf Minecraft Access (MCA)
+     * token, checking the cancellation state before each redirect.
+     *
+     * @param cookieHeader HTTP {@code Cookie} header value
+     * @param cancelled    Cancellation check
+     * @return Future that will complete with an MCA token or exceptionally
+     */
+    @CheckReturnValue
+    @NotNull
+    public static CompletableFuture<String> cookiesToMcaViaSisuLeaf(@NotNull String cookieHeader, @NotNull BooleanSupplier cancelled) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 String url = SISU_AUTH_URL;
@@ -1057,6 +1109,9 @@ public final class MSAuth {
                 String encoded = null;
 
                 for (int hop = 1; hop <= MAX_SISU_REDIRECTS; hop++) {
+                    if (cancelled.getAsBoolean()) {
+                        return null;
+                    }
                     url = followSisuRedirect(url, cookiesForHop, hop);
                     cookiesForHop = cookieHeader;
 
@@ -1066,6 +1121,9 @@ public final class MSAuth {
                     }
                 }
 
+                if (cancelled.getAsBoolean()) {
+                    return null;
+                }
                 if (encoded == null || encoded.isBlank()) {
                     throw new FriendlyException("No Xbox access token in SISU cookie auth response.", "ias.error.cookie.expired");
                 }
@@ -1095,6 +1153,9 @@ public final class MSAuth {
                 throw new FriendlyException("Unable to exchange cookies for tokens via SISU.", t, "ias.error.cookie.expired");
             }
         }, BLOCKING).thenComposeAsync(pair -> {
+            if (pair == null || cancelled.getAsBoolean()) {
+                return CompletableFuture.completedFuture(null);
+            }
             int sep = pair.indexOf('\0');
             return xstsToMca(pair.substring(sep + 1), pair.substring(0, sep));
         }, IAS.executor());

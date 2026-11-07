@@ -31,6 +31,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import org.joml.Matrix3x2fStack;
@@ -51,19 +52,26 @@ import ru.vidtu.ias.platform.IStonecutter;
 import ru.vidtu.ias.utils.AuthLog;
 import ru.vidtu.ias.utils.exceptions.FriendlyException;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Cookie alt import popup screen.
@@ -113,6 +121,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private static final long MULTI_COOKIE_RATE_LIMIT_DELAY_MS = 30000L;
 
     /**
+     * Short delay used after the user explicitly skips an account.
+     */
+    private static final long MULTI_COOKIE_SKIP_DELAY_MS = 1000L;
+
+    /**
+     * Ignore duplicate skip clicks within this window so a double-click skips only one account.
+     */
+    private static final long MULTI_COOKIE_SKIP_CLICK_COOLDOWN_MS = 750L;
+
+    /**
      * Maximum number of rate-limit retries for one cookie file before moving on.
      */
     private static final int MULTI_COOKIE_RATE_LIMIT_RETRIES = 2;
@@ -121,6 +139,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Maximum time one account may take in a batch import before it is counted as failed and the batch moves on.
      */
     private static final long MULTI_COOKIE_RECORD_TIMEOUT_MS = 120000L;
+
+    /**
+     * Maximum width of a batch status line.
+     */
+    private static final int STATUS_WIDTH = 230;
+
+    /**
+     * Matcher for the Minecraft username in a Minecraft access token payload.
+     */
+    private static final Pattern JWT_NAME = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]{1,64})\"");
 
     /**
      * Width of the failed-import list.
@@ -163,6 +191,91 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private boolean importing;
 
     /**
+     * 1-based index the user asked to skip while waiting between accounts, or {@code 0}.
+     */
+    private volatile int skipRequestedIndex;
+
+    /**
+     * 1-based index of the job that is currently active or scheduled next, or {@code 0}.
+     */
+    private volatile int pendingJobIndex;
+
+    /**
+     * {@link System#nanoTime()} of the last accepted skip click, used to debounce double-clicks.
+     */
+    private volatile long lastSkipNanos;
+
+    /**
+     * Future of the account currently being imported, if any.
+     */
+    private volatile CompletableFuture<MicrosoftAccount> activeRecordFuture;
+
+    /**
+     * Cancellation flag of the account currently being imported, if any.
+     */
+    private volatile AtomicBoolean activeRecordCancelled;
+
+    /**
+     * {@link System#nanoTime()} at which the current batch started.
+     */
+    private volatile long batchStartedNanos;
+
+    /**
+     * {@link System#nanoTime()} at which the whole import started (including file parsing).
+     */
+    private volatile long importStartedNanos;
+
+    /**
+     * {@link System#nanoTime()} at which the current account started.
+     */
+    private volatile long accountStartedNanos;
+
+    /**
+     * Final duration of the last account, used while waiting for the next one to start.
+     */
+    private volatile long accountElapsedNanos;
+
+    /**
+     * Total number of jobs in the current batch (including unreadable files).
+     */
+    private volatile int batchTotal;
+
+    /**
+     * 1-based number of the current batch job.
+     */
+    private volatile int batchIndex;
+
+    /**
+     * Successfully imported accounts in the current batch.
+     */
+    private volatile int batchImported;
+
+    /**
+     * Failed accounts in the current batch.
+     */
+    private volatile int batchFailed;
+
+    /**
+     * Accounts skipped by the user in the current batch.
+     */
+    private volatile int batchSkipped;
+
+    /**
+     * Duplicate accounts in the current batch.
+     */
+    private volatile int batchDuplicate;
+
+    /**
+     * Job currently being imported, if any.
+     */
+    private volatile ImportJob batchJob;
+
+    /**
+     * Username/mail reported by the authentication pipeline for the current job.
+     */
+    private volatile String batchAccountName;
+
+    /**
      * Whether this screen was closed.
      */
     private volatile boolean closed;
@@ -201,7 +314,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
      * Current stage.
      */
     @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
-    private Component stage = Component.empty();
+    private volatile Component stage = Component.empty();
 
     /**
      * Current stage label.
@@ -312,6 +425,15 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
 
         this.addRenderableWidget(new PopupButton(centerX - 75, backY, 150, 20,
                 CommonComponents.GUI_BACK, btn -> this.onClose(), Supplier::get));
+
+        if (this.importing && this.batchTotal > 1) {
+            PopupButton skipButton = new PopupButton(centerX - 75, centerY + 46, 150, 20,
+                    Component.translatable("ias.cookie.batch.skip"), btn -> this.skipCurrentAccount(), Supplier::get);
+            skipButton.color(1.0F, 0.75F, 0.5F, true);
+            skipButton.setTooltip(Tooltip.create(Component.translatable("ias.cookie.batch.skip.tip")));
+            skipButton.setTooltipDelay(Duration.ofMillis(250L));
+            this.addRenderableWidget(skipButton);
+        }
 
         if (this.crypt == null) {
             this.password = new PopupBox(this.font, centerX - 100, centerY - 10 + 5, 178, 20, this.password,
@@ -503,6 +625,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.errored = false;
         this.error = Float.NaN;
         this.errorNote = null;
+        this.importStartedNanos = System.nanoTime();
         this.stage(MicrosoftAccount.INITIALIZING);
 
         final String source = raw;
@@ -576,6 +699,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.failureScroll = 0;
         this.failures.clear();
         this.selectedCookieFiles = List.of();
+        this.importStartedNanos = System.nanoTime();
         this.stage(Component.translatable("ias.cookie.multi.progress", 1, sources.size()).withStyle(ChatFormatting.YELLOW));
 
         //? if >=1.21.11 {
@@ -584,11 +708,25 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         /*this.init(this.minecraft, this.width, this.height);*/
 
         IAS.executor().execute(() -> {
-            List<ImportJob> records = new ArrayList<>();
-            for (int i = 0; i < sources.size(); i++) {
-                addJobs(records, "Localts #" + (i + 1), sources.get(i));
+            try {
+                List<ImportJob> records = new ArrayList<>();
+                for (int i = 0; i < sources.size(); i++) {
+                    addJobs(records, "Localts #" + (i + 1), sources.get(i));
+                }
+                if (this.closed) {
+                    return;
+                }
+                if (records.isEmpty()) {
+                    this.error(new FriendlyException("No usable accounts found in the import.", "ias.error.cookie.invalid"));
+                    return;
+                }
+                int total = Math.max(1, records.size());
+                this.beginBatch(total);
+                this.refreshBatchWidgets();
+                this.importJobs(records, 0, 0, 0, 0, 0, 0, total, this);
+            } catch (Throwable t) {
+                this.abortImport("Cookie batch import crashed while preparing accounts", t);
             }
-            this.importTextRecords(records, 0, 0, 0, 0, 0, records.size(), this);
         });
     }
 
@@ -604,6 +742,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.failureScroll = 0;
         this.failures.clear();
         this.selectedCookieFiles = List.copyOf(sources);
+        this.importStartedNanos = System.nanoTime();
         this.stage(Component.translatable("ias.cookie.multi.progress", 1, sources.size()).withStyle(ChatFormatting.YELLOW));
 
         //? if >=1.21.11 {
@@ -612,69 +751,173 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         /*this.init(this.minecraft, this.width, this.height);*/
 
         IAS.executor().execute(() -> {
-            List<ImportJob> records = new ArrayList<>();
-            int readFailed = 0;
-            for (String source : sources) {
-                String label = sourceName(source);
-                try {
-                    List<String> split = CookieParser.splitRecords(CookieParser.readText(Path.of(unwrapPath(source))));
-                    for (int i = 0; i < split.size(); i++) {
-                        addJobs(records, split.size() == 1 ? label : label + " #" + (i + 1), split.get(i));
+            try {
+                List<ImportJob> records = new ArrayList<>();
+                int readFailed = 0;
+                for (String source : sources) {
+                    String label = sourceName(source);
+                    try {
+                        List<String> split = CookieParser.splitRecords(readImportText(source));
+                        for (int i = 0; i < split.size(); i++) {
+                            addJobs(records, split.size() == 1 ? label : label + " #" + (i + 1), split.get(i));
+                        }
+                    } catch (Throwable t) {
+                        readFailed++;
+                        this.recordFailure(label, new FriendlyException("Unable to read " + source, t, "ias.error.cookie.file"));
+                        AuthLog.expected(LOGGER, "Unable to read " + source, t);
                     }
-                } catch (Throwable t) {
-                    readFailed++;
-                    this.recordFailure(label, new FriendlyException("Unable to read " + source, t, "ias.error.cookie.file"));
-                    AuthLog.expected(LOGGER, "Unable to read " + source, t);
                 }
-            }
-            if (records.isEmpty()) {
-                if (readFailed > 0) {
-                    this.finishCookieFileImport(0, readFailed, 0, readFailed);
-                } else {
-                    this.error(new FriendlyException("No cookie accounts found in the selected files.", "ias.error.cookie.invalid"));
+                if (this.closed) {
+                    return;
                 }
-                return;
+                if (records.isEmpty()) {
+                    if (readFailed > 0) {
+                        this.finishCookieFileImport(0, readFailed, 0, 0, readFailed);
+                    } else {
+                        this.error(new FriendlyException("No cookie accounts found in the selected files.", "ias.error.cookie.invalid"));
+                    }
+                    return;
+                }
+                int total = records.size() + readFailed;
+                this.beginBatch(total);
+                this.refreshBatchWidgets();
+                this.importJobs(records, 0, 0, readFailed, 0, 0, 0, total, this);
+            } catch (Throwable t) {
+                this.abortImport("Cookie batch import crashed while preparing accounts", t);
             }
-            this.importTextRecords(records, 0, 0, readFailed, 0, 0, records.size() + readFailed, this);
         });
     }
 
     /**
      * Adds a batch job for the record, or one job per token if the record holds several tokens.
      * <p>
-     * {@link #startCreateFromSource} would otherwise start a nested batch for such a record, which finishes the
-     * whole screen on its own and never completes the outer record, so the outer batch would stall.
+     * Each job also carries a best-effort type and username hint for the status display.
      */
     private static void addJobs(List<ImportJob> out, String label, String record) {
         List<String> tokens = TokenImporter.extractValues(record);
         if (tokens.size() > 1) {
             for (int i = 0; i < tokens.size(); i++) {
-                out.add(new ImportJob(label + " #" + (i + 1), tokens.get(i)));
+                String token = tokens.get(i);
+                out.add(new ImportJob(label + " #" + (i + 1), token, detectType(token), tokenUsername(token)));
             }
             return;
         }
-        out.add(new ImportJob(label, record));
+        out.add(new ImportJob(label, record, detectType(record), usernameHint(record)));
     }
 
-    private void importTextRecords(List<ImportJob> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, int total, CreateHandler handler) {
+    /**
+     * Resets the per-batch progress counters.
+     *
+     * @param total Number of jobs in the batch
+     */
+    private void beginBatch(int total) {
+        this.batchStartedNanos = this.importStartedNanos > 0L ? this.importStartedNanos : System.nanoTime();
+        this.accountStartedNanos = 0L;
+        this.accountElapsedNanos = 0L;
+        this.batchTotal = Math.max(0, total);
+        this.batchIndex = 0;
+        this.batchImported = 0;
+        this.batchFailed = 0;
+        this.batchSkipped = 0;
+        this.batchDuplicate = 0;
+        this.batchJob = null;
+        this.batchAccountName = null;
+        this.skipRequestedIndex = 0;
+        this.pendingJobIndex = total > 0 ? 1 : 0;
+        this.lastSkipNanos = 0L;
+        this.activeRecordFuture = null;
+        this.activeRecordCancelled = null;
+    }
+
+    /**
+     * Rebuilds the import widgets after the exact job count is known, so the skip button can appear.
+     */
+    private void refreshBatchWidgets() {
+        assert this.minecraft != null;
+        this.minecraft.execute(() -> {
+            if (this.closed || this != this.currentScreen()) {
+                return;
+            }
+            synchronized (this.lock) {
+                this.label = null;
+            }
+            //? if >=1.21.11 {
+            this.init(this.width, this.height);
+            //?} else
+            /*this.init(this.minecraft, this.width, this.height);*/
+        });
+    }
+
+    /**
+     * Updates the counters displayed by the live batch status.
+     */
+    private void updateBatchProgress(int index, int imported, int failed, int skipped, int duplicate) {
+        this.batchIndex = index;
+        this.batchImported = imported;
+        this.batchFailed = failed;
+        this.batchSkipped = skipped;
+        this.batchDuplicate = duplicate;
+    }
+
+    /**
+     * Imports the given batch jobs one by one.
+     *
+     * @param jobs             Jobs to import
+     * @param index            Current job index
+     * @param imported         Successful imports so far
+     * @param failed           Failed imports so far
+     * @param skipped          Imports skipped by the user so far
+     * @param duplicate        Duplicate imports so far
+     * @param rateLimitRetries Rate-limit retries used for the current job
+     * @param total            Total number of jobs (including files that could not be read)
+     * @param handler          Parent creation handler
+     */
+    private void importJobs(List<ImportJob> jobs, int index, int imported, int failed, int skipped, int duplicate,
+                            int rateLimitRetries, int total, CreateHandler handler) {
         if (this.closed) {
             return;
         }
-        if (index >= records.size()) {
-            this.finishCookieFileImport(imported, failed, duplicate, total);
+        if (index >= jobs.size()) {
+            this.finishCookieFileImport(imported, failed, skipped, duplicate, Math.max(total, jobs.size()));
             return;
         }
 
+        if (this.skipRequestedIndex != 0) {
+            if (this.skipRequestedIndex == index + 1) {
+                this.skipRequestedIndex = 0;
+                int skippedNumber = index + 1;
+                this.batchJob = jobs.get(index);
+                this.batchAccountName = null;
+                this.updateBatchProgress(skippedNumber, imported, failed, skipped + 1, duplicate);
+                this.accountStartedNanos = 0L;
+                this.accountElapsedNanos = 0L;
+                this.stage(Component.translatable("ias.cookie.batch.skipped", skippedNumber, Math.max(total, jobs.size())).withStyle(ChatFormatting.YELLOW));
+                this.scheduleJobImport(jobs, index + 1, imported, failed, skipped + 1, duplicate, 0, total, MULTI_COOKIE_SKIP_DELAY_MS, handler);
+                return;
+            }
+            this.skipRequestedIndex = 0;
+        }
+
         int number = index + 1;
-        ImportJob job = records.get(index);
-        this.stage(Component.translatable("ias.cookie.multi.progress", number, records.size()).withStyle(ChatFormatting.YELLOW));
+        int jobCount = Math.max(total, jobs.size());
+        ImportJob job = jobs.get(index);
+        this.pendingJobIndex = number;
+        this.updateBatchProgress(number, imported, failed, skipped, duplicate);
+        this.batchJob = job;
+        this.batchAccountName = null;
+        this.accountStartedNanos = System.nanoTime();
+        this.accountElapsedNanos = 0L;
+        this.stage(Component.translatable(MicrosoftAccount.INITIALIZING).withStyle(ChatFormatting.YELLOW));
         // A record that never reports success or failure must not stall the whole batch.
         CompletableFuture<MicrosoftAccount> future = new CompletableFuture<MicrosoftAccount>()
                 .orTimeout(MULTI_COOKIE_RECORD_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        this.startCreateFromSource(job.source(), false, new CreateHandler() {
+        AtomicBoolean recordCancelled = new AtomicBoolean();
+        this.activeRecordFuture = future;
+        this.activeRecordCancelled = recordCancelled;
+        this.startCreateSingleSource(job.source(), new CreateHandler() {
             @Override
             public boolean cancelled() {
-                return CookiePopupScreen.this.closed || handler.cancelled();
+                return CookiePopupScreen.this.closed || handler.cancelled() || recordCancelled.get();
             }
 
             @Override
@@ -703,22 +946,43 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 if (this.closed) {
                     return;
                 }
+                if (this.activeRecordFuture == future) {
+                    this.activeRecordFuture = null;
+                    this.activeRecordCancelled = null;
+                }
+                // Stop any auth pipeline that is still running after a timeout or skip.
+                recordCancelled.set(true);
+                if (this.accountStartedNanos > 0L) {
+                    this.accountElapsedNanos = System.nanoTime() - this.accountStartedNanos;
+                    this.accountStartedNanos = 0L;
+                }
                 Throwable error = this.normalizeTimeout(rawError, job.label());
+                if (this.isSkipped(error)) {
+                    this.updateBatchProgress(number, imported, failed, skipped + 1, duplicate);
+                    this.stage(Component.translatable("ias.cookie.batch.skipped", number, jobCount).withStyle(ChatFormatting.YELLOW));
+                    AuthLog.expected(LOGGER, "Cookie account " + number + "/" + jobCount + " skipped", error);
+                    this.scheduleJobImport(jobs, index + 1, imported, failed, skipped + 1, duplicate, 0, total, MULTI_COOKIE_SKIP_DELAY_MS, handler);
+                    return;
+                }
                 if (error != null || account == null) {
                     if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
                         int attempt = rateLimitRetries + 1;
-                        this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + records.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
-                        this.scheduleTextRecordImport(records, index, imported, failed, duplicate, attempt, total, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
+                        this.stage(Component.translatable("ias.cookie.batch.retry", MULTI_COOKIE_RATE_LIMIT_DELAY_MS / 1000L, attempt, MULTI_COOKIE_RATE_LIMIT_RETRIES).withStyle(ChatFormatting.YELLOW));
+                        this.scheduleJobImport(jobs, index, imported, failed, skipped, duplicate, attempt, total, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
                         return;
                     }
-                    AuthLog.expected(LOGGER, "Cookie account " + number + "/" + records.size() + " failed", error);
+                    AuthLog.expected(LOGGER, "Cookie account " + number + "/" + jobCount + " failed", error);
                     this.recordFailure(job.label(), error);
-                    this.scheduleTextRecordImport(records, index + 1, imported, failed + 1, duplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                    this.updateBatchProgress(number, imported, failed + 1, skipped, duplicate);
+                    this.scheduleJobImport(jobs, index + 1, imported, failed + 1, skipped, duplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
                     return;
                 }
 
                 boolean wasDuplicate = this.storeImportedAccount(account);
-                if (records.size() == 1) {
+                this.batchAccountName = account.name();
+                int nextDuplicate = duplicate + (wasDuplicate ? 1 : 0);
+                this.updateBatchProgress(number, imported + 1, failed, skipped, nextDuplicate);
+                if (jobs.size() == 1) {
                     // One account should enter the session, matching Add / provider import.
                     this.minecraft.execute(() -> {
                         if (this.closed || this != this.currentScreen()) {
@@ -728,25 +992,72 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                         this.handler.accept(account);
                     });
                 }
-                this.scheduleTextRecordImport(records, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
+                this.scheduleJobImport(jobs, index + 1, imported + 1, failed, skipped, nextDuplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
             } catch (Throwable t) {
-                this.abortImport("Cookie batch import crashed at account " + number + "/" + records.size(), t);
+                this.abortImport("Cookie batch import crashed at account " + number + "/" + jobCount, t);
             }
         }, IAS.executor());
     }
 
-    private void scheduleTextRecordImport(List<ImportJob> records, int index, int imported, int failed, int duplicate, int rateLimitRetries, int total, long delayMs, CreateHandler handler) {
-        if (index >= records.size()) {
-            this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler);
+    /**
+     * Schedules the next batch job (or the same one for a rate-limit retry).
+     */
+    private void scheduleJobImport(List<ImportJob> jobs, int index, int imported, int failed, int skipped, int duplicate,
+                                   int rateLimitRetries, int total, long delayMs, CreateHandler handler) {
+        this.pendingJobIndex = index < jobs.size() ? index + 1 : 0;
+        if (index >= jobs.size()) {
+            this.importJobs(jobs, index, imported, failed, skipped, duplicate, rateLimitRetries, total, handler);
             return;
         }
         CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor()).execute(() -> {
             try {
-                this.importTextRecords(records, index, imported, failed, duplicate, rateLimitRetries, total, handler);
+                this.importJobs(jobs, index, imported, failed, skipped, duplicate, rateLimitRetries, total, handler);
             } catch (Throwable t) {
-                this.abortImport("Cookie batch import crashed at account " + (index + 1) + "/" + records.size(), t);
+                this.abortImport("Cookie batch import crashed at account " + (index + 1) + "/" + jobs.size(), t);
             }
         });
+    }
+
+    /**
+     * Skips the account currently being imported (or the next one, if between accounts).
+     */
+    private void skipCurrentAccount() {
+        if (!this.importing) {
+            return;
+        }
+        long now = System.nanoTime();
+        if (now - this.lastSkipNanos < TimeUnit.MILLISECONDS.toNanos(MULTI_COOKIE_SKIP_CLICK_COOLDOWN_MS)) {
+            return;
+        }
+        this.lastSkipNanos = now;
+
+        CompletableFuture<MicrosoftAccount> future = this.activeRecordFuture;
+        if (future != null && !future.isDone()) {
+            AtomicBoolean cancelled = this.activeRecordCancelled;
+            if (cancelled != null) {
+                cancelled.set(true);
+            }
+            future.completeExceptionally(new ImportSkippedException());
+            return;
+        }
+
+        // Between accounts (including a rate-limit delay): skip the job that is scheduled next.
+        if (this.pendingJobIndex > 0) {
+            this.skipRequestedIndex = this.pendingJobIndex;
+        }
+    }
+
+    /**
+     * Whether the error was caused by the user skipping the account.
+     */
+    private static boolean isSkipped(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 16; depth++, current = current.getCause()) {
+            if (current instanceof ImportSkippedException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -783,6 +1094,261 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         }
     }
 
+    /**
+     * Reads an import file, rejecting non-regular files (FIFOs/devices) so a bad path
+     * cannot block the import thread forever.
+     */
+    private static String readImportText(String source) throws java.io.IOException {
+        Path path = Path.of(unwrapPath(source));
+        if (!Files.isRegularFile(path)) {
+            throw new java.io.IOException("Not a regular file: " + path);
+        }
+        return CookieParser.readText(path);
+    }
+
+    /**
+     * Detects the account type for the status display.
+     *
+     * @param record Account source text (cookie export or token)
+     * @return Translation key for the type
+     */
+    private static String detectType(String record) {
+        String lower = record.toLowerCase(Locale.ROOT);
+        if (lower.contains("__host-msaauth") || lower.contains("mspauth=") || lower.contains("\tmspauth\t")
+                || lower.contains("\tmspauthp\t") || lower.contains("mspprof=")) {
+            return "ias.cookie.batch.type.cookie";
+        }
+        List<String> tokens = TokenImporter.extractValues(record);
+        if (tokens.size() == 1) {
+            String token = tokens.get(0);
+            if (looksLikeMinecraftAccessToken(token)) {
+                return "ias.cookie.batch.type.access";
+            }
+            if (token.startsWith("M.") || token.startsWith("0.") || token.length() > 40) {
+                return "ias.cookie.batch.type.refresh";
+            }
+        }
+        return "ias.cookie.batch.type.unknown";
+    }
+
+    /**
+     * Extracts a best-effort username/email for the status display.
+     *
+     * @param record Account source text (cookie export or token)
+     * @return Username or email, or {@code null} if it cannot be detected cheaply
+     */
+    private static String usernameHint(String record) {
+        String cookieName = cookieValue(record, "JSH");
+        if (cookieName == null || cookieName.isBlank()) {
+            cookieName = cookieValue(record, "JSHP");
+        }
+        if (cookieName != null && !cookieName.isBlank()) {
+            String[] fields = cookieName.split("\\$", -1);
+            if (fields.length > 2 && !fields[2].isBlank()) {
+                return fields[2].strip();
+            }
+            if (fields.length > 1 && !fields[1].isBlank()) {
+                return decodeUrl(fields[1].strip());
+            }
+        }
+        String pre = cookieValue(record, "MSPPre");
+        if (pre != null && !pre.isBlank()) {
+            String value = decodeUrl(pre);
+            int sep = value.indexOf('|');
+            if (sep > 0) {
+                value = value.substring(0, sep);
+            }
+            value = value.strip();
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+
+        for (String line : record.split("\n")) {
+            String stripped = line.strip();
+            String lower = stripped.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("email:") || lower.startsWith("username:") || lower.startsWith("user:")
+                    || lower.startsWith("login:") || lower.startsWith("account:")) {
+                String rest = stripped.substring(stripped.indexOf(':') + 1);
+                // Localts lines use the same "name:token" shape; never treat their token as a username.
+                if (TokenImporter.looksLikeImportToken(rest.strip())) {
+                    continue;
+                }
+                String value = cleanMetadataUsername(rest);
+                if (value != null) {
+                    return value;
+                }
+            }
+        }
+        for (String line : record.split("\n")) {
+            String stripped = line.strip();
+            if (stripped.toLowerCase(Locale.ROOT).startsWith("source:")) {
+                String rest = stripped.substring(stripped.indexOf(':') + 1);
+                if (TokenImporter.looksLikeImportToken(rest.strip())) {
+                    continue;
+                }
+                String value = cleanMetadataUsername(rest);
+                // A checker "Source:" may be an email:password pair, a seller name, or a path.
+                // Only trust it when an email address is actually present.
+                if (value != null && value.contains("@")) {
+                    return value;
+                }
+            }
+        }
+
+        for (String line : record.split("\n")) {
+            String stripped = line.strip();
+            String lower = stripped.toLowerCase(Locale.ROOT);
+            for (String prefix : new String[]{"# username:", "# user:", "# email:", "# login:", "# account:"}) {
+                if (lower.startsWith(prefix)) {
+                    String value = cleanMetadataUsername(stripped.substring(prefix.length()));
+                    if (value != null) {
+                        return value;
+                    }
+                }
+            }
+        }
+
+        // Localts-style "username:M.C..." or "email:token" prefix.
+        for (String line : record.split("\n")) {
+            String stripped = line.strip();
+            String lower = stripped.toLowerCase(Locale.ROOT);
+            if (stripped.isEmpty() || stripped.startsWith("#") || stripped.startsWith("//")
+                    || lower.contains("localts") || lower.contains("thanks for choosing")) {
+                continue;
+            }
+            int sep = stripped.indexOf(':');
+            if (sep > 0 && sep <= 64) {
+                String prefix = stripped.substring(0, sep).strip();
+                String rest = stripped.substring(sep + 1).strip();
+                if (!prefix.isEmpty() && !prefix.contains(" ") && !prefix.contains("\t")
+                        && !prefix.contains("/") && !prefix.contains("\\")
+                        && TokenImporter.looksLikeImportToken(rest)) {
+                    return prefix;
+                }
+            }
+            break;
+        }
+
+        List<String> tokens = TokenImporter.extractValues(record);
+        for (String token : tokens) {
+            String username = tokenUsername(token);
+            if (username != null && !username.isBlank()) {
+                return username;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Cleans a checker metadata value (for example {@code email:password}) into a display name,
+     * dropping passwords and paths.
+     */
+    private static String cleanMetadataUsername(String raw) {
+        String value = raw.strip();
+        int cut = value.indexOf('|');
+        if (cut < 0) {
+            cut = value.indexOf('\t');
+        }
+        if (cut > 0) {
+            value = value.substring(0, cut).strip();
+        }
+        // Metadata is often "username:password" (checker exports). Never display the secret part.
+        int colon = value.indexOf(':');
+        if (colon > 0) {
+            value = value.substring(0, colon).strip();
+        }
+        if (value.isBlank() || value.length() > 64 || value.contains("/") || value.contains("\\")) {
+            return null;
+        }
+        return value;
+    }
+
+    /**
+     * Reads a cookie value from Netscape TSV or a semicolon-separated Cookie header.
+     *
+     * @param text Cookie text
+     * @param name Cookie name
+     * @return Cookie value, or {@code null} if absent
+     */
+    private static String cookieValue(String text, String name) {
+        for (String line : text.split("\n")) {
+            String stripped = line.strip();
+            if (stripped.regionMatches(true, 0, "#HttpOnly_", 0, 10)) {
+                stripped = stripped.substring(10).strip();
+            } else if (stripped.startsWith("#")) {
+                continue;
+            }
+            if (stripped.isEmpty()) {
+                continue;
+            }
+            if (stripped.contains("\t")) {
+                String[] parts = stripped.split("\t", -1);
+                if (parts.length >= 6 && parts[5].equalsIgnoreCase(name)) {
+                    return parts.length >= 7 ? parts[6] : "";
+                }
+                continue;
+            }
+            for (String segment : stripped.split(";")) {
+                String part = segment.strip();
+                int eq = part.indexOf('=');
+                if (eq > 0 && part.substring(0, eq).strip().equalsIgnoreCase(name)) {
+                    return part.substring(eq + 1).strip();
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String decodeUrl(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        } catch (Throwable t) {
+            return value;
+        }
+    }
+
+    private static String tokenUsername(String token) {
+        return looksLikeMinecraftAccessToken(token) ? jwtUsername(token) : null;
+    }
+
+    /**
+     * Extracts the Minecraft profile name from an access token JWT payload.
+     */
+    private static String jwtUsername(String token) {
+        int first = token.indexOf('.');
+        if (first < 0) {
+            return null;
+        }
+        int second = token.indexOf('.', first + 1);
+        if (second < 0) {
+            return null;
+        }
+        String payload = token.substring(first + 1, second);
+        if (payload.isEmpty()) {
+            return null;
+        }
+        try {
+            int padding = (4 - payload.length() % 4) % 4;
+            if (padding > 0) {
+                payload += "=".repeat(padding);
+            }
+            byte[] decoded = Base64.getUrlDecoder().decode(payload);
+            Matcher matcher = JWT_NAME.matcher(new String(decoded, StandardCharsets.UTF_8));
+            return matcher.find() ? matcher.group(1) : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static boolean looksLikeMinecraftAccessToken(String token) {
+        if (token == null || !token.startsWith("eyJ")) {
+            return false;
+        }
+        int firstDot = token.indexOf('.');
+        return firstDot > 3 && token.indexOf('.', firstDot + 1) > firstDot + 1;
+    }
+
     private boolean isRateLimited(Throwable error) {
         FriendlyException friendly = FriendlyException.friendlyInChain(error);
         return friendly != null && "ias.error.rateLimited".equals(friendly.key());
@@ -808,7 +1374,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         return duplicate;
     }
 
-    private void finishCookieFileImport(int imported, int failed, int duplicate, int total) {
+    private void finishCookieFileImport(int imported, int failed, int skipped, int duplicate, int total) {
         assert this.minecraft != null;
         this.minecraft.execute(() -> {
             if (this.closed) {
@@ -818,8 +1384,17 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.selectedCookieFiles = List.of();
             this.showFailures = !this.failures.isEmpty();
             this.failureScroll = 0;
+            this.activeRecordFuture = null;
+            this.activeRecordCancelled = null;
+            this.skipRequestedIndex = 0;
+            this.pendingJobIndex = 0;
+            this.batchJob = null;
+            this.batchAccountName = null;
+            this.batchTotal = 0;
+            this.importStartedNanos = 0L;
             synchronized (this.lock) {
-                this.stage = Component.translatable("ias.cookie.multi.done", imported, total, failed, duplicate).withStyle(failed == 0 ? ChatFormatting.GREEN : ChatFormatting.YELLOW);
+                String key = skipped > 0 ? "ias.cookie.multi.done.skipped" : "ias.cookie.multi.done";
+                this.stage = Component.translatable(key, imported, total, failed, duplicate, skipped).withStyle(failed == 0 ? ChatFormatting.GREEN : ChatFormatting.YELLOW);
                 this.label = null;
                 this.error = 0.0F;
             }
@@ -840,7 +1415,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             final String text;
             if (fromPath) {
                 try {
-                    text = CookieParser.readText(Path.of(unwrapPath(source)));
+                    text = readImportText(source);
                 } catch (java.io.IOException e) {
                     createHandler.error(new FriendlyException("Unable to read cookie file: " + source, e, "ias.error.cookie.file"));
                     return;
@@ -853,167 +1428,116 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             if (records.size() > 1) {
                 List<ImportJob> jobs = new ArrayList<>(records.size());
                 for (int i = 0; i < records.size(); i++) {
-                    jobs.add(new ImportJob(Component.translatable("ias.cookie.account", i + 1).getString(), records.get(i)));
+                    addJobs(jobs, Component.translatable("ias.cookie.account", i + 1).getString(), records.get(i));
                 }
-                this.importTextRecords(jobs, 0, 0, 0, 0, 0, jobs.size(), createHandler);
+                this.beginBatch(jobs.size());
+                this.refreshBatchWidgets();
+                this.importJobs(jobs, 0, 0, 0, 0, 0, 0, jobs.size(), createHandler);
                 return;
             }
 
             List<String> tokens = TokenImporter.extractValues(text);
             if (tokens.size() > 1) {
-                this.importTokenValues(tokens, 0, 0, 0, 0, 0, createHandler);
+                List<ImportJob> jobs = new ArrayList<>(tokens.size());
+                for (int i = 0; i < tokens.size(); i++) {
+                    String token = tokens.get(i);
+                    jobs.add(new ImportJob(Component.translatable("ias.cookie.account", i + 1).getString(), token, detectType(token), tokenUsername(token)));
+                }
+                this.beginBatch(jobs.size());
+                this.refreshBatchWidgets();
+                this.importJobs(jobs, 0, 0, 0, 0, 0, 0, jobs.size(), createHandler);
                 return;
             }
 
-            try {
-                createHandler.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
-
-                CookieParser.ParsedCookies cookies = CookieParser.fromText(text);
-
-                if (this.closed) {
-                    return;
-                }
-
-                if (!cookies.refreshToken().isBlank()) {
-                    // Route through TokenImporter so tokens minted for the IAS OAuth client (for
-                    // example, a refresh token copied from an account added via Microsoft login)
-                    // are retried with the launcher client, and vice versa. A launcher-only
-                    // exchange rejects IAS-bound tokens with "Client mismatch" (400).
-                    boolean hasCookies = !cookies.cookies().isEmpty();
-                    TokenImporter.createAccountFromToken(this.crypt, cookies.refreshToken(), new CreateHandler() {
-                        @Override
-                        public boolean cancelled() {
-                            return createHandler.cancelled();
-                        }
-
-                        @Override
-                        public void stage(String stage, Object... args) {
-                            createHandler.stage(stage, args);
-                        }
-
-                        @Override
-                        public void success(MicrosoftAccount account) {
-                            createHandler.success(account);
-                        }
-
-                        @Override
-                        public void error(Throwable error) {
-                            if (!hasCookies || createHandler.cancelled()) {
-                                createHandler.error(error);
-                                return;
-                            }
-
-                            // The M.C artifact embedded in the cookies may belong to a different
-                            // OAuth client (e.g. the login.live.com web session), in which case it
-                            // cannot be redeemed here. The cookies themselves may still be a live
-                            // session, so retry through the regular cookie (OAuth/SISU) flow.
-                            AuthLog.expected(LOGGER, "Embedded refresh token failed, falling back to cookie auth", error);
-                            MSAccountFactory.createFromCookies(CookiePopupScreen.this.crypt, cookies.toCookieHeader(), createHandler)
-                                    .exceptionallyAsync(t -> {
-                                        createHandler.error(t);
-                                        return null;
-                                    }, IAS.executor());
-                        }
-                    });
-                    return;
-                }
-
-                MSAccountFactory.createFromCookies(this.crypt, cookies.toCookieHeader(), createHandler).exceptionallyAsync(t -> {
-                    createHandler.error(t);
-                    return null;
-                }, IAS.executor());
-                return;
-            } catch (FriendlyException cookieError) {
-                if (!"ias.error.cookie.invalid".equals(cookieError.key())) {
-                    createHandler.error(cookieError);
-                    return;
-                }
-            }
-
-            TokenImporter.importText(this.crypt, text, createHandler);
+            this.startCreateSingleSource(text, createHandler);
         } catch (Throwable t) {
             createHandler.error(t);
         }
     }
 
-    private void importTokenValues(List<String> tokens, int index, int imported, int failed, int duplicate, int rateLimitRetries, CreateHandler handler) {
-        if (this.closed) {
-            return;
-        }
-        if (index >= tokens.size()) {
-            this.finishCookieFileImport(imported, failed, duplicate, tokens.size());
-            return;
-        }
-
-        int number = index + 1;
-        this.stage(Component.translatable("ias.cookie.multi.progress", number, tokens.size()).withStyle(ChatFormatting.YELLOW));
-        CompletableFuture<MicrosoftAccount> future = new CompletableFuture<MicrosoftAccount>()
-                .orTimeout(MULTI_COOKIE_RECORD_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        TokenImporter.createAccountFromToken(this.crypt, tokens.get(index), new CreateHandler() {
-            @Override
-            public boolean cancelled() {
-                return CookiePopupScreen.this.closed || handler.cancelled();
+    /**
+     * Creates one account from one already-split record. Batch jobs must use this instead of
+     * {@link #startCreateFromSource} so a record can never start a nested batch that finishes
+     * the outer batch on its own.
+     */
+    private void startCreateSingleSource(String text, CreateHandler createHandler) {
+        try {
+            if (this.closed) {
+                return;
             }
 
-            @Override
-            public void stage(String stage, Object... args) {
-                if (!future.isDone()) {
-                    handler.stage(stage, args);
-                }
-            }
+            createHandler.stage(MicrosoftAccount.COOKIES_TO_MSA_MSR);
 
-            @Override
-            public void success(MicrosoftAccount account) {
-                future.complete(account);
-            }
-
-            @Override
-            public void error(Throwable error) {
-                future.completeExceptionally(error);
-            }
-        });
-
-        future.whenCompleteAsync((account, rawError) -> {
-            // See importTextRecords: never let an exception escape this unobserved callback.
+            final CookieParser.ParsedCookies cookies;
             try {
+                cookies = CookieParser.fromText(text);
+            } catch (FriendlyException cookieError) {
+                if (!"ias.error.cookie.invalid".equals(cookieError.key())) {
+                    createHandler.error(cookieError);
+                    return;
+                }
                 if (this.closed) {
                     return;
                 }
-                String label = Component.translatable("ias.cookie.account", number).getString();
-                Throwable error = this.normalizeTimeout(rawError, label);
-                if (error != null || account == null) {
-                    if (this.isRateLimited(error) && rateLimitRetries < MULTI_COOKIE_RATE_LIMIT_RETRIES) {
-                        int attempt = rateLimitRetries + 1;
-                        this.stage(Component.literal("Rate limited. Retrying account " + number + "/" + tokens.size() + " after a short wait (attempt " + attempt + "/" + MULTI_COOKIE_RATE_LIMIT_RETRIES + ")...").withStyle(ChatFormatting.YELLOW));
-                        this.scheduleTokenImport(tokens, index, imported, failed, duplicate, attempt, MULTI_COOKIE_RATE_LIMIT_DELAY_MS, handler);
-                        return;
+                TokenImporter.importText(this.crypt, text, createHandler);
+                return;
+            }
+
+            if (this.closed) {
+                return;
+            }
+
+            if (!cookies.refreshToken().isBlank()) {
+                // Route through TokenImporter so tokens minted for the IAS OAuth client (for
+                // example, a refresh token copied from an account added via Microsoft login)
+                // are retried with the launcher client, and vice versa. A launcher-only
+                // exchange rejects IAS-bound tokens with "Client mismatch" (400).
+                boolean hasCookies = !cookies.cookies().isEmpty();
+                TokenImporter.createAccountFromToken(this.crypt, cookies.refreshToken(), new CreateHandler() {
+                    @Override
+                    public boolean cancelled() {
+                        return createHandler.cancelled();
                     }
-                    AuthLog.expected(LOGGER, "Token " + number + "/" + tokens.size() + " failed during batch import", error);
-                    this.recordFailure(label, error);
-                    this.scheduleTokenImport(tokens, index + 1, imported, failed + 1, duplicate, 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
-                    return;
-                }
 
-                boolean wasDuplicate = this.storeImportedAccount(account);
-                this.scheduleTokenImport(tokens, index + 1, imported + 1, failed, duplicate + (wasDuplicate ? 1 : 0), 0, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
-            } catch (Throwable t) {
-                this.abortImport("Token batch import crashed at account " + number + "/" + tokens.size(), t);
+                    @Override
+                    public void stage(String stage, Object... args) {
+                        createHandler.stage(stage, args);
+                    }
+
+                    @Override
+                    public void success(MicrosoftAccount account) {
+                        createHandler.success(account);
+                    }
+
+                    @Override
+                    public void error(Throwable error) {
+                        if (!hasCookies || createHandler.cancelled()) {
+                            createHandler.error(error);
+                            return;
+                        }
+
+                        // The M.C artifact embedded in the cookies may belong to a different
+                        // OAuth client (e.g. the login.live.com web session), in which case it
+                        // cannot be redeemed here. The cookies themselves may still be a live
+                        // session, so retry through the regular cookie (OAuth/SISU) flow.
+                        AuthLog.expected(LOGGER, "Embedded refresh token failed, falling back to cookie auth", error);
+                        MSAccountFactory.createFromCookies(CookiePopupScreen.this.crypt, cookies.toCookieHeader(), createHandler)
+                                .exceptionallyAsync(t -> {
+                                    createHandler.error(t);
+                                    return null;
+                                }, IAS.executor());
+                    }
+                });
+                return;
             }
-        }, IAS.executor());
-    }
 
-    private void scheduleTokenImport(List<String> tokens, int index, int imported, int failed, int duplicate, int rateLimitRetries, long delayMs, CreateHandler handler) {
-        if (index >= tokens.size()) {
-            this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler);
-            return;
+            MSAccountFactory.createFromCookies(this.crypt, cookies.toCookieHeader(), createHandler).exceptionallyAsync(t -> {
+                createHandler.error(t);
+                return null;
+            }, IAS.executor());
+        } catch (Throwable t) {
+            createHandler.error(t);
         }
-        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor()).execute(() -> {
-            try {
-                this.importTokenValues(tokens, index, imported, failed, duplicate, rateLimitRetries, handler);
-            } catch (Throwable t) {
-                this.abortImport("Token batch import crashed at account " + (index + 1) + "/" + tokens.size(), t);
-            }
-        });
     }
 
     private static String unwrapPath(String path) {
@@ -1126,6 +1650,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.closed = true;
         this.importing = false;
         this.errored = false;
+        this.skipRequestedIndex = 0;
+        this.pendingJobIndex = 0;
+        this.activeRecordFuture = null;
+        this.activeRecordCancelled = null;
+        this.importStartedNanos = 0L;
         //$set_screen 'this.minecraft' 'this.parent'
         this.minecraft.gui.setScreen(this.parent);
     }
@@ -1161,17 +1690,21 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             IStonecutter.renderMultilineLabelCentered(this.cryptPasswordTip, graphics, this.width, this.height + 40);
             pose.popMatrix();
         } else if (this.importing || this.errored) {
-            synchronized (this.lock) {
-                if (this.label == null) {
-                    Component component = Objects.requireNonNullElse(this.stage, Component.empty());
-                    this.label = MultiLineLabel.create(this.font, component, 230);
-                    this.minecraft.getNarrator().saySystemQueued(component);
+            if (this.importing && this.batchTotal > 1) {
+                this.renderBatchStatus(graphics);
+            } else {
+                synchronized (this.lock) {
+                    if (this.label == null) {
+                        Component component = Objects.requireNonNullElse(this.stage, Component.empty());
+                        this.label = MultiLineLabel.create(this.font, component, 230);
+                        this.minecraft.getNarrator().saySystemQueued(component);
+                    }
+                    int centerY = this.height / 2;
+                    int labelY = this.errored
+                            ? (centerY - 6) - (this.label.getLineCount() * 9) / 2
+                            : (this.height - this.label.getLineCount() * 9) / 2 - 4;
+                    IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, labelY);
                 }
-                int centerY = this.height / 2;
-                int labelY = this.errored
-                        ? (centerY - 6) - (this.label.getLineCount() * 9) / 2
-                        : (this.height - this.label.getLineCount() * 9) / 2 - 4;
-                IStonecutter.renderMultilineLabelCentered(this.label, graphics, this.width / 2, labelY);
             }
 
             if (Float.isFinite(this.error)) {
@@ -1230,6 +1763,72 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 /*graphics.drawCenteredString(this.font, inputTitle, this.width / 2, centerY - 54, 0xFF_FF_FF_FF);*/
             }
         }
+    }
+
+    /**
+     * Renders the live batch status: account number, elapsed times, type/user and counters.
+     */
+    //? if >=26.1 {
+    private void renderBatchStatus(GuiGraphicsExtractor graphics) {
+    //?} else
+    /*private void renderBatchStatus(GuiGraphics graphics) {*/
+        List<Component> lines = this.batchStatusLines();
+        List<MultiLineLabel> labels = new ArrayList<>(lines.size());
+        int totalHeight = 0;
+        for (Component line : lines) {
+            MultiLineLabel label = MultiLineLabel.create(this.font, line, STATUS_WIDTH);
+            labels.add(label);
+            totalHeight += label.getLineCount() * 9 + 2;
+        }
+        int y = (this.height - totalHeight) / 2 - 6;
+        for (MultiLineLabel label : labels) {
+            IStonecutter.renderMultilineLabelCentered(label, graphics, this.width / 2, y);
+            y += label.getLineCount() * 9 + 2;
+        }
+    }
+
+    private List<Component> batchStatusLines() {
+        List<Component> lines = new ArrayList<>(4);
+        long now = System.nanoTime();
+        long totalNanos = this.batchStartedNanos > 0L ? now - this.batchStartedNanos : 0L;
+        long accountNanos = this.accountStartedNanos > 0L ? now - this.accountStartedNanos : this.accountElapsedNanos;
+        int total = Math.max(1, this.batchTotal);
+        lines.add(Component.translatable("ias.cookie.batch.progress", Math.max(1, this.batchIndex), total,
+                formatElapsed(totalNanos), formatElapsed(accountNanos)).withStyle(ChatFormatting.YELLOW));
+
+        ImportJob job = this.batchJob;
+        if (job != null) {
+            MutableComponent info = Component.literal(job.label()).withStyle(ChatFormatting.GRAY)
+                    .append(Component.literal(" · ").withStyle(ChatFormatting.DARK_GRAY))
+                    .append(Component.translatable(job.typeKey()).withStyle(ChatFormatting.AQUA));
+            String username = this.batchAccountName != null && !this.batchAccountName.isBlank()
+                    ? this.batchAccountName
+                    : job.usernameHint();
+            if (username != null && !username.isBlank()) {
+                info.append(Component.literal(" · ").withStyle(ChatFormatting.DARK_GRAY))
+                        .append(Component.translatable("ias.cookie.batch.user", username).withStyle(ChatFormatting.WHITE));
+            }
+            lines.add(info);
+        }
+
+        lines.add(this.stage);
+        lines.add(Component.translatable("ias.cookie.batch.counts", this.batchImported, this.batchFailed,
+                this.batchDuplicate, this.batchSkipped).withStyle(ChatFormatting.GRAY));
+        return lines;
+    }
+
+    /**
+     * Formats a nanosecond duration as {@code Hh MMm SSs}, {@code Mm SSs} or {@code Ss}.
+     */
+    private static String formatElapsed(long nanos) {
+        long seconds = Math.max(0L, TimeUnit.NANOSECONDS.toSeconds(nanos));
+        long minutes = seconds / 60L;
+        long rest = seconds % 60L;
+        if (minutes >= 60L) {
+            long hours = minutes / 60L;
+            return String.format(Locale.ROOT, "%dh %02dm %02ds", hours, minutes % 60L, rest);
+        }
+        return minutes > 0L ? String.format(Locale.ROOT, "%dm %02ds", minutes, rest) : rest + "s";
     }
 
     //? if >=26.1 {
@@ -1376,6 +1975,9 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 this.stage = component;
                 this.label = null;
             }
+            if (this.importing && this.batchTotal > 1) {
+                this.minecraft.getNarrator().saySystemQueued(component);
+            }
         });
     }
 
@@ -1416,6 +2018,10 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             if (this.closed) {
                 return;
             }
+            AtomicBoolean cancelled = this.activeRecordCancelled;
+            if (cancelled != null) {
+                cancelled.set(true);
+            }
             synchronized (this.lock) {
                 this.stage = component;
                 this.label = null;
@@ -1424,6 +2030,16 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.importing = false;
             this.errored = true;
             this.showFailures = false;
+            this.batchTotal = 0;
+            this.batchJob = null;
+            this.batchAccountName = null;
+            this.skipRequestedIndex = 0;
+            this.pendingJobIndex = 0;
+            this.activeRecordFuture = null;
+            this.activeRecordCancelled = null;
+            this.accountStartedNanos = 0L;
+            this.accountElapsedNanos = 0L;
+            this.importStartedNanos = 0L;
             //? if >=1.21.11 {
             this.init(this.width, this.height);
             //?} else
@@ -1431,10 +2047,19 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         });
     }
 
-    private record ImportJob(String label, String source) {
+    private record ImportJob(String label, String source, String typeKey, String usernameHint) {
     }
 
     private record ImportFailure(String label, Component reason) {
+    }
+
+    /**
+     * Marker error used when the user skips the current account.
+     */
+    private static final class ImportSkippedException extends RuntimeException {
+        private ImportSkippedException() {
+            super("Import skipped by user.", null, false, false);
+        }
     }
 
     private Screen currentScreen() {
