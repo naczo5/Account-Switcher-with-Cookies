@@ -425,6 +425,16 @@ public final class AccountScreen extends Screen {
                 .bounds(this.width / 2 + 50 + 4, this.height - 24, 100, 20)
                 .build());
 
+        // Small GitHub shortcut in the otherwise free bottom-right corner.
+        // Hidden on very narrow windows where it would collide with the action rows.
+        if (this.width >= 368) {
+            this.addRenderableWidget(Button.builder(Component.literal("\u2605"),
+                            btn -> IStonecutter.openUrl("https://github.com/naczo5/Account-Switcher-with-Cookies"))
+                    .bounds(this.width - 24, this.height - 24, 20, 20)
+                    .tooltip(Tooltip.create(Component.translatable("ias.github.tip")))
+                    .build());
+        }
+
         // Add account list.
         int listWidth = Math.min(this.width, 260);
         int listTop = narrowTop ? 56 : 34;

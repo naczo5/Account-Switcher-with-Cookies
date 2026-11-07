@@ -8,11 +8,15 @@ This is the operating guide for agents and contributors working in this reposito
 - Adds cookie-alt / `M.C...` refresh-token / Minecraft access-token (MCA JWT) importing, Localts marketplace integration, batch importing, and multi-version builds.
 - License: LGPL-3.0. Keep existing copyright headers intact.
 
-## Supported targets
+## Maintained versions
 
-- **Active modern targets** (built by `./gradlew assemble`): **26.3**, **26.2**, **1.21.11** (Fabric).
+The maintained versions are **1.8.9, 1.21.11, 26.2, and 26.3**.
+
+- **1.8.9** is a first-class target with the same feature priority as the modern versions.
+- The modern targets (1.21.11, 26.2, 26.3) and 1.8.9 should be developed to be **as close as possible in functionality**. When adding or changing an import/account feature, port it to both the modern screens and the standalone 1.8.9 implementation unless there is a documented platform limitation.
 - **Forge 1.8.9** is a standalone project in `forge-1.8/` and is built separately.
-- **Legacy targets** (1.18.2 through 26.1.2) may provide overrides under `src/_legacy/<mcver>/...`; some newer legacy versions build directly from `src/main` + `src/_legacy/_shared`. They are only built with `-Dru.vidtu.ias.legacy=true` (`./compileall legacy`).
+- **Legacy targets** (1.18.2 through 26.1.2) may provide overrides under `src/_legacy/<mcver>/...`; some newer legacy versions build directly from `src/main` + `src/_legacy/_shared`. They are only built with `-Dru.vidtu.ias.legacy=true` (`./compileall legacy`). They are not part of the maintained feature-parity set.
+- The maintained version set may move when a new Minecraft version releases; update `dev/versions/versions_beta.txt` / `versions_active.txt` and this section together.
 - The active Stonecutter version is `26.3-fabric` in `stonecutter.gradle.kts`. `versions/` contains generated virtual projects; never edit `versions/*/build`.
 
 ## Source map

@@ -455,10 +455,12 @@ public class GuiCookieImport extends GuiScreen {
                 ok.add(profile);
                 batchImported = ok.size();
                 batchUser = profile.name;
+                postStatus(I18n.format("ias.cookie.batch.imported", profile.name));
             } else {
                 failures.add(EnumChatFormatting.RED + ("Account " + (idx + 1)) + EnumChatFormatting.GRAY + ": "
                         + formatError(lastError != null ? lastError : new Exception(I18n.format("ias.error.cookie.invalid"))));
                 batchFailed = failures.size();
+                postStatus(I18n.format("ias.cookie.batch.failed"));
             }
             if (accountStartedNanos > 0L) {
                 accountElapsedNanos = System.nanoTime() - accountStartedNanos;
@@ -680,6 +682,20 @@ public class GuiCookieImport extends GuiScreen {
             return String.format(Locale.ROOT, "%dh %02dm %02ds", hours, minutes % 60L, rest);
         }
         return minutes > 0L ? String.format(Locale.ROOT, "%dm %02ds", minutes, rest) : rest + "s";
+    }
+
+    /**
+     * Formats a per-account duration with sub-second precision, so fast accounts don't all show 0s.
+     */
+    private static String formatAccountElapsed(long nanos) {
+        long millis = Math.max(0L, nanos / 1_000_000L);
+        if (millis < 1000L) {
+            return millis + "ms";
+        }
+        if (millis < 10000L) {
+            return String.format(Locale.ROOT, "%.1fs", millis / 1000.0D);
+        }
+        return formatElapsed(nanos);
     }
 
     private static String detectType(String text) {
@@ -1229,10 +1245,12 @@ public class GuiCookieImport extends GuiScreen {
                         ok.addAll(profiles);
                         batchImported = ok.size();
                         batchUser = profiles.get(profiles.size() - 1).name;
+                        postStatus(I18n.format("ias.cookie.batch.imported", batchUser));
                     } else {
                         failed++;
                         batchFailed = failed;
                         failures.add(failureText(path, 0, lastError != null ? lastError : new Exception(I18n.format("ias.error.cookie.invalid"))));
+                        postStatus(I18n.format("ias.cookie.batch.failed"));
                     }
                     if (accountStartedNanos > 0L) {
                         accountElapsedNanos = System.nanoTime() - accountStartedNanos;
@@ -1576,7 +1594,7 @@ public class GuiCookieImport extends GuiScreen {
         long accountNanos = accountStartedNanos > 0L ? now - accountStartedNanos : accountElapsedNanos;
         int total = Math.max(1, batchTotal);
         drawCenteredString(fontRendererObj, I18n.format("ias.cookie.batch.progress",
-                        Math.max(1, batchIndex), total, formatElapsed(totalNanos), formatElapsed(accountNanos)),
+                        Math.max(1, batchIndex), total, formatElapsed(totalNanos), formatAccountElapsed(accountNanos)),
                 centerX, height / 2 - 24, 0xFFFF55);
 
         String info = batchLabel == null ? "" : batchLabel;

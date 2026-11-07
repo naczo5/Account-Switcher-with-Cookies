@@ -16,6 +16,7 @@ import net.minecraft.client.gui.GuiSlot;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.resources.I18n;
 import org.apache.commons.lang3.StringUtils;
+import org.lwjgl.Sys;
 import org.lwjgl.input.Keyboard;
 import the_fireplace.ias.account.AlreadyLoggedInException;
 import the_fireplace.ias.account.ExtendedAccountData;
@@ -58,6 +59,7 @@ public class GuiAccountSelector extends GuiScreen {
 	private GuiButton logout;
 	private GuiButton checkHypixel;
 	private GuiButton manageProfile;
+	private GuiButton github;
 	//Search
 	private String query;
 	private GuiTextField search;
@@ -99,6 +101,14 @@ public class GuiAccountSelector extends GuiScreen {
 		this.buttonList.add(loginoffline = new GuiButton(2, this.width / 2 - 154 - 10, this.height - 28, 110, 20, I18n.format("ias.login")+" "+I18n.format("ias.offline")));
 		this.buttonList.add(new GuiButton(3, this.width / 2 + 4 + 50, this.height - 28, 110, 20, I18n.format("gui.cancel")));
 		this.buttonList.add(delete = new GuiButton(4, this.width / 2 - 50, this.height - 28, 100, 20, I18n.format("ias.delete")));
+		// Small GitHub shortcut in the otherwise free bottom-right corner.
+		// Hidden on very narrow windows where it would collide with the action rows.
+		if (this.width >= 384) {
+			this.github = new GuiButton(17, this.width - 24, this.height - 28, 20, 20, "\u2605");
+			this.buttonList.add(this.github);
+		} else {
+			this.github = null;
+		}
 		//Direct Play shortcuts (parity with modern AccountScreen). Hidden on narrow
 		// windows where they would overlap Bulk Import.
 		if (this.width >= 550) {
@@ -211,6 +221,10 @@ public class GuiAccountSelector extends GuiScreen {
 				this.drawString(fontRendererObj, JavaTools.getJavaCompat().getFormattedDate(), width-8-61, height/2-64-15+39, -1);
 			}
 		}
+		if (github != null && par1 >= github.xPosition && par1 < github.xPosition + github.width
+				&& par2 >= github.yPosition && par2 < github.yPosition + github.height) {
+			hoveredTooltip = Collections.singletonList(I18n.format("ias.github.tip"));
+		}
 		if (hoveredTooltip != null && !hoveredTooltip.isEmpty()) {
 			this.drawHoveringText(hoveredTooltip, par1, par2);
 		}
@@ -244,6 +258,8 @@ public class GuiAccountSelector extends GuiScreen {
 				openImportFolder();
 			}else if(button.id == 16){
 				mc.displayGuiScreen(new GuiProviders(this));
+			}else if(button.id == 17){
+				openGithub();
 			}else if(button.id == 11){
 				mc.displayGuiScreen(new GuiManageProfile(this, queriedaccounts.get(selectedAccountIndex)));
 			}else if(button.id == 12){
@@ -271,6 +287,14 @@ public class GuiAccountSelector extends GuiScreen {
 	private void escape(){
 		mc.displayGuiScreen(null);
 	}
+	/** Opens the project repository in the system browser. */
+	private void openGithub(){
+		try {
+			Sys.openURL("https://github.com/naczo5/Account-Switcher-with-Cookies");
+		} catch (Throwable ignored) {
+		}
+	}
+
 	/** Restores the account Prism/the launcher selected when the game started. */
 	private void logout(){
 		try {

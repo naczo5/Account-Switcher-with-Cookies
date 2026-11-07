@@ -236,6 +236,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
     private volatile long accountElapsedNanos;
 
     /**
+     * {@link System#nanoTime()} at which the next delayed account/retry attempt starts, or {@code 0}.
+     */
+    private volatile long batchNextStartNanos;
+
+    /**
      * Total number of jobs in the current batch (including unreadable files).
      */
     private volatile int batchTotal;
@@ -814,6 +819,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.batchStartedNanos = this.importStartedNanos > 0L ? this.importStartedNanos : System.nanoTime();
         this.accountStartedNanos = 0L;
         this.accountElapsedNanos = 0L;
+        this.batchNextStartNanos = 0L;
         this.batchTotal = Math.max(0, total);
         this.batchIndex = 0;
         this.batchImported = 0;
@@ -891,6 +897,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 this.updateBatchProgress(skippedNumber, imported, failed, skipped + 1, duplicate);
                 this.accountStartedNanos = 0L;
                 this.accountElapsedNanos = 0L;
+                this.batchNextStartNanos = 0L;
                 this.stage(Component.translatable("ias.cookie.batch.skipped", skippedNumber, Math.max(total, jobs.size())).withStyle(ChatFormatting.YELLOW));
                 this.scheduleJobImport(jobs, index + 1, imported, failed, skipped + 1, duplicate, 0, total, MULTI_COOKIE_SKIP_DELAY_MS, handler);
                 return;
@@ -907,6 +914,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.batchAccountName = null;
         this.accountStartedNanos = System.nanoTime();
         this.accountElapsedNanos = 0L;
+        this.batchNextStartNanos = 0L;
         this.stage(Component.translatable(MicrosoftAccount.INITIALIZING).withStyle(ChatFormatting.YELLOW));
         // A record that never reports success or failure must not stall the whole batch.
         CompletableFuture<MicrosoftAccount> future = new CompletableFuture<MicrosoftAccount>()
@@ -974,6 +982,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                     AuthLog.expected(LOGGER, "Cookie account " + number + "/" + jobCount + " failed", error);
                     this.recordFailure(job.label(), error);
                     this.updateBatchProgress(number, imported, failed + 1, skipped, duplicate);
+                    this.stage(Component.translatable("ias.cookie.batch.failed").withStyle(ChatFormatting.RED));
                     this.scheduleJobImport(jobs, index + 1, imported, failed + 1, skipped, duplicate, 0, total, MULTI_COOKIE_IMPORT_DELAY_MS, handler);
                     return;
                 }
@@ -982,6 +991,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                 this.batchAccountName = account.name();
                 int nextDuplicate = duplicate + (wasDuplicate ? 1 : 0);
                 this.updateBatchProgress(number, imported + 1, failed, skipped, nextDuplicate);
+                this.stage(Component.translatable("ias.cookie.batch.imported", account.name()).withStyle(ChatFormatting.GREEN));
                 if (jobs.size() == 1) {
                     // One account should enter the session, matching Add / provider import.
                     this.minecraft.execute(() -> {
@@ -1006,9 +1016,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
                                    int rateLimitRetries, int total, long delayMs, CreateHandler handler) {
         this.pendingJobIndex = index < jobs.size() ? index + 1 : 0;
         if (index >= jobs.size()) {
+            this.batchNextStartNanos = 0L;
             this.importJobs(jobs, index, imported, failed, skipped, duplicate, rateLimitRetries, total, handler);
             return;
         }
+        this.batchNextStartNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, delayMs));
         CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS, IAS.executor()).execute(() -> {
             try {
                 this.importJobs(jobs, index, imported, failed, skipped, duplicate, rateLimitRetries, total, handler);
@@ -1395,6 +1407,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.batchJob = null;
             this.batchAccountName = null;
             this.batchTotal = 0;
+            this.batchNextStartNanos = 0L;
             this.importStartedNanos = 0L;
             synchronized (this.lock) {
                 String key = skipped > 0 ? "ias.cookie.multi.done.skipped" : "ias.cookie.multi.done";
@@ -1659,6 +1672,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         this.activeRecordFuture = null;
         this.activeRecordCancelled = null;
         this.importStartedNanos = 0L;
+        this.batchNextStartNanos = 0L;
         //$set_screen 'this.minecraft' 'this.parent'
         this.minecraft.gui.setScreen(this.parent);
     }
@@ -1797,8 +1811,17 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
         long totalNanos = this.batchStartedNanos > 0L ? now - this.batchStartedNanos : 0L;
         long accountNanos = this.accountStartedNanos > 0L ? now - this.accountStartedNanos : this.accountElapsedNanos;
         int total = Math.max(1, this.batchTotal);
+        Component timing;
+        if (this.accountStartedNanos > 0L) {
+            timing = Component.translatable("ias.cookie.batch.onAccount", formatAccountElapsed(accountNanos));
+        } else if (this.batchNextStartNanos > 0L) {
+            timing = Component.translatable("ias.cookie.batch.startingIn",
+                    formatElapsed(Math.max(0L, this.batchNextStartNanos - now)));
+        } else {
+            timing = Component.translatable("ias.cookie.batch.onAccount", formatAccountElapsed(accountNanos));
+        }
         lines.add(Component.translatable("ias.cookie.batch.progress", Math.max(1, this.batchIndex), total,
-                formatElapsed(totalNanos), formatElapsed(accountNanos)).withStyle(ChatFormatting.YELLOW));
+                formatElapsed(totalNanos), timing).withStyle(ChatFormatting.YELLOW));
 
         ImportJob job = this.batchJob;
         if (job != null) {
@@ -1833,6 +1856,20 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             return String.format(Locale.ROOT, "%dh %02dm %02ds", hours, minutes % 60L, rest);
         }
         return minutes > 0L ? String.format(Locale.ROOT, "%dm %02ds", minutes, rest) : rest + "s";
+    }
+
+    /**
+     * Formats a per-account duration with sub-second precision, so fast accounts don't all show 0s.
+     */
+    private static String formatAccountElapsed(long nanos) {
+        long millis = Math.max(0L, TimeUnit.NANOSECONDS.toMillis(nanos));
+        if (millis < 1000L) {
+            return millis + "ms";
+        }
+        if (millis < 10000L) {
+            return String.format(Locale.ROOT, "%.1fs", millis / 1000.0D);
+        }
+        return formatElapsed(nanos);
     }
 
     //? if >=26.1 {
@@ -2043,6 +2080,7 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             this.activeRecordCancelled = null;
             this.accountStartedNanos = 0L;
             this.accountElapsedNanos = 0L;
+            this.batchNextStartNanos = 0L;
             this.importStartedNanos = 0L;
             //? if >=1.21.11 {
             this.init(this.width, this.height);
