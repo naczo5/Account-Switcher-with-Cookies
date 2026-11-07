@@ -65,6 +65,7 @@ public class GuiCookieImport extends GuiScreen {
     private volatile long batchStartedNanos;
     private volatile long accountStartedNanos;
     private volatile long accountElapsedNanos;
+    private volatile long batchNextStartNanos;
     private volatile String batchLabel = "";
     private volatile String batchType = "ias.cookie.batch.type.unknown";
     private volatile String batchUser = "";
@@ -425,7 +426,7 @@ public class GuiCookieImport extends GuiScreen {
                         rateLimitRetries++;
                         postStatus(I18n.format("ias.error.rateLimited"));
                         try {
-                            Thread.sleep(30000L);
+                            countdownSleep(30000L);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             if (closed) {
@@ -468,7 +469,7 @@ public class GuiCookieImport extends GuiScreen {
             }
             if (idx + 1 < total) {
                 try {
-                    Thread.sleep(6000L);
+                    countdownSleep(6000L);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     if (closed) {
@@ -577,6 +578,7 @@ public class GuiCookieImport extends GuiScreen {
         batchDuplicate = 0;
         accountStartedNanos = 0L;
         accountElapsedNanos = 0L;
+        batchNextStartNanos = 0L;
         batchLabel = "";
         batchType = "ias.cookie.batch.type.unknown";
         batchUser = "";
@@ -591,6 +593,7 @@ public class GuiCookieImport extends GuiScreen {
         batchUser = user == null ? "" : user;
         accountStartedNanos = System.nanoTime();
         accountElapsedNanos = 0L;
+        batchNextStartNanos = 0L;
     }
 
     private void setBatchInfo(String text) {
@@ -637,6 +640,7 @@ public class GuiCookieImport extends GuiScreen {
      * Brief pause so the "Skipped account" status is visible before the next job starts.
      */
     private void skipDelay() {
+        batchNextStartNanos = System.nanoTime() + 1_000_000_000L;
         try {
             Thread.sleep(1000L);
         } catch (InterruptedException ie) {
@@ -645,6 +649,20 @@ public class GuiCookieImport extends GuiScreen {
             } else {
                 Thread.interrupted();
             }
+        } finally {
+            batchNextStartNanos = 0L;
+        }
+    }
+
+    /**
+     * Sleeps while exposing a countdown for the render thread.
+     */
+    private void countdownSleep(long millis) throws InterruptedException {
+        batchNextStartNanos = System.nanoTime() + Math.max(0L, millis) * 1_000_000L;
+        try {
+            Thread.sleep(millis);
+        } finally {
+            batchNextStartNanos = 0L;
         }
     }
 
@@ -658,6 +676,7 @@ public class GuiCookieImport extends GuiScreen {
         batchStartedNanos = 0L;
         accountStartedNanos = 0L;
         accountElapsedNanos = 0L;
+        batchNextStartNanos = 0L;
         batchLabel = "";
         batchType = "ias.cookie.batch.type.unknown";
         batchUser = "";
@@ -1102,7 +1121,7 @@ public class GuiCookieImport extends GuiScreen {
                         if (isRateLimited(t) && rateLimitRetries < 2) {
                             rateLimitRetries++;
                             try {
-                                Thread.sleep(30000L);
+                                countdownSleep(30000L);
                             } catch (InterruptedException ie) {
                                 Thread.currentThread().interrupt();
                                 if (closed) {
@@ -1127,7 +1146,7 @@ public class GuiCookieImport extends GuiScreen {
                     }
                     if (i + 1 < tokens.size()) {
                         try {
-                            Thread.sleep(6000L);
+                            countdownSleep(6000L);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             if (closed) {
@@ -1215,7 +1234,7 @@ public class GuiCookieImport extends GuiScreen {
                                 rateLimitRetries++;
                                 postStatus(I18n.format("ias.error.rateLimited"));
                                 try {
-                                    Thread.sleep(30000L);
+                                    countdownSleep(30000L);
                                 } catch (InterruptedException ie) {
                                     Thread.currentThread().interrupt();
                                     if (closed) {
@@ -1258,7 +1277,7 @@ public class GuiCookieImport extends GuiScreen {
                     }
                     if (idx + 1 < total) {
                         try {
-                            Thread.sleep(6000L);
+                            countdownSleep(6000L);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             if (closed) {
@@ -1593,8 +1612,17 @@ public class GuiCookieImport extends GuiScreen {
         long totalNanos = batchStartedNanos > 0L ? now - batchStartedNanos : 0L;
         long accountNanos = accountStartedNanos > 0L ? now - accountStartedNanos : accountElapsedNanos;
         int total = Math.max(1, batchTotal);
+        String timing;
+        if (accountStartedNanos > 0L) {
+            timing = I18n.format("ias.cookie.batch.onAccount", formatAccountElapsed(accountNanos));
+        } else if (batchNextStartNanos > 0L) {
+            timing = I18n.format("ias.cookie.batch.startingIn",
+                    formatElapsed(Math.max(0L, batchNextStartNanos - now)));
+        } else {
+            timing = I18n.format("ias.cookie.batch.onAccount", formatAccountElapsed(accountNanos));
+        }
         drawCenteredString(fontRendererObj, I18n.format("ias.cookie.batch.progress",
-                        Math.max(1, batchIndex), total, formatElapsed(totalNanos), formatAccountElapsed(accountNanos)),
+                        Math.max(1, batchIndex), total, formatElapsed(totalNanos), timing),
                 centerX, height / 2 - 24, 0xFFFF55);
 
         String info = batchLabel == null ? "" : batchLabel;
