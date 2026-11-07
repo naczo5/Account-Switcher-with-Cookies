@@ -1201,7 +1201,11 @@ final class CookiePopupScreen extends Screen implements CreateHandler {
             String lower = stripped.toLowerCase(Locale.ROOT);
             for (String prefix : new String[]{"# username:", "# user:", "# email:", "# login:", "# account:"}) {
                 if (lower.startsWith(prefix)) {
-                    String value = cleanMetadataUsername(stripped.substring(prefix.length()));
+                    String rest = stripped.substring(prefix.length());
+                    if (TokenImporter.looksLikeImportToken(rest.strip())) {
+                        continue;
+                    }
+                    String value = cleanMetadataUsername(rest);
                     if (value != null) {
                         return value;
                     }

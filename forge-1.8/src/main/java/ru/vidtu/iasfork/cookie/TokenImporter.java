@@ -3,6 +3,7 @@ package ru.vidtu.iasfork.cookie;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -30,7 +31,7 @@ public final class TokenImporter {
         Matcher matcher = MC_TOKEN_JSON.matcher(text);
         while (matcher.find()) {
             String token = normalizeToken(matcher.group(1));
-            if (!token.isEmpty()) {
+            if (looksLikeImportToken(token)) {
                 tokens.add(token);
             }
         }
@@ -48,17 +49,42 @@ public final class TokenImporter {
         if (cleaned.size() > 1) {
             for (String line : cleaned) {
                 String token = normalizeToken(line);
-                if (!token.isEmpty()) {
+                if (looksLikeImportToken(token)) {
                     tokens.add(token);
                 }
             }
         } else {
             String token = normalizeToken(text);
-            if (!token.isEmpty()) {
+            if (looksLikeImportToken(token)) {
                 tokens.add(token);
             }
         }
         return new ArrayList<String>(tokens);
+    }
+
+    /**
+     * Whether the string is a usable Minecraft/Microsoft token rather than a cookie row or metadata.
+     * Mirrors the modern importer so cookie/metadata payloads are not split into fake tokens.
+     */
+    public static boolean looksLikeImportToken(String token) {
+        if (token == null) {
+            return false;
+        }
+        String value = token.trim();
+        if (value.isEmpty() || value.contains("\t") || value.startsWith("#")) {
+            return false;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (lower.contains("thanks for choosing") || lower.contains("netscape") || lower.contains("http cookie file")) {
+            return false;
+        }
+        if (looksLikeMinecraftAccessToken(value)) {
+            return true;
+        }
+        if (value.startsWith("M.C") || value.startsWith("M.") || value.startsWith("0.")) {
+            return value.length() > 40;
+        }
+        return value.length() >= 80 && value.matches("[A-Za-z0-9._\\-+=/*!$]+");
     }
 
     public static CookieAuth.MinecraftProfile importSingleToken(String token) throws Exception {
