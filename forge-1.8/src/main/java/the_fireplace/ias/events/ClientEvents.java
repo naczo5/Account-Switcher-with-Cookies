@@ -2,6 +2,7 @@ package the_fireplace.ias.events;
 
 import com.github.mrebhan.ingameaccountswitcher.tools.Config;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiMultiplayer;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
@@ -25,6 +26,7 @@ import java.lang.reflect.Field;
  */
 public class ClientEvents {
     private static final int BUTTON_ID = 20;
+    private static final int TEXT_BUTTON_ID = 21;
 
     @SubscribeEvent
     public void guiEvent(GuiScreenEvent.InitGuiEvent.Post event) {
@@ -36,6 +38,9 @@ public class ClientEvents {
         if (MainMenuScreens.isMainMenu(gui)) {
             event.buttonList.add(new GuiButtonWithImage(BUTTON_ID, gui.width / 2 + 104,
                     (gui.height / 4 + 48) + 72 + 12, 20, 20, ""));
+            // A text shortcut is easier to find on custom title screens where the
+            // image button can be hidden behind another mod's widgets.
+            event.buttonList.add(new GuiButton(TEXT_BUTTON_ID, 8, 8, 90, 20, I18n.format("ias.accounts.button")));
         } else if (gui instanceof GuiMultiplayer) {
             event.buttonList.add(new GuiButtonWithImage(BUTTON_ID, gui.width / 2 + 158, gui.height - 30, 20, 20, ""));
         }
@@ -43,7 +48,7 @@ public class ClientEvents {
 
     @SubscribeEvent
     public void onClick(GuiScreenEvent.ActionPerformedEvent event) {
-        if (event.button.id == BUTTON_ID && canOpenFromScreen(event.gui)) {
+        if ((event.button.id == BUTTON_ID || event.button.id == TEXT_BUTTON_ID) && canOpenFromScreen(event.gui)) {
             openAccountSwitcher();
         }
     }

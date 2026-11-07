@@ -2,6 +2,7 @@ ias.loggedinas=You are currently logged in as
 ias.selectaccount=Select an account
 ias.offlinemode=You are currently in offline mode. You can only join offline mode servers.
 ias.addaccount=Add Account
+ias.accounts.button=Accounts
 ias.github.tip=Open the CookieIAS GitHub repository - stars are appreciated!
 ias.login=Login
 ias.offline=(Offline Mode)
