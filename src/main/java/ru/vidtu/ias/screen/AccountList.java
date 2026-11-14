@@ -633,6 +633,13 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
      * Deletes every stored account, regardless of the current search filter.
      */
     void deleteAll() {
+        // Stop background checks so they don't keep working on removed accounts.
+        if (this.usernameCheckInProgress()) {
+            this.cancelUsernameCheck();
+        }
+        if (this.hypixelCheckInProgress()) {
+            this.cancelHypixelCheck();
+        }
         for (Account account : IASStorage.ACCOUNTS) {
             AccountList.clearSkin(account.uuid());
             AccountList.clearNameChange(account.uuid());

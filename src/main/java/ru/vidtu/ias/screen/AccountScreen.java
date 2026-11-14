@@ -33,6 +33,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import ru.vidtu.ias.platform.IInput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -480,15 +481,10 @@ public final class AccountScreen extends Screen {
         if (this.list == null || IASStorage.ACCOUNTS.isEmpty()) {
             return;
         }
-        final Screen confirm = new ConfirmPopupScreen(this,
-                Component.translatable("ias.accounts.deleteAll.confirm.title"),
+        // DeletePopupScreen closes back to this screen after the handler runs.
+        final Screen confirm = new DeletePopupScreen(this,
                 Component.translatable("ias.accounts.deleteAll.confirm", IASStorage.ACCOUNTS.size()),
-                Component.translatable("ias.accounts.deleteAll.confirm.button"),
-                () -> {
-                    //$ set_screen 'this.minecraft' 'this'
-                    this.minecraft.gui.setScreen(this);
-                    this.list.deleteAll();
-                });
+                () -> this.list.deleteAll());
         //$ set_screen 'this.minecraft' confirm
         this.minecraft.gui.setScreen(confirm);
     }
@@ -667,7 +663,11 @@ public final class AccountScreen extends Screen {
      */
     void updateSelected() {
         if (this.deleteAll != null) {
-            this.deleteAll.active = !IASStorage.ACCOUNTS.isEmpty();
+            boolean hasAccounts = !IASStorage.ACCOUNTS.isEmpty();
+            this.deleteAll.active = hasAccounts;
+            // Red only while usable, so the disabled state reads as grey.
+            MutableComponent label = Component.translatable("ias.accounts.deleteAll");
+            this.deleteAll.setMessage(hasAccounts ? label.withStyle(ChatFormatting.RED) : label);
         }
 
         // Get the selected.

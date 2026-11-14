@@ -336,7 +336,13 @@ public class GuiAccountSelector extends GuiScreen {
 	@Override
 	public void confirmClicked(boolean result, int id){
 		if (id == 18 && result) {
+			// Stop any running Hypixel check so it cannot write results for removed accounts.
+			hypixelCheckId++;
+			hypixelCheckRunning = false;
 			AltDatabase.getInstance().getAlts().clear();
+			hypixelResults.clear();
+			hypixelPhases.clear();
+			saveHypixelResults();
 			selectedAccountIndex = 0;
 			Config.save();
 			updateQueried();
@@ -670,6 +676,8 @@ public class GuiAccountSelector extends GuiScreen {
 		delete.enabled = hasAccounts;
 		if (deleteAll != null) {
 			deleteAll.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
+			// Keep the default disabled (grey) label color instead of forcing red.
+			deleteAll.packedFGColour = deleteAll.enabled ? 0xFF5555 : 0;
 		}
 		edit.enabled = hasAccounts;
 		reloadskins.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
