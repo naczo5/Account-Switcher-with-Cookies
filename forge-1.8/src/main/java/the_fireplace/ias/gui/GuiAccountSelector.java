@@ -14,6 +14,7 @@ import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiSelectWorld;
 import net.minecraft.client.gui.GuiSlot;
 import net.minecraft.client.gui.GuiTextField;
+import net.minecraft.client.gui.GuiYesNo;
 import net.minecraft.client.resources.I18n;
 import org.apache.commons.lang3.StringUtils;
 import org.lwjgl.Sys;
@@ -60,6 +61,7 @@ public class GuiAccountSelector extends GuiScreen {
 	private GuiButton checkHypixel;
 	private GuiButton manageProfile;
 	private GuiButton github;
+	private GuiButton deleteAll;
 	//Search
 	private String query;
 	private GuiTextField search;
@@ -108,6 +110,15 @@ public class GuiAccountSelector extends GuiScreen {
 			this.buttonList.add(this.github);
 		} else {
 			this.github = null;
+		}
+		// "Delete All" in the bottom-left corner, kept apart from the per-account buttons.
+		// Hidden on narrow windows where it would collide with the bottom row.
+		if (this.width >= 544) {
+			this.deleteAll = new GuiButton(18, 4, this.height - 28, 100, 20, I18n.format("ias.accounts.deleteAll"));
+			this.deleteAll.packedFGColour = 0xFF5555;
+			this.buttonList.add(this.deleteAll);
+		} else {
+			this.deleteAll = null;
 		}
 		//Direct Play shortcuts (parity with modern AccountScreen). Hidden on narrow
 		// windows where they would overlap Bulk Import.
@@ -225,6 +236,10 @@ public class GuiAccountSelector extends GuiScreen {
 				&& par2 >= github.yPosition && par2 < github.yPosition + github.height) {
 			hoveredTooltip = Collections.singletonList(I18n.format("ias.github.tip"));
 		}
+		if (deleteAll != null && par1 >= deleteAll.xPosition && par1 < deleteAll.xPosition + deleteAll.width
+				&& par2 >= deleteAll.yPosition && par2 < deleteAll.yPosition + deleteAll.height) {
+			hoveredTooltip = Collections.singletonList(I18n.format("ias.accounts.deleteAll.tip"));
+		}
 		if (hoveredTooltip != null && !hoveredTooltip.isEmpty()) {
 			this.drawHoveringText(hoveredTooltip, par1, par2);
 		}
@@ -260,6 +275,8 @@ public class GuiAccountSelector extends GuiScreen {
 				mc.displayGuiScreen(new GuiProviders(this));
 			}else if(button.id == 17){
 				openGithub();
+			}else if(button.id == 18){
+				confirmDeleteAll();
 			}else if(button.id == 11){
 				mc.displayGuiScreen(new GuiManageProfile(this, queriedaccounts.get(selectedAccountIndex)));
 			}else if(button.id == 12){
@@ -305,6 +322,34 @@ public class GuiAccountSelector extends GuiScreen {
 			loginfailed = t;
 		}
 	}
+	/**
+	 * Asks for confirmation before deleting every stored account.
+	 */
+	private void confirmDeleteAll(){
+		int count = AltDatabase.getInstance().getAlts().size();
+		if (count == 0) return;
+		mc.displayGuiScreen(new GuiYesNo(this, I18n.format("ias.accounts.deleteAll.confirm.title"),
+				I18n.format("ias.accounts.deleteAll.confirm", count),
+				I18n.format("ias.accounts.deleteAll.confirm.button"), I18n.format("gui.cancel"), 18));
+	}
+
+	@Override
+	public void confirmClicked(boolean result, int id){
+		if (id == 18 && result) {
+			// Stop any running Hypixel check so it cannot write results for removed accounts.
+			hypixelCheckId++;
+			hypixelCheckRunning = false;
+			AltDatabase.getInstance().getAlts().clear();
+			hypixelResults.clear();
+			hypixelPhases.clear();
+			saveHypixelResults();
+			selectedAccountIndex = 0;
+			Config.save();
+			updateQueried();
+		}
+		mc.displayGuiScreen(this);
+	}
+
 	/**
 	 * Delete the selected account
 	 */
@@ -629,6 +674,11 @@ public class GuiAccountSelector extends GuiScreen {
 		login.enabled = hasAccounts && loginOk;
 		loginoffline.enabled = hasAccounts;
 		delete.enabled = hasAccounts;
+		if (deleteAll != null) {
+			deleteAll.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
+			// Keep the default disabled (grey) label color instead of forcing red.
+			deleteAll.packedFGColour = deleteAll.enabled ? 0xFF5555 : 0;
+		}
 		edit.enabled = hasAccounts;
 		reloadskins.enabled = !AltDatabase.getInstance().getAlts().isEmpty();
 		try {

@@ -629,6 +629,28 @@ final class AccountList extends ObjectSelectionList<AccountEntry> {
         this.minecraft.gui.setScreen(delete);
     }
 
+    /**
+     * Deletes every stored account, regardless of the current search filter.
+     */
+    void deleteAll() {
+        // Stop background checks so they don't keep working on removed accounts.
+        if (this.usernameCheckInProgress()) {
+            this.cancelUsernameCheck();
+        }
+        if (this.hypixelCheckInProgress()) {
+            this.cancelHypixelCheck();
+        }
+        for (Account account : IASStorage.ACCOUNTS) {
+            AccountList.clearSkin(account.uuid());
+            AccountList.clearNameChange(account.uuid());
+            AccountList.clearHypixelBan(account.uuid());
+        }
+        IASStorage.ACCOUNTS.clear();
+        this.selectedAccounts.clear();
+        this.saveStorage();
+        this.update(this.screen.search().getValue());
+    }
+
     private void deleteSelected(boolean confirm) {
         Set<Account> accounts = new LinkedHashSet<>(this.selectedAccounts);
         if (accounts.isEmpty()) {
