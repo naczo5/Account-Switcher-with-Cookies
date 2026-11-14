@@ -102,7 +102,7 @@ Always compile **26.3, 26.2, and 1.21.11** after touching shared/modern code; th
 
 ## Versioning and release
 
-- Version: `gradle.properties` → `version=3.4.4`.
+- Version: `gradle.properties` → `version=3.4.5`.
 - Also update when bumping:
   - `README.md` and `README.zh-CN.md` artifact names.
   - `forge-1.8/build.gradle` (`version = '<version>+1.8.9-forge'`).
