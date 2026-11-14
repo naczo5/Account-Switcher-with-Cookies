@@ -178,6 +178,11 @@ public final class AccountScreen extends Screen {
     private Button checkUsernames;
 
     /**
+     * Delete all accounts button, {@code null} on narrow windows.
+     */
+    private Button deleteAll;
+
+    /**
      * Creates a new screen.
      *
      * @param parent Parent screen, {@code null} if none
@@ -435,6 +440,20 @@ public final class AccountScreen extends Screen {
                     .build());
         }
 
+        // "Delete All" in the bottom-left corner, mirroring the GitHub shortcut and kept
+        // apart from the per-account buttons. Hidden where it would hit the action grid.
+        if (this.width >= 528) {
+            this.deleteAll = Button.builder(Component.translatable("ias.accounts.deleteAll").withStyle(ChatFormatting.RED),
+                            btn -> this.confirmDeleteAll())
+                    .bounds(4, this.height - 24, 100, 20)
+                    .build();
+            this.deleteAll.setTooltip(Tooltip.create(Component.translatable("ias.accounts.deleteAll.tip")));
+            this.deleteAll.setTooltipDelay(Duration.ofMillis(250L));
+            this.addRenderableWidget(this.deleteAll);
+        } else {
+            this.deleteAll = null;
+        }
+
         // Add account list.
         int listWidth = Math.min(this.width, 260);
         int listTop = narrowTop ? 56 : 34;
@@ -455,6 +474,23 @@ public final class AccountScreen extends Screen {
         this.updateSelected();
         this.updateUsernameCheckButton();
         this.updateHypixelCheckButton();
+    }
+
+    private void confirmDeleteAll() {
+        if (this.list == null || IASStorage.ACCOUNTS.isEmpty()) {
+            return;
+        }
+        final Screen confirm = new ConfirmPopupScreen(this,
+                Component.translatable("ias.accounts.deleteAll.confirm.title"),
+                Component.translatable("ias.accounts.deleteAll.confirm", IASStorage.ACCOUNTS.size()),
+                Component.translatable("ias.accounts.deleteAll.confirm.button"),
+                () -> {
+                    //$ set_screen 'this.minecraft' 'this'
+                    this.minecraft.gui.setScreen(this);
+                    this.list.deleteAll();
+                });
+        //$ set_screen 'this.minecraft' confirm
+        this.minecraft.gui.setScreen(confirm);
     }
 
     private void confirmUsernameCheck() {
@@ -630,6 +666,10 @@ public final class AccountScreen extends Screen {
      * Updates the selected entry.
      */
     void updateSelected() {
+        if (this.deleteAll != null) {
+            this.deleteAll.active = !IASStorage.ACCOUNTS.isEmpty();
+        }
+
         // Get the selected.
         AccountEntry selected = this.list != null ? this.list.getSelected() : null;
         boolean multiSelected = this.list != null && this.list.hasMultiSelection();
