@@ -98,7 +98,7 @@ final class MicrosoftCryptPopupScreen extends Screen implements LastPassRenderCa
 
         // Add hardware button.
         button = new PopupButton(this.width / 2 - 75, this.height / 2 - 12, 150, 20,
-                Component.translatable("ias.microsoft.hardware"), btn -> this.minecraft.setScreen(new MicrosoftPopupScreen(this.parent, this.handler, HardwareCrypt.INSTANCE_V2)),
+                Component.translatable("ias.microsoft.hardware"), btn -> this.minecraft.setScreen(new MicrosoftPopupScreen(this.parent, this.handler, HardwareCrypt.INSTANCE_V3)),
                 new LegacyTooltip(this, this.font, Component.translatable("ias.microsoft.hardware.tip"), 250));
         button.color(1.0F, 1.0F, 0.5F, true);
         this.addRenderableWidget(button);

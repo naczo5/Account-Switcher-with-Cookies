@@ -119,8 +119,8 @@ final class MicrosoftCryptPopupScreen extends Screen {
 
         // Add hardware button.
         button = new PopupButton(this.width / 2 - 75, this.height / 2 - 12, 150, 20, Component.translatable("ias.microsoft.hardware"), btn -> {
-            //$set_screen 'this.minecraft' 'new MicrosoftPopupScreen(this.parent, this.handler, HardwareCrypt.INSTANCE_V2)'
-            this.minecraft.gui.setScreen(new MicrosoftPopupScreen(this.parent, this.handler, HardwareCrypt.INSTANCE_V2));
+            //$set_screen 'this.minecraft' 'new MicrosoftPopupScreen(this.parent, this.handler, HardwareCrypt.INSTANCE_V3)'
+            this.minecraft.gui.setScreen(new MicrosoftPopupScreen(this.parent, this.handler, HardwareCrypt.INSTANCE_V3));
         }, Supplier::get);
         button.setTooltip(Tooltip.create(Component.translatable("ias.microsoft.hardware.tip")));
         button.setTooltipDelay(Duration.ofMillis(250L));

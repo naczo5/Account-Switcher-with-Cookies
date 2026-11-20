@@ -109,6 +109,7 @@ public sealed interface Crypt permits DummyCrypt, HardwareCrypt, PasswordCrypt {
                 case "ias:dummy_crypt_v1" -> CompletableFuture.completedFuture(DummyCrypt.INSTANCE);
                 case "ias:hardware_crypt_v1" -> CompletableFuture.completedFuture(HardwareCrypt.INSTANCE_V1);
                 case "ias:hardware_crypt_v2" -> CompletableFuture.completedFuture(HardwareCrypt.INSTANCE_V2);
+                case "ias:hardware_crypt_v3" -> CompletableFuture.completedFuture(HardwareCrypt.INSTANCE_V3);
                 case "ias:password_crypt_v1" -> password.get().thenApplyAsync(pass -> pass == null ? null : new PasswordCrypt(pass), IAS.executor());
                 default -> CompletableFuture.failedFuture(new IllegalArgumentException("Unknown crypt type: " + type));
             };

@@ -41,6 +41,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Crypt with "hardware ID".
@@ -49,16 +50,22 @@ import java.util.Objects;
  */
 public final class HardwareCrypt implements Crypt {
     /**
+     * Shared "hardware ID" crypt version 3.
+     */
+    @NotNull
+    public static final HardwareCrypt INSTANCE_V3 = new HardwareCrypt(3, "ias:hardware_crypt_v3", null);
+
+    /**
      * Shared "hardware ID" crypt version 2.
      */
     @NotNull
-    public static final HardwareCrypt INSTANCE_V2 = new HardwareCrypt(2, "ias:hardware_crypt_v2", null);
+    public static final HardwareCrypt INSTANCE_V2 = new HardwareCrypt(2, "ias:hardware_crypt_v2", INSTANCE_V3);
 
     /**
      * Shared "hardware ID" crypt version 1.
      */
     @NotNull
-    public static final HardwareCrypt INSTANCE_V1 = new HardwareCrypt(1, "ias:hardware_crypt_v1", INSTANCE_V2);
+    public static final HardwareCrypt INSTANCE_V1 = new HardwareCrypt(1, "ias:hardware_crypt_v1", INSTANCE_V3);
 
     /**
      * Logger for this class.
@@ -82,6 +89,13 @@ public final class HardwareCrypt implements Crypt {
             "MINECRAFT_IN_GAME_ACCOUNT_SWITCHER_VERY_NERDY_SYSTEM_ENV");
 
     /**
+     * Environmental keys excluded in V3+ because they vary across sessions, networks, or launchers.
+     */
+    @NotNull
+    @Unmodifiable
+    private static final Set<String> VOLATILE_ENV_V3 = Set.of("LOGONSERVER", "TEMP", "TMP");
+
+    /**
      * List of system properties used for hardware password.
      */
     @NotNull
@@ -90,6 +104,14 @@ public final class HardwareCrypt implements Crypt {
             "user.home", "user.country", "sun.io.unicode.encoding", "stderr.encoding", "sun.cpu.endian",
             "sun.cpu.isalist", "sun.jnu.encoding", "stdout.encoding", "sun.arch.data.model",
             "user.language", "user.variant", "minecraft.inGameAccountSwitcher.veryNerdySystemProperty");
+
+    /**
+     * System properties excluded in V3+ because they vary across JVM versions or launchers.
+     */
+    @NotNull
+    @Unmodifiable
+    private static final Set<String> VOLATILE_PROPS_V3 = Set.of("java.io.tmpdir", "native.encoding",
+            "stderr.encoding", "sun.jnu.encoding", "stdout.encoding");
 
     /**
      * Hardware crypt version.
@@ -260,6 +282,7 @@ public final class HardwareCrypt implements Crypt {
 
                 // System properties.
                 for (String key : PROPS) {
+                    if (this.version >= 3 && VOLATILE_PROPS_V3.contains(key)) continue;
                     String value = System.getProperty(key);
                     if (value == null) continue;
                     out.write(value.getBytes(StandardCharsets.UTF_8));
@@ -269,38 +292,43 @@ public final class HardwareCrypt implements Crypt {
                 // Can be undefined in Mac/Linux distributions, too lazy to test, but if it's null
                 // it will stay null anyway, so should be persistent.
                 for (String key : ENV) {
+                    if (this.version >= 3 && VOLATILE_ENV_V3.contains(key)) continue;
                     String value = System.getenv(key);
                     if (value == null) continue;
                     out.write(value.getBytes(StandardCharsets.UTF_8));
                 }
 
-                // Network interfaces.
-                List<NetworkInterface> nets;
-                try {
-                    nets = NetworkInterface.networkInterfaces().toList();
-                } catch (SocketException ignored) {
-                    nets = List.of();
-                }
-                for (NetworkInterface net : nets) {
-                    if (net.isVirtual() || net.isLoopback()) continue;
-                    out.write(net.getName().getBytes(StandardCharsets.UTF_8));
-                    String displayName = net.getDisplayName();
-                    if (displayName != null) {
-                        out.write(displayName.getBytes(StandardCharsets.UTF_8));
-                    }
-                    byte[] mac = EMPTY_MAC;
+                // Not using network interfaces in V3+: toggling Bluetooth, VPNs, USB tethering,
+                // or docks adds/removes adapters and changes the derived key.
+                if (this.version < 3) {
+                    // Network interfaces.
+                    List<NetworkInterface> nets;
                     try {
-                        mac = Objects.requireNonNullElse(net.getHardwareAddress(), EMPTY_MAC);
-                    } catch (SocketException e) {
-                        // Log into trace. (disabled for MOST users)
-                        LOGGER.trace("Unable to get MAC: {}", net, e);
+                        nets = NetworkInterface.networkInterfaces().toList();
+                    } catch (SocketException ignored) {
+                        nets = List.of();
                     }
-                    out.write(mac);
-                    try {
-                        out.writeInt(net.getMTU());
-                    } catch (SocketException e) {
-                        // Log into trace. (disabled for MOST users)
-                        LOGGER.trace("Unable to get MTU: {}", net, e);
+                    for (NetworkInterface net : nets) {
+                        if (net.isVirtual() || net.isLoopback()) continue;
+                        out.write(net.getName().getBytes(StandardCharsets.UTF_8));
+                        String displayName = net.getDisplayName();
+                        if (displayName != null) {
+                            out.write(displayName.getBytes(StandardCharsets.UTF_8));
+                        }
+                        byte[] mac = EMPTY_MAC;
+                        try {
+                            mac = Objects.requireNonNullElse(net.getHardwareAddress(), EMPTY_MAC);
+                        } catch (SocketException e) {
+                            // Log into trace. (disabled for MOST users)
+                            LOGGER.trace("Unable to get MAC: {}", net, e);
+                        }
+                        out.write(mac);
+                        try {
+                            out.writeInt(net.getMTU());
+                        } catch (SocketException e) {
+                            // Log into trace. (disabled for MOST users)
+                            LOGGER.trace("Unable to get MTU: {}", net, e);
+                        }
                     }
                 }
 
@@ -319,21 +347,6 @@ public final class HardwareCrypt implements Crypt {
                     Object sys = hwLayerClass.getMethod("getComputerSystem").invoke(hwLayer);
                     Class<?> boardClass = Class.forName("oshi.hardware.Baseboard");
                     Object board = sysClass.getMethod("getBaseboard").invoke(sys);
-                    Class<?> firmwareClass = Class.forName("oshi.hardware.Firmware");
-                    Object firmware = sysClass.getMethod("getFirmware").invoke(sys);
-                    Class<?> diskClass = Class.forName("oshi.hardware.HWDiskStore");
-                    List<?> disks = (List<?>) hwLayerClass.getMethod("getDiskStores").invoke(hwLayer);
-                    Method diskNameMethod = diskClass.getMethod("getName");
-                    Method diskModelMethod = diskClass.getMethod("getModel");
-                    Method diskSerialMethod = diskClass.getMethod("getSerial");
-                    Method diskSizeMethod = diskClass.getMethod("getSize");
-                    // Not using displays - some cheap ones report unplugging when turned off.
-                    Class<?> cardClass = Class.forName("oshi.hardware.GraphicsCard");
-                    List<?> cards = (List<?>) hwLayerClass.getMethod("getGraphicsCards").invoke(hwLayer);
-                    Method cardNameMethod = cardClass.getMethod("getName");
-                    Method cardIdMethod = cardClass.getMethod("getDeviceId");
-                    Method cardVendorMethod = cardClass.getMethod("getVendor");
-                    Method cardRamMethod = cardClass.getMethod("getVRam");
 
                     // Extract OS data.
                     int osBit = (int) osClass.getMethod("getBitness").invoke(os);
@@ -361,44 +374,65 @@ public final class HardwareCrypt implements Crypt {
                     out.write(boardModel.getBytes(StandardCharsets.UTF_8));
                     out.write(boardVersion.getBytes(StandardCharsets.UTF_8));
 
-                    // Extract Firmware data.
-                    String firmwareName = (String) firmwareClass.getMethod("getName").invoke(firmware);
-                    // Not using BIOS version and release date - can be updated.
-                    String firmwareDescription = (String) firmwareClass.getMethod("getDescription").invoke(firmware);
-                    String firmwareManufacturer = (String) firmwareClass.getMethod("getManufacturer").invoke(firmware);
-                    out.write(firmwareName.getBytes(StandardCharsets.UTF_8));
-                    out.write(firmwareDescription.getBytes(StandardCharsets.UTF_8));
-                    out.write(firmwareManufacturer.getBytes(StandardCharsets.UTF_8));
+                    // Not using firmware descriptions or disk stores in V3+: UEFI/BIOS updates can
+                    // change firmware strings, and removable USB/external drives change disk lists.
+                    if (this.version < 3) {
+                        Class<?> firmwareClass = Class.forName("oshi.hardware.Firmware");
+                        Object firmware = sysClass.getMethod("getFirmware").invoke(sys);
+                        Class<?> diskClass = Class.forName("oshi.hardware.HWDiskStore");
+                        List<?> disks = (List<?>) hwLayerClass.getMethod("getDiskStores").invoke(hwLayer);
+                        Method diskNameMethod = diskClass.getMethod("getName");
+                        Method diskModelMethod = diskClass.getMethod("getModel");
+                        Method diskSerialMethod = diskClass.getMethod("getSerial");
+                        Method diskSizeMethod = diskClass.getMethod("getSize");
 
-                    // Extract DiscStore[] data.
-                    // Not using partitions - can be changed.
-                    for (Object disk : disks) {
-                        String diskName = (String) diskNameMethod.invoke(disk);
-                        String diskModel = (String) diskModelMethod.invoke(disk);
-                        String diskSerial = (String) diskSerialMethod.invoke(disk);
-                        long diskSize = (long) diskSizeMethod.invoke(disk);
-                        out.write(diskName.getBytes(StandardCharsets.UTF_8));
-                        out.write(diskModel.getBytes(StandardCharsets.UTF_8));
-                        out.write(diskSerial.getBytes(StandardCharsets.UTF_8));
-                        out.writeLong(diskSize);
-                    }
+                        // Extract Firmware data.
+                        String firmwareName = (String) firmwareClass.getMethod("getName").invoke(firmware);
+                        // Not using BIOS version and release date - can be updated.
+                        String firmwareDescription = (String) firmwareClass.getMethod("getDescription").invoke(firmware);
+                        String firmwareManufacturer = (String) firmwareClass.getMethod("getManufacturer").invoke(firmware);
+                        out.write(firmwareName.getBytes(StandardCharsets.UTF_8));
+                        out.write(firmwareDescription.getBytes(StandardCharsets.UTF_8));
+                        out.write(firmwareManufacturer.getBytes(StandardCharsets.UTF_8));
 
-                    // Not using graphics card data in V2, because
-                    // OSHI changed it video card data on Windows:
-                    // https://github.com/oshi/oshi/pull/2533
-                    // and this is bumped between 1.20.4 and 1.20.5.
-                    if (this.version < 2) {
-                        // Extract GraphicsCard[] data.
-                        // Not using version - can be a driver.
-                        for (Object card : cards) {
-                            String cardName = (String) cardNameMethod.invoke(card);
-                            String cardId = (String) cardIdMethod.invoke(card);
-                            String cardVendor = (String) cardVendorMethod.invoke(card);
-                            long cardRam = (long) cardRamMethod.invoke(card);
-                            out.write(cardName.getBytes(StandardCharsets.UTF_8));
-                            out.write(cardId.getBytes(StandardCharsets.UTF_8));
-                            out.write(cardVendor.getBytes(StandardCharsets.UTF_8));
-                            out.writeLong(cardRam);
+                        // Extract DiscStore[] data.
+                        // Not using partitions - can be changed.
+                        for (Object disk : disks) {
+                            String diskName = (String) diskNameMethod.invoke(disk);
+                            String diskModel = (String) diskModelMethod.invoke(disk);
+                            String diskSerial = (String) diskSerialMethod.invoke(disk);
+                            long diskSize = (long) diskSizeMethod.invoke(disk);
+                            out.write(diskName.getBytes(StandardCharsets.UTF_8));
+                            out.write(diskModel.getBytes(StandardCharsets.UTF_8));
+                            out.write(diskSerial.getBytes(StandardCharsets.UTF_8));
+                            out.writeLong(diskSize);
+                        }
+
+                        // Not using graphics card data in V2, because
+                        // OSHI changed it video card data on Windows:
+                        // https://github.com/oshi/oshi/pull/2533
+                        // and this is bumped between 1.20.4 and 1.20.5.
+                        if (this.version < 2) {
+                            // Not using displays - some cheap ones report unplugging when turned off.
+                            Class<?> cardClass = Class.forName("oshi.hardware.GraphicsCard");
+                            List<?> cards = (List<?>) hwLayerClass.getMethod("getGraphicsCards").invoke(hwLayer);
+                            Method cardNameMethod = cardClass.getMethod("getName");
+                            Method cardIdMethod = cardClass.getMethod("getDeviceId");
+                            Method cardVendorMethod = cardClass.getMethod("getVendor");
+                            Method cardRamMethod = cardClass.getMethod("getVRam");
+
+                            // Extract GraphicsCard[] data.
+                            // Not using version - can be a driver.
+                            for (Object card : cards) {
+                                String cardName = (String) cardNameMethod.invoke(card);
+                                String cardId = (String) cardIdMethod.invoke(card);
+                                String cardVendor = (String) cardVendorMethod.invoke(card);
+                                long cardRam = (long) cardRamMethod.invoke(card);
+                                out.write(cardName.getBytes(StandardCharsets.UTF_8));
+                                out.write(cardId.getBytes(StandardCharsets.UTF_8));
+                                out.write(cardVendor.getBytes(StandardCharsets.UTF_8));
+                                out.writeLong(cardRam);
+                            }
                         }
                     }
                 } catch (Throwable t) {
